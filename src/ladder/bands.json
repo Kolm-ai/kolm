@@ -1,0 +1,18 @@
+{
+  "l0-meta": {
+    "patch_lines": { "lo": 600, "hi": 2500, "low_is_bad": false },
+    "files_touched": { "lo": 15, "hi": 40, "low_is_bad": false }
+  },
+  "l1-static": {
+    "new_type_errors": { "lo": 0, "hi": 3, "low_is_bad": false },
+    "new_lint_errors": { "lo": 0, "hi": 10, "low_is_bad": false }
+  },
+  "l2-dynamic": {
+    "newly_failing_tests": { "lo": 0, "hi": 0, "low_is_bad": false },
+    "changed_line_coverage": { "lo": 0.4, "hi": 0.8, "low_is_bad": true }
+  },
+  "l3-semantic": {
+    "rubric_score": { "lo": 0.55, "hi": 0.85, "low_is_bad": true },
+    "reviewer_confidence": { "lo": 0.4, "hi": 0.75, "low_is_bad": true }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "kolm-code-sandbox",
+  "main": "src/worker.mjs",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "vars": {
+    // Comma separated extra egress hosts, on top of the defaults baked into
+    // src/sandbox.mjs. The bearer token is a secret, never a var:
+    //   wrangler secret put KOLM_CODE_SANDBOX_TOKEN
+    "KOLM_CODE_SANDBOX_ALLOWED_HOSTS": ""
+  },
+  "containers": [
+    {
+      "class_name": "KolmCodeSandbox",
+      "image": "./Dockerfile",
+      "instance_type": "standard-1",
+      "max_instances": 10
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "SANDBOX", "class_name": "KolmCodeSandbox" }
+    ]
+  },
+  "migrations": [
+    { "tag": "kolm-code-v1", "new_sqlite_classes": ["KolmCodeSandbox"] }
+  ]
+}

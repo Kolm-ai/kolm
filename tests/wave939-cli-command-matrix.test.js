@@ -53,9 +53,9 @@ test('W939 generated matrix is current and all hard CLI command gates are green'
   assert.equal(m.updated_at, '2026-06-18');
   assert.equal(m.gates.ok, true, JSON.stringify(m.gates.failures, null, 2));
   assert.deepEqual(m.gates.failures, []);
-  assert.equal(m.summary.dispatcher_case_count, 258);
+  assert.equal(m.summary.dispatcher_case_count, 259);
   assert.equal(m.summary.command_function_count, 334);
-  assert.equal(m.summary.completion_verb_count, 254);
+  assert.equal(m.summary.completion_verb_count, 255);
   assert.equal(m.summary.product_graph_cli_commands, 64);
   assert.equal(m.summary.product_graph_cli_verbs, 40);
   assert.equal(m.summary.product_graph_proof_cli_commands, 54);

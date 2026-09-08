@@ -765,6 +765,7 @@ COMMANDS
   wrap <agent-cmd> [args...]       spawn with kolm env injected (legacy: wrap <config> --out <spec.json>)
   shell-init [--shell ...]         emit shell-export snippet (sh|bash|zsh|fish|pwsh|powershell|cmd|auto)
   agents <sub>                     dev-agent telemetry (stats|sessions|recommend|failing)
+  code <sub>                       confidence-cascade coding agent (run|resume|status|show|funnel|eval|bands|receipt|doctor|serve|truffle-worker) - docs/KOLM_CODE.md
 
 ENVIRONMENT
   KOLM_BASE             cloud endpoint (default: https://kolm.ai)
@@ -35703,6 +35704,8 @@ const COMPLETION_VERBS = [
   // W918 — `org` is the workspace, an alias of `team`. Dispatched to cmdOrg
   // (which delegates everything except `list` straight to cmdTeam).
   'org',
+  // W-code — `kolm code` is the confidence-cascade coding agent (cli/kolm-code.mjs).
+  'code',
 ];
 const COMPLETION_SUBS = {
   auditor: ['keygen', 'sign', 'verify'],
@@ -50303,6 +50306,11 @@ async function main() {
       }
       case 'import-chat': await withErrorContext('import-chat', () => cmdImportChat(rest)); break;
       case 'merge':       await withErrorContext('merge',       () => cmdMerge(rest)); break;
+      case 'code': {
+        const codeMod = await import('./kolm-code.mjs');
+        await withErrorContext('code', async () => { process.exitCode = await codeMod.main(rest); });
+        break;
+      }
       case 'agent':       await withErrorContext('agent',       () => cmdAgent(rest)); break;
       case 'init-agent':  await withErrorContext('init-agent',  () => cmdInitAgent(rest)); break;
       case 'services':    await withErrorContext('services',    () => cmdServices(rest)); break;

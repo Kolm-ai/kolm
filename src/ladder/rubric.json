@@ -1,0 +1,79 @@
+{
+  "id": "kolm-code-patch-v1",
+  "title": "kolm code patch rubric",
+  "scale": "0..1 (0 = definitely violated, 1 = definitely satisfied)",
+  "items": [
+    {
+      "id": "correctness",
+      "weight": 0.22,
+      "blocking": true,
+      "title": "Correctness",
+      "question": "Does the patch actually do what the task asked, without introducing a wrong result, a crash, or an off-by-one?",
+      "evidence": "Read the changed functions line by line; trace at least one input through the new control flow; check every early return and error branch."
+    },
+    {
+      "id": "spec_compliance",
+      "weight": 0.14,
+      "blocking": true,
+      "title": "Spec compliance",
+      "question": "Does the patch satisfy every acceptance criterion in the plan, and none of the forbidden constraints?",
+      "evidence": "Map each acceptance criterion to the lines that satisfy it; name any criterion with no corresponding change."
+    },
+    {
+      "id": "tests",
+      "weight": 0.14,
+      "blocking": false,
+      "title": "Tests",
+      "question": "Are the new or changed behaviors covered by tests that would fail if the change were reverted?",
+      "evidence": "Point at the assertions that pin the new behavior; flag tests that assert only that the code runs."
+    },
+    {
+      "id": "no_placeholders",
+      "weight": 0.1,
+      "blocking": true,
+      "title": "No placeholders",
+      "question": "Is the patch free of stubs, TODO markers, commented-out work, and functions that return a canned value?",
+      "evidence": "Quote any added line containing TODO/FIXME/placeholder/not implemented, or any function body that ignores its arguments."
+    },
+    {
+      "id": "scope_discipline",
+      "weight": 0.1,
+      "blocking": false,
+      "title": "Scope discipline",
+      "question": "Does the patch touch only what the task needs, with no drive-by reformatting or unrelated refactors?",
+      "evidence": "List changed files that are not in the plan's files_to_touch and say why each is or is not justified."
+    },
+    {
+      "id": "error_handling",
+      "weight": 0.1,
+      "blocking": false,
+      "title": "Error handling",
+      "question": "Are failures surfaced rather than swallowed, with useful context and no empty catch blocks?",
+      "evidence": "Quote every added catch/except; check that inputs crossing a trust boundary are validated."
+    },
+    {
+      "id": "no_secrets",
+      "weight": 0.08,
+      "blocking": true,
+      "title": "No secrets",
+      "question": "Does the patch add any credential, API key, token, private key, or production endpoint with embedded auth?",
+      "evidence": "Quote any added literal that looks like a key or a token; check test fixtures and config files too."
+    },
+    {
+      "id": "style_consistency",
+      "weight": 0.06,
+      "blocking": false,
+      "title": "Style consistency",
+      "question": "Does the new code match the conventions already used in the files it touches?",
+      "evidence": "Compare imports, naming, error style, and module layout against the surrounding file."
+    },
+    {
+      "id": "reversibility",
+      "weight": 0.06,
+      "blocking": false,
+      "title": "Reversibility",
+      "question": "Can this change be reverted cleanly, without data migrations, deletions, or irreversible side effects?",
+      "evidence": "Name any destructive operation (schema drop, file delete, network write) and whether it is guarded."
+    }
+  ]
+}

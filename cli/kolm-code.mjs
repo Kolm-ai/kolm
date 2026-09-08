@@ -1,0 +1,1368 @@
+#!/usr/bin/env node
+// kolm code — the confidence-cascade coding agent CLI (owner E, spec section 7).
+//
+//   kolm code run "fix the flaky retry in src/queue.js"
+//
+// Everything this file needs comes from `src/ladder/index.js` (the single public
+// surface) plus the GitHub and Truffle helpers, which are imported lazily so a
+// plain `kolm code help` never pays for them.
+//
+// House rules honoured here: ASCII only (no emoji, no box drawing), never print
+// a secret VALUE (only the variable name that would carry it), never crash with
+// a stack trace on a LadderError, and map every failure onto kolm's exit codes.
+
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import * as ladder from '../src/ladder/index.js';
+
+const { LadderError, isLadderError } = ladder;
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(HERE, '..');
+
+/** kolm's exit-code convention (cli/kolm.js line 77). */
+export const EXIT = Object.freeze({
+  OK: 0,
+  BAD_ARGS: 1,
+  GATE_FAIL: 2,
+  MISSING_PREREQ: 3,
+  EXECUTION: 4,
+  NOT_FOUND: 5,
+  USAGE: 64,
+});
+
+/** LadderError.code -> exit code. Anything unlisted is an execution failure. */
+const CODE_EXIT = Object.freeze({
+  'not-armed': EXIT.MISSING_PREREQ,
+  'sqlite-unavailable': EXIT.MISSING_PREREQ,
+  'not-found': EXIT.NOT_FOUND,
+  aborted: EXIT.EXECUTION,
+  'bad-args': EXIT.BAD_ARGS,
+  'bad-arg': EXIT.BAD_ARGS,
+  'bad-config': EXIT.BAD_ARGS,
+  'bad-ref': EXIT.BAD_ARGS,
+  'bad-bands': EXIT.BAD_ARGS,
+  'budget-exceeded': EXIT.GATE_FAIL,
+});
+
+const VERBS = Object.freeze([
+  'run',
+  'resume',
+  'status',
+  'show',
+  'funnel',
+  'eval',
+  'bands',
+  'receipt',
+  'doctor',
+  'serve',
+  'truffle-worker',
+  'help',
+]);
+
+/** Stage ids in cascade order, plus the judge rung the viewer also shows. */
+const STAGE_IDS = Object.freeze(['l0-meta', 'l1-static', 'l2-dynamic', 'l3-semantic', 'l4-judge']);
+
+// ---------------------------------------------------------------------------
+// argument parsing
+// ---------------------------------------------------------------------------
+
+/** Flags that never consume the next token. */
+const BOOLEAN_FLAGS = new Set([
+  'json',
+  'quiet',
+  'keepWorktrees',
+  'pr',
+  'live',
+  'open',
+  'suggest',
+  'apply',
+  'yes',
+  'help',
+  'version',
+]);
+
+/** Flags that accumulate; `--coder a --coder b,c` -> ['a','b','c']. */
+const LIST_FLAGS = new Set(['coder', 'reviewer']);
+
+function camel(name) {
+  return String(name).replace(/-([a-z0-9])/g, (_, ch) => ch.toUpperCase());
+}
+
+/**
+ * A dependency-free flag parser: `--k v`, `--k=v`, boolean flags, `--` ends
+ * option parsing. Exported so the tests can exercise it without a subprocess.
+ *
+ * @param {string[]} argv
+ * @param {{booleans?: Set<string>, lists?: Set<string>}} [opts]
+ * @returns {{positional: string[], flags: Record<string, string|boolean|string[]>, passthrough: string[]}}
+ */
+export function parseArgs(argv = [], opts = {}) {
+  const booleans = opts.booleans ?? BOOLEAN_FLAGS;
+  const lists = opts.lists ?? LIST_FLAGS;
+  const positional = [];
+  const passthrough = [];
+  const flags = {};
+  let terminated = false;
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = String(argv[i]);
+    if (terminated) {
+      passthrough.push(token);
+      continue;
+    }
+    if (token === '--') {
+      terminated = true;
+      continue;
+    }
+    if (token === '-h') {
+      flags.help = true;
+      continue;
+    }
+    if (token.startsWith('--') && token.length > 2) {
+      let key = token.slice(2);
+      let value;
+      let inline = false;
+      const eq = key.indexOf('=');
+      if (eq !== -1) {
+        value = key.slice(eq + 1);
+        key = key.slice(0, eq);
+        inline = true;
+      }
+      const name = camel(key);
+      if (!inline) {
+        const next = argv[i + 1];
+        if (booleans.has(name) || next === undefined || (String(next).startsWith('--') && String(next).length > 2)) {
+          value = true;
+        } else {
+          value = String(next);
+          i += 1;
+        }
+      }
+      if (lists.has(name)) {
+        const parts = value === true
+          ? []
+          : String(value)
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+        flags[name] = (flags[name] ?? []).concat(parts);
+      } else {
+        flags[name] = value;
+      }
+      continue;
+    }
+    positional.push(token);
+  }
+
+  return { positional, flags, passthrough };
+}
+
+// ---------------------------------------------------------------------------
+// tiny output helpers (ASCII only)
+// ---------------------------------------------------------------------------
+
+function out(line = '') {
+  process.stdout.write(`${line}\n`);
+}
+
+function note(line = '') {
+  process.stderr.write(`${line}\n`);
+}
+
+function usd(value) {
+  const n = Number(value);
+  return `$${(Number.isFinite(n) ? n : 0).toFixed(4)}`;
+}
+
+function seconds(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n)) return '-';
+  return `${(n / 1000).toFixed(1)}s`;
+}
+
+function truncate(text, limit) {
+  const s = String(text ?? '');
+  return s.length > limit ? `${s.slice(0, limit - 1)}~` : s;
+}
+
+/**
+ * Space-padded ASCII table with a dashed rule. No box-drawing characters.
+ * @param {string[]} headers
+ * @param {Array<Array<string|number>>} rows
+ * @returns {string}
+ */
+export function renderTable(headers, rows) {
+  const cells = [headers.map((h) => String(h)), ...rows.map((r) => r.map((c) => (c === null || c === undefined ? '-' : String(c))))];
+  const widths = headers.map((_, i) => Math.max(...cells.map((row) => (row[i] ?? '').length)));
+  const line = (row) => row.map((cell, i) => String(cell ?? '').padEnd(widths[i])).join('  ').trimEnd();
+  const rule = widths.map((w) => '-'.repeat(w)).join('  ');
+  return [line(cells[0]), rule, ...cells.slice(1).map(line)].join('\n');
+}
+
+function jsonOut(value) {
+  out(JSON.stringify(value, null, 2));
+}
+
+// ---------------------------------------------------------------------------
+// owner-D surface guard
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a function from the ladder index, with a legible error when the
+ * orchestrator half of the build has not exported it (yet).
+ * @param {string} name
+ * @returns {Function}
+ */
+function api(name) {
+  const fn = ladder[name];
+  if (typeof fn !== 'function') {
+    throw new LadderError('bad-config', `src/ladder/index.js does not export ${name}()`, { missing: name });
+  }
+  return fn;
+}
+
+function requireSqlite() {
+  if (typeof ladder.sqliteAvailable === 'function' && !ladder.sqliteAvailable()) {
+    throw new LadderError(
+      'sqlite-unavailable',
+      `node:sqlite is unavailable on Node ${process.version}; kolm code needs Node >= 22.5`,
+      { node: process.version },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// config overlay: CLI flags are applied as environment overrides, because
+// loadConfig() returns a deep-frozen object that cannot be patched afterwards.
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {Record<string, any>} flags
+ * @param {Record<string, string|undefined>} [base]
+ * @returns {Record<string, string|undefined>}
+ */
+export function envOverlay(flags = {}, base = process.env) {
+  const env = { ...base };
+  const set = (name, value) => {
+    if (value === undefined || value === null || value === '' || value === true) return;
+    env[name] = String(value);
+  };
+  set('KOLM_CODE_MODE', flags.mode);
+  set('KOLM_CODE_DRIVER', flags.driver);
+  set('KOLM_CODE_CANDIDATES', flags.candidates);
+  set('KOLM_CODE_ORCHESTRATOR', flags.orchestrator);
+  set('KOLM_CODE_JUDGE', flags.judge);
+  set('KOLM_CODE_MAX_COST_USD', flags.maxCost);
+  set('KOLM_CODE_BANDS_PATH', flags.bandsPath);
+  set('KOLM_CODE_DB_PATH', flags.db);
+  set('TRUFFLE_PARTNER_POLL_MS', flags.pollMs);
+  if (Array.isArray(flags.coder) && flags.coder.length > 0) {
+    env.KOLM_CODE_CODER_LADDER = flags.coder.join(',');
+  }
+  if (Array.isArray(flags.reviewer) && flags.reviewer.length > 0) {
+    env.KOLM_CODE_REVIEWER_LADDER = flags.reviewer.join(',');
+  }
+  if (flags.keepWorktrees === true) env.KOLM_CODE_KEEP_WORKTREES = 'all';
+  return env;
+}
+
+function configFrom(flags) {
+  return api('loadConfig')(envOverlay(flags));
+}
+
+/**
+ * Config for verbs that will actually call models. Ollama rungs are armed by
+ * reachability, which `loadConfig` cannot know without a probe, so probe once
+ * here when any configured ref points at Ollama (doctor --live does the same).
+ * @param {Record<string, any>} flags
+ * @returns {Promise<object>}
+ */
+async function configForModels(flags) {
+  const config = configFrom(flags);
+  if (config.mockProvider === true || config.ollamaReachable !== null) return config;
+  const refs = [config.orchestratorRef, config.judgeRef, ...(config.coderLadder ?? []), ...(config.reviewerLadder ?? [])];
+  if (!refs.some((ref) => typeof ref === 'string' && ref.startsWith('ollama:'))) return config;
+  const probe = await api('probeOllama')(config);
+  return api('withOllamaReachable')(config, probe.reachable);
+}
+
+function openStoreFor(config) {
+  requireSqlite();
+  return api('openStore')(config.dbPath);
+}
+
+// ---------------------------------------------------------------------------
+// usage
+// ---------------------------------------------------------------------------
+
+const USAGE = `kolm code - confidence-cascade coding agent
+
+usage: kolm code <verb> [options]
+
+verbs:
+  run "<task>"            generate candidates, run them up the cascade, keep the winner
+  resume <runId>          continue an interrupted run
+  status [runId]          list runs newest-first, or show one run's candidates and stages
+  show <runId>            full detail for one run
+  funnel                  how many candidates cleared cheaply vs went to the judge
+  eval                    cascade vs direct comparison over stored runs
+  bands                   print, suggest or apply the confidence bands
+  receipt verify|show     verify or print a signed evidence receipt
+  doctor                  arming table for every model rung, the driver and the store
+  serve                   run the local viewer
+  truffle-worker          claim and settle Truffle partner tasks
+  help                    this text
+
+run options:
+  --repo <path>           repository to work in (default: the current directory)
+  --repo-url <url>        clone source recorded on the task
+  --base <ref>            base ref for the worktrees (default: HEAD)
+  --mode cascade|direct   verification mode (default: cascade)
+  --driver local|cloudflare|fake
+  --candidates <n>        how many candidates to generate
+  --coder <ref,...>       coder ladder, repeatable (e.g. --coder ollama:qwen3.8:latest)
+  --reviewer <ref,...>    reviewer ladder for the L3 rubric rung
+  --judge <ref>           L4 judge model
+  --orchestrator <ref>    planner / repair model
+  --max-cost <usd>        budget ceiling for the run
+  --keep-worktrees        keep every worktree, not only the winner's
+  --pr                    open a draft pull request when the run passes
+  --pr-base <branch>      base branch for that pull request (default: main)
+  --json                  print the run summary as JSON
+  --quiet                 do not stream stage events to stderr
+
+other options:
+  --since <iso>           funnel/eval window
+  --limit <n>             status list length
+  --suggest               bands: print proposed thresholds from stored runs
+  --apply --yes           bands: write the proposal (never over the bundled file)
+  --live                  doctor: probe Ollama, gh, the driver and every armed model
+  --port <n>              serve: listen port (default 7474)
+  --host <addr>           serve: bind address (default 127.0.0.1)
+  --open                  serve: open the viewer in the OS browser
+  --max-tasks <n>         truffle-worker: stop after N settled tasks
+  --poll-ms <n>           truffle-worker: claim poll interval
+
+exit codes:
+  0 ok   1 bad arguments   2 cascade FAIL or JUDGE   3 not armed
+  4 execution error        5 not found               64 usage
+
+environment and the full operator guide: docs/KOLM_CODE.md`;
+
+// ---------------------------------------------------------------------------
+// run
+// ---------------------------------------------------------------------------
+
+function formatEvent(event) {
+  const type = String(event?.type ?? 'event');
+  const payload = event && typeof event.payload === 'object' && event.payload !== null ? event.payload : {};
+  const stage = payload.stage ?? payload.stageId ?? null;
+  const who = payload.candidateId ?? payload.candidate_id ?? payload.candidate ?? null;
+  const head = `[${stage || type}${who ? ` ${who}` : ''}]`;
+  const bits = [];
+  if (payload.decision) bits.push(String(payload.decision));
+  if (payload.verdict) bits.push(String(payload.verdict));
+  if (Number.isFinite(payload.turn)) bits.push(`turn ${payload.turn}`);
+  if (Array.isArray(payload.tools) && payload.tools.length > 0) bits.push(payload.tools.join(','));
+  if (payload.tool) bits.push(String(payload.tool));
+  if (Number.isFinite(payload.durationMs)) bits.push(seconds(payload.durationMs));
+  if (Number.isFinite(payload.costUsd) && payload.costUsd > 0) bits.push(usd(payload.costUsd));
+  if (bits.length === 0 && payload.message) bits.push(truncate(payload.message, 140));
+  if (bits.length === 0 && stage) bits.push(type);
+  if (bits.length === 0) {
+    // Scalars only: an object would stringify to "[object Object]" and an empty
+    // string would render as a bare "key=" that tells the operator nothing.
+    const rest = Object.entries(payload)
+      .filter(([, v]) => (typeof v === 'string' ? v !== '' : ['number', 'boolean'].includes(typeof v)))
+      .slice(0, 3)
+      .map(([k, v]) => `${k}=${truncate(v, 40)}`);
+    if (rest.length > 0) bits.push(rest.join(' '));
+    else bits.push(type);
+  }
+  return `${head} ${bits.join(' ')}`.trimEnd();
+}
+
+function summarizeRun(result) {
+  const rows = [
+    ['run', result.runId],
+    ['verdict', result.verdict],
+    ['winner', result.winner ?? '-'],
+    ['branch', result.branch ?? '-'],
+    ['sha', result.sha ?? '-'],
+    ['cost', usd(result.costUsd)],
+    ['elapsed', seconds(result.durationMs)],
+    ['receipt', result.receiptPath ?? '-'],
+  ];
+  if (result.stopReason) rows.push(['stopped', String(result.stopReason)]);
+  const funnel = result.funnel;
+  if (funnel && typeof funnel === 'object') {
+    const cleared = Number(funnel.cleared_cheaply ?? funnel.clearedCheaply ?? 0);
+    rows.push([
+      'funnel',
+      `${funnel.candidates ?? 0} candidates, ${(cleared * 100).toFixed(0)}% cleared cheaply, ${funnel.judged ?? 0} judged`,
+    ]);
+  }
+  return rows.map(([k, v]) => `${k.padEnd(9)}${v}`).join('\n');
+}
+
+async function cmdRun(parsed) {
+  const flags = parsed.flags;
+  const text = parsed.positional.slice(1).join(' ').trim();
+  if (!text) {
+    throw new LadderError('bad-args', 'run needs a task: kolm code run "<task>"');
+  }
+
+  const config = await configForModels(flags);
+  const arming = api('armingReport')(config);
+  const ladders = api('effectiveLadders')(config, arming);
+
+  if (!config.mockProvider) {
+    const orchestrator = arming.rungs.find((r) => r.id === 'orchestrator');
+    const anyCoder = arming.rungs.some((r) => r.kind === 'coder' && r.armed);
+    if (!orchestrator?.armed && !anyCoder) {
+      throw new LadderError(
+        'not-armed',
+        `no armed model: ${orchestrator?.reason ?? 'orchestrator unavailable'}. Run "kolm code doctor" for the full table.`,
+        { rungs: arming.rungs.filter((r) => !r.armed).map((r) => r.id) },
+      );
+    }
+  }
+
+  const repoPath = path.resolve(String(flags.repo ?? process.cwd()));
+  const store = openStoreFor(config);
+  const driver = api('createDriver')(config.driver, config);
+  const createProvider = api('createProvider');
+  const providers = {
+    orchestrator: createProvider(config.orchestratorRef, config),
+    judge: createProvider(config.judgeRef, config),
+    coders: ladders.coders.map((ref) => createProvider(ref, config)),
+    reviewer: ladders.reviewer ? createProvider(ladders.reviewer, config) : null,
+  };
+
+  const task = {
+    text,
+    title: flags.title ? String(flags.title) : truncate(text, 72),
+    repoUrl: flags.repoUrl ? String(flags.repoUrl) : undefined,
+    baseRef: flags.base ? String(flags.base) : undefined,
+  };
+
+  const controller = new AbortController();
+  const streaming = flags.quiet !== true;
+  let observedRunId = null;
+  let interrupted = false;
+
+  const onSigint = () => {
+    interrupted = true;
+    controller.abort();
+    note('');
+    note(`aborted; resume with: kolm code resume ${observedRunId ?? '<runId>'}`);
+  };
+  process.on('SIGINT', onSigint);
+
+  try {
+    const result = await api('runTask')({
+      task,
+      repoPath,
+      repoUrl: task.repoUrl,
+      baseRef: task.baseRef,
+      config,
+      store,
+      driver,
+      providers,
+      logger: console,
+      signal: controller.signal,
+      mode: config.mode,
+      bands: config.bandsPath ? api('loadBands')(config.bandsPath) : undefined,
+      onEvent: (event) => {
+        if (event?.payload?.runId) observedRunId = event.payload.runId;
+        if (streaming) note(formatEvent(event));
+      },
+    });
+    observedRunId = result?.runId ?? observedRunId;
+
+    if (flags.json) jsonOut(sanitizeRunResult(result));
+    else out(summarizeRun(result));
+
+    if (flags.pr === true && result.verdict === 'PASS') {
+      const prUrl = await openPullRequestFor({ config, result, repoPath, flags });
+      if (prUrl) out(`pr       ${prUrl}`);
+    }
+
+    if (interrupted) return EXIT.EXECUTION;
+    return result.verdict === 'PASS' ? EXIT.OK : EXIT.GATE_FAIL;
+  } finally {
+    process.off('SIGINT', onSigint);
+    try {
+      store.close();
+    } catch {
+      // the store is already closed; nothing to unwind
+    }
+  }
+}
+
+/** Drop the diff blobs so `--json` stays a summary, not a patch dump. */
+function sanitizeRunResult(result) {
+  const copy = { ...result };
+  if (Array.isArray(copy.candidates)) {
+    copy.candidates = copy.candidates.map((c) => {
+      const entry = { ...c };
+      if (typeof entry.diff === 'string') entry.diffBytes = Buffer.byteLength(entry.diff);
+      delete entry.diff;
+      delete entry.diff_text;
+      return entry;
+    });
+  }
+  return copy;
+}
+
+async function openPullRequestFor({ config, result, repoPath, flags }) {
+  const [{ resolveGitHubToken }, { openPrForRun, buildPrBody }] = await Promise.all([
+    import('../src/ladder/github/app-auth.js'),
+    import('../src/ladder/github/pr.js'),
+  ]);
+  const resolved = await resolveGitHubToken({ config });
+  if (!resolved?.token) {
+    throw new LadderError(
+      'not-armed',
+      'no GitHub credential: set KOLM_GITHUB_TOKEN or GITHUB_TOKEN, install the GitHub App, or run "gh auth login"',
+      { reasons: resolved?.reasons ?? [] },
+    );
+  }
+  const body = buildPrBody({
+    receipt: result.receipt ?? null,
+    runSummary: result,
+    receiptPath: result.receiptPath,
+  });
+  const pr = await openPrForRun({
+    repoPath,
+    branch: result.branch,
+    base: flags.prBase ? String(flags.prBase) : 'main',
+    title: result.receipt?.task?.title ?? `kolm code ${result.runId}`,
+    body,
+    token: resolved.token,
+    draft: true,
+  });
+  return pr.htmlUrl ?? pr.url ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// resume
+// ---------------------------------------------------------------------------
+
+async function cmdResume(parsed) {
+  const runId = parsed.positional[1];
+  if (!runId) throw new LadderError('bad-args', 'resume needs a run id: kolm code resume <runId>');
+  const flags = parsed.flags;
+  const config = await configForModels(flags);
+  const store = openStoreFor(config);
+  try {
+    const stored = store.getRun(runId);
+    if (!stored) {
+      throw new LadderError('not-found', `no run ${runId} in ${config.dbPath}`, { runId });
+    }
+    // resumeTask() delegates straight to runTask(), which still validates the
+    // task and the repo path, so rehydrate both from the stored run row.
+    const task = stored.task && typeof stored.task === 'object' ? stored.task : null;
+    if (!task || !String(task.text ?? '').trim()) {
+      throw new LadderError('bad-config', `run ${runId} has no stored task text to resume from`, { runId });
+    }
+    const repoPath = stored.repo_path ?? task.repoPath ?? process.cwd();
+    const driver = api('createDriver')(config.driver, config);
+    const arming = api('armingReport')(config);
+    const ladders = api('effectiveLadders')(config, arming);
+    const createProvider = api('createProvider');
+    const controller = new AbortController();
+    const onSigint = () => {
+      controller.abort();
+      note('');
+      note(`aborted; resume with: kolm code resume ${runId}`);
+    };
+    process.on('SIGINT', onSigint);
+    try {
+      const result = await api('resumeTask')({
+        runId,
+        task,
+        repoPath,
+        repoUrl: task.repoUrl ?? null,
+        baseRef: task.baseRef ?? stored.base_sha ?? undefined,
+        mode: stored.mode ?? config.mode,
+        config,
+        store,
+        driver,
+        providers: {
+          orchestrator: createProvider(config.orchestratorRef, config),
+          judge: createProvider(config.judgeRef, config),
+          coders: ladders.coders.map((ref) => createProvider(ref, config)),
+          reviewer: ladders.reviewer ? createProvider(ladders.reviewer, config) : null,
+        },
+        logger: console,
+        signal: controller.signal,
+        onEvent: (event) => {
+          if (flags.quiet !== true) note(formatEvent(event));
+        },
+      });
+      if (flags.json) jsonOut(sanitizeRunResult(result));
+      else out(summarizeRun(result));
+      return result.verdict === 'PASS' ? EXIT.OK : EXIT.GATE_FAIL;
+    } finally {
+      process.off('SIGINT', onSigint);
+    }
+  } finally {
+    store.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// status / show
+// ---------------------------------------------------------------------------
+
+function stageDecision(results, stage) {
+  const entry = results?.[stage];
+  if (!entry || !entry.verdict) return '-';
+  return String(entry.verdict.decision ?? 'skip');
+}
+
+async function cmdStatus(parsed) {
+  const flags = parsed.flags;
+  const config = configFrom(flags);
+  const store = openStoreFor(config);
+  try {
+    const runId = parsed.positional[1];
+    if (!runId) {
+      const limit = Number(flags.limit ?? 20);
+      const runs = store.listRuns({ limit: Number.isFinite(limit) ? limit : 20 });
+      if (flags.json) {
+        jsonOut({ runs });
+        return EXIT.OK;
+      }
+      if (runs.length === 0) {
+        out(`no runs recorded in ${config.dbPath}`);
+        return EXIT.OK;
+      }
+      out(
+        renderTable(
+          ['RUN', 'STATUS', 'WINNER', 'COST', 'MODE', 'CREATED', 'TASK'],
+          runs.map((run) => [
+            run.id,
+            run.status ?? '-',
+            run.winner_candidate ?? '-',
+            usd(run.total_cost_usd),
+            run.mode ?? '-',
+            String(run.created_at ?? '').slice(0, 19),
+            truncate(run.task?.title ?? run.task?.text ?? '-', 48),
+          ]),
+        ),
+      );
+      return EXIT.OK;
+    }
+
+    const run = store.getRun(runId);
+    if (!run) throw new LadderError('not-found', `no run ${runId} in ${config.dbPath}`, { runId });
+    const candidates = store.listCandidates(runId);
+    if (flags.json) {
+      jsonOut({
+        run,
+        candidates: candidates.map((c) => ({ ...c, diff_text: undefined, results: store.latestResults(runId, c.candidate_id) })),
+      });
+      return EXIT.OK;
+    }
+    out(`run ${run.id}  ${run.status ?? '-'}  ${usd(run.total_cost_usd)}`);
+    out(`task ${truncate(run.task?.title ?? run.task?.text ?? '-', 100)}`);
+    out('');
+    out(
+      renderTable(
+        ['CANDIDATE', 'GENERATOR', 'STATUS', ...STAGE_IDS],
+        candidates.map((c) => {
+          const results = store.latestResults(runId, c.candidate_id);
+          return [
+            c.candidate_id,
+            truncate(c.generator_ref ?? '-', 30),
+            c.status ?? '-',
+            ...STAGE_IDS.map((stage) => stageDecision(results, stage)),
+          ];
+        }),
+      ),
+    );
+    return EXIT.OK;
+  } finally {
+    store.close();
+  }
+}
+
+async function cmdShow(parsed) {
+  const flags = parsed.flags;
+  const runId = parsed.positional[1];
+  if (!runId) throw new LadderError('bad-args', 'show needs a run id: kolm code show <runId>');
+  const config = configFrom(flags);
+  const store = openStoreFor(config);
+  try {
+    const run = store.getRun(runId);
+    if (!run) throw new LadderError('not-found', `no run ${runId} in ${config.dbPath}`, { runId });
+    const candidates = store.listCandidates(runId).map((c) => ({
+      candidate_id: c.candidate_id,
+      generator_ref: c.generator_ref,
+      status: c.status,
+      summary: c.summary,
+      diff_sha256: c.diff_sha256,
+      diff_bytes: c.diff_text ? Buffer.byteLength(c.diff_text) : 0,
+      results: store.latestResults(runId, c.candidate_id),
+    }));
+    const events = store.eventsSince(runId, 0, 100000);
+    const cost = store.costSummary(runId);
+    const receiptPath = typeof ladder.receiptPathFor === 'function' ? ladder.receiptPathFor(config, runId) : null;
+    const detail = {
+      run: { ...run, receipt: run.receipt ? { present: true } : null },
+      candidates,
+      judgments: store.listJudgments(runId),
+      funnel: store.funnel({ runIds: [runId] }),
+      cost,
+      events: events.length,
+      receiptPath,
+      receiptOnDisk: receiptPath ? fs.existsSync(receiptPath) : false,
+    };
+
+    if (flags.json) {
+      jsonOut(detail);
+      return EXIT.OK;
+    }
+
+    out(`run       ${run.id}`);
+    out(`status    ${run.status ?? '-'}`);
+    out(`task      ${truncate(run.task?.title ?? run.task?.text ?? '-', 100)}`);
+    out(`repo      ${run.repo_path ?? '-'}`);
+    out(`base sha  ${run.base_sha ?? '-'}`);
+    out(`mode      ${run.mode ?? '-'}  driver ${run.driver ?? '-'}`);
+    out(`winner    ${run.winner_candidate ?? '-'}`);
+    out(`cost      ${usd(cost.total_usd)}`);
+    out(`events    ${events.length}`);
+    out(`receipt   ${receiptPath ?? '-'}${detail.receiptOnDisk ? '' : ' (not on disk)'}`);
+    out('');
+    out(
+      renderTable(
+        ['CANDIDATE', 'GENERATOR', 'STATUS', ...STAGE_IDS],
+        candidates.map((c) => [
+          c.candidate_id,
+          truncate(c.generator_ref ?? '-', 30),
+          c.status ?? '-',
+          ...STAGE_IDS.map((stage) => stageDecision(c.results, stage)),
+        ]),
+      ),
+    );
+    const byModel = Object.entries(cost.by_model ?? {});
+    if (byModel.length > 0) {
+      out('');
+      out(renderTable(['MODEL', 'CALLS', 'IN', 'OUT', 'COST'], byModel.map(([model, b]) => [model, b.calls, b.input_tokens, b.output_tokens, usd(b.cost_usd)])));
+    }
+    return EXIT.OK;
+  } finally {
+    store.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// funnel / eval
+// ---------------------------------------------------------------------------
+
+async function cmdFunnel(parsed) {
+  const flags = parsed.flags;
+  const config = configFrom(flags);
+  const store = openStoreFor(config);
+  try {
+    const result = store.funnel({ since: flags.since ? String(flags.since) : undefined });
+    if (flags.json) {
+      jsonOut(result);
+      return EXIT.OK;
+    }
+    const stages = result.stages ?? {};
+    const ids = STAGE_IDS.filter((s) => stages[s]).concat(Object.keys(stages).filter((s) => !STAGE_IDS.includes(s)));
+    out(
+      renderTable(
+        ['STAGE', 'GOOD', 'UNSURE', 'BAD', 'SKIP'],
+        ids.map((id) => {
+          const b = stages[id] ?? { good: 0, unsure: 0, bad: 0, skip: 0 };
+          return [id, b.good, b.unsure, b.bad, b.skip];
+        }),
+      ),
+    );
+    out('');
+    out(`runs             ${result.runs}`);
+    out(`candidates       ${result.candidates}`);
+    out(`cleared cheaply  ${(Number(result.cleared_cheaply ?? 0) * 100).toFixed(1)}%`);
+    out(`judged           ${result.judged}`);
+    out(`hard fail        ${result.hard_fail}`);
+    out(`verdicts         PASS ${result.verdicts.PASS}  FAIL ${result.verdicts.FAIL}  JUDGE ${result.verdicts.JUDGE}`);
+    return EXIT.OK;
+  } finally {
+    store.close();
+  }
+}
+
+async function cmdEval(parsed) {
+  const flags = parsed.flags;
+  const config = configFrom(flags);
+  const store = openStoreFor(config);
+  try {
+    const result = await api('evalRuns')({ store, since: flags.since ? String(flags.since) : undefined });
+    if (flags.json) {
+      jsonOut(result);
+      return EXIT.OK;
+    }
+    out(api('formatEvalTable')(result));
+    return EXIT.OK;
+  } finally {
+    store.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// bands
+// ---------------------------------------------------------------------------
+
+function diffBands(before, after) {
+  const changes = [];
+  for (const [stage, keys] of Object.entries(after ?? {})) {
+    for (const [key, spec] of Object.entries(keys ?? {})) {
+      const old = before?.[stage]?.[key];
+      for (const field of ['lo', 'hi']) {
+        const from = old ? old[field] : undefined;
+        const to = spec[field];
+        if (from !== to) changes.push({ where: `${stage}.${key}.${field}`, from, to });
+      }
+    }
+  }
+  return changes;
+}
+
+async function cmdBands(parsed) {
+  const flags = parsed.flags;
+  const config = configFrom(flags);
+  const bands = api('loadBands')(config.bandsPath || undefined);
+  const source = config.bandsPath || process.env.KOLM_CODE_BANDS_PATH || ladder.BUNDLED_BANDS_PATH;
+
+  if (!flags.suggest && !flags.apply) {
+    if (flags.json) {
+      jsonOut({ source, bands });
+      return EXIT.OK;
+    }
+    out(`bands ${source}`);
+    out('');
+    const rows = [];
+    for (const [stage, keys] of Object.entries(bands)) {
+      for (const [key, spec] of Object.entries(keys)) {
+        rows.push([stage, key, spec.lo, spec.hi, spec.low_is_bad ? 'low is bad' : 'high is bad']);
+      }
+    }
+    out(renderTable(['STAGE', 'METRIC', 'LO', 'HI', 'ORIENTATION'], rows));
+    return EXIT.OK;
+  }
+
+  const store = openStoreFor(config);
+  try {
+    const proposal = await api('suggestBands')({ store, bands });
+    const patched = proposal.bandsPatched ?? bands;
+    const changes = diffBands(bands, patched);
+
+    if (flags.json) {
+      jsonOut({ source, proposals: proposal.proposals ?? [], changes, applied: false });
+    } else {
+      out(`bands ${source}`);
+      if (changes.length === 0) out('no threshold would change from the stored runs');
+      for (const change of changes) out(`${change.where}: ${change.from} -> ${change.to}`);
+    }
+
+    if (!flags.apply) return EXIT.OK;
+    if (flags.yes !== true) {
+      throw new LadderError('bad-args', 'bands --apply rewrites your bands file; add --yes to confirm');
+    }
+
+    const bundled = path.resolve(ladder.BUNDLED_BANDS_PATH);
+    let target = config.bandsPath ? path.resolve(config.bandsPath) : path.join(config.codeDir, 'bands.json');
+    if (path.resolve(target) === bundled) {
+      target = path.join(config.codeDir, 'bands.json');
+    }
+    if (path.resolve(target) === bundled) {
+      throw new LadderError('bad-args', 'refusing to overwrite the bundled bands file', { target });
+    }
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, `${JSON.stringify(patched, null, 2)}\n`, 'utf8');
+    out(`wrote ${target}`);
+    if (!config.bandsPath || path.resolve(config.bandsPath) !== path.resolve(target)) {
+      out(`set KOLM_CODE_BANDS_PATH=${target} to use it`);
+    }
+    return EXIT.OK;
+  } finally {
+    store.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// receipt
+// ---------------------------------------------------------------------------
+
+function locateReceipt(config, target) {
+  if (!target) return null;
+  const asPath = path.resolve(String(target));
+  if (fs.existsSync(asPath) && fs.statSync(asPath).isFile()) return asPath;
+  if (typeof ladder.receiptPathFor === 'function') {
+    const derived = ladder.receiptPathFor(config, String(target));
+    if (derived && fs.existsSync(derived)) return derived;
+  }
+  return null;
+}
+
+async function cmdReceipt(parsed) {
+  const flags = parsed.flags;
+  const sub = parsed.positional[1];
+  const target = parsed.positional[2];
+  if (sub !== 'verify' && sub !== 'show') {
+    throw new LadderError('bad-args', 'receipt takes a subcommand: kolm code receipt verify|show <path|runId>');
+  }
+  if (!target) throw new LadderError('bad-args', `receipt ${sub} needs a path or a run id`);
+
+  const config = configFrom(flags);
+  const receiptPath = locateReceipt(config, target);
+
+  let receipt = null;
+  if (receiptPath) {
+    receipt = api('readReceipt')(receiptPath);
+  } else if (typeof ladder.sqliteAvailable === 'function' && ladder.sqliteAvailable()) {
+    const store = api('openStore')(config.dbPath);
+    try {
+      receipt = store.getRun(String(target))?.receipt ?? null;
+    } finally {
+      store.close();
+    }
+  }
+
+  if (!receipt) {
+    note(`kolm code: not-found: no receipt for ${target}`);
+    return EXIT.NOT_FOUND;
+  }
+
+  if (sub === 'show') {
+    jsonOut(receipt);
+    return EXIT.OK;
+  }
+
+  const result = api('verifyReceipt')(receipt);
+  if (flags.json) jsonOut({ path: receiptPath, ...result });
+  else if (result.ok) out(`VERIFIED  kid ${result.kid ?? '-'}  ${receiptPath ?? target}`);
+  else out(`UNVERIFIED  ${result.reason ?? 'signature did not verify'}  ${receiptPath ?? target}`);
+  return result.ok ? EXIT.OK : EXIT.GATE_FAIL;
+}
+
+// ---------------------------------------------------------------------------
+// doctor
+// ---------------------------------------------------------------------------
+
+function gitAvailable() {
+  try {
+    const res = spawnSync('git', ['--version'], { encoding: 'utf8', timeout: 10000 });
+    if (res.status === 0) return { ok: true, detail: String(res.stdout || '').trim() };
+    return { ok: false, detail: 'git exited non-zero' };
+  } catch (err) {
+    return { ok: false, detail: `git not on PATH (${err.code ?? err.message})` };
+  }
+}
+
+async function liveProbeProvider(ref, config) {
+  const started = Date.now();
+  try {
+    const provider = api('createProvider')(ref, config);
+    const res = await provider.chat({ messages: [{ role: 'user', content: 'ping' }], maxTokens: 8 });
+    return `ok ${seconds(Date.now() - started)} ${usd(res?.costUsd ?? 0)}`;
+  } catch (err) {
+    return `failed: ${truncate(err?.message ?? String(err), 70)}`;
+  }
+}
+
+async function liveProbeDriver(config) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kolm-code-doctor-'));
+  try {
+    const git = (args) => spawnSync('git', args, { cwd: tmp, encoding: 'utf8', timeout: 30000 });
+    if (git(['init', '-q']).status !== 0) return 'git init failed';
+    git(['config', 'user.email', 'kolm@localhost']);
+    git(['config', 'user.name', 'kolm code doctor']);
+    fs.writeFileSync(path.join(tmp, 'README'), 'kolm code doctor probe\n');
+    git(['add', 'README']);
+    if (git(['commit', '-qm', 'probe']).status !== 0) return 'git commit failed';
+    const driver = api('createDriver')('local', config);
+    const worktree = await driver.create({ repoPath: tmp, runId: 'r_doctor', candidateId: 'c0a0' });
+    const at = worktree.path;
+    await worktree.destroy();
+    await driver.destroyRun('r_doctor');
+    return `create + destroy ok (${path.basename(at)})`;
+  } catch (err) {
+    return `failed: ${truncate(err?.message ?? String(err), 70)}`;
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+async function cmdDoctor(parsed) {
+  const flags = parsed.flags;
+  const config = configFrom(flags);
+  const live = flags.live === true;
+
+  let ollamaProbe = null;
+  let ghProbe = null;
+  let effectiveConfig = config;
+  if (live) {
+    ollamaProbe = await api('probeOllama')(config);
+    effectiveConfig = api('withOllamaReachable')(config, ollamaProbe.reachable);
+    ghProbe = await api('probeGhCli')({});
+  }
+
+  const arming = api('armingReport')(effectiveConfig, ollamaProbe ? { probe: { ollama: ollamaProbe } } : {});
+  const { describeGitHubArming } = await import('../src/ladder/github/app-auth.js');
+  const { describeTruffleArming, truffleEnvFromConfig, REQUIRED_TRUFFLE_ENV } = await import('../src/ladder/truffle/worker.js');
+
+  const githubDetail = describeGitHubArming({ config: effectiveConfig });
+  const truffleDetail = describeTruffleArming(truffleEnvFromConfig(effectiveConfig));
+
+  const sqliteOk = typeof ladder.sqliteAvailable === 'function' ? ladder.sqliteAvailable() : false;
+  const git = gitAvailable();
+
+  const rows = arming.rungs.map((rung) => ({
+    id: rung.id,
+    kind: rung.kind,
+    ref: rung.ref,
+    armed: rung.armed,
+    reason: rung.reason,
+  }));
+
+  const github = rows.find((r) => r.id === 'github');
+  if (github) {
+    github.armed = githubDetail.armed || github.armed;
+    // `sources` lists only credential sources actually present (gh cli is
+    // reported separately as unknown), so an unarmed row names the variables.
+    const real = githubDetail.sources ?? [];
+    github.reason = github.armed
+      ? `token from ${real.join(', ') || 'gh cli'}`
+      : 'set KOLM_GITHUB_TOKEN or GITHUB_TOKEN, install the App, or run gh auth login';
+  }
+  const truffle = rows.find((r) => r.id === 'truffle');
+  if (truffle) {
+    truffle.reason = truffleDetail.armed
+      ? `partner contract vars set (${REQUIRED_TRUFFLE_ENV.length} names)`
+      : `missing ${truffleDetail.missing.join(', ')}`;
+    truffle.armed = truffleDetail.armed;
+  }
+
+  rows.push({
+    id: 'sqlite',
+    kind: 'store',
+    ref: effectiveConfig.dbPath,
+    armed: sqliteOk,
+    reason: sqliteOk ? `node:sqlite on ${process.version}` : `node:sqlite unavailable on ${process.version}`,
+  });
+  rows.push({
+    id: 'git',
+    kind: 'tool',
+    ref: null,
+    armed: git.ok,
+    reason: git.detail,
+  });
+
+  if (live) {
+    for (const row of rows) {
+      if (!['orchestrator', 'judge', 'coder', 'reviewer'].includes(row.kind)) continue;
+      if (!row.armed) {
+        row.live = 'skipped (not armed)';
+        continue;
+      }
+      row.live = await liveProbeProvider(row.ref, effectiveConfig);
+    }
+    const driverRow = rows.find((r) => r.id === 'driver');
+    if (driverRow) {
+      driverRow.live = effectiveConfig.driver === 'local' ? await liveProbeDriver(effectiveConfig) : `no live probe for the ${effectiveConfig.driver} driver`;
+    }
+    const ollamaRowExists = rows.some((r) => String(r.ref ?? '').startsWith('ollama:'));
+    if (ollamaRowExists || ollamaProbe) {
+      rows.push({
+        id: 'ollama',
+        kind: 'probe',
+        ref: effectiveConfig.ollamaUrl,
+        armed: Boolean(ollamaProbe?.reachable),
+        reason: ollamaProbe?.reachable ? `${ollamaProbe.models.length} models` : (ollamaProbe?.error ?? 'unreachable'),
+      });
+    }
+    rows.push({
+      id: 'gh-cli',
+      kind: 'probe',
+      ref: null,
+      armed: Boolean(ghProbe?.authenticated),
+      reason: ghProbe?.reason ?? 'not probed',
+    });
+  }
+
+  const orchestratorArmed = rows.find((r) => r.id === 'orchestrator')?.armed === true;
+  const coderArmed = rows.some((r) => r.kind === 'coder' && r.armed);
+  const driverArmed = rows.find((r) => r.id === 'driver')?.armed === true;
+  const ok = orchestratorArmed && coderArmed && driverArmed && sqliteOk;
+
+  if (flags.json) {
+    jsonOut({
+      ok,
+      node: process.version,
+      dbPath: effectiveConfig.dbPath,
+      dataDir: effectiveConfig.dataDir,
+      driver: effectiveConfig.driver,
+      mode: effectiveConfig.mode,
+      mockProvider: effectiveConfig.mockProvider === true,
+      live,
+      rungs: rows,
+    });
+    return ok ? EXIT.OK : EXIT.MISSING_PREREQ;
+  }
+
+  out(`kolm code doctor  node ${process.version}  data ${effectiveConfig.codeDir}`);
+  out('');
+  const headers = live ? ['ROW', 'KIND', 'REF', 'STATUS', 'REASON', 'LIVE'] : ['ROW', 'KIND', 'REF', 'STATUS', 'REASON'];
+  out(
+    renderTable(
+      headers,
+      rows.map((row) => {
+        const base = [row.id, row.kind, truncate(row.ref ?? '-', 40), row.armed ? 'ARMED' : 'NOT ARMED', truncate(row.reason ?? '-', 60)];
+        return live ? [...base, truncate(row.live ?? '-', 40)] : base;
+      }),
+    ),
+  );
+  out('');
+  if (effectiveConfig.mockProvider === true) out('note: KOLM_TEST_MOCK_PROVIDER=1 is set; every provider call is short-circuited');
+  out(ok ? 'ready: orchestrator, a coder rung, the driver and the store are armed' : 'not ready: see the NOT ARMED rows above (env var names only, never values)');
+  return ok ? EXIT.OK : EXIT.MISSING_PREREQ;
+}
+
+// ---------------------------------------------------------------------------
+// serve
+// ---------------------------------------------------------------------------
+
+function openInBrowser(url) {
+  try {
+    const [cmd, args] = process.platform === 'win32'
+      ? ['cmd', ['/c', 'start', '', url]]
+      : process.platform === 'darwin'
+        ? ['open', [url]]
+        : ['xdg-open', [url]];
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+    child.on('error', () => {});
+    child.unref();
+  } catch {
+    // best effort only: the URL is already printed
+  }
+}
+
+async function cmdServe(parsed) {
+  const flags = parsed.flags;
+  const config = configFrom(flags);
+  const store = openStoreFor(config);
+  const { createViewerServer } = await import('../src/ladder/viewer/server.js');
+  const port = Number(flags.port ?? 7474);
+  const viewer = createViewerServer({
+    store,
+    config,
+    host: flags.host ? String(flags.host) : '127.0.0.1',
+    port: Number.isFinite(port) ? port : 7474,
+    verifyReceipt: typeof ladder.verifyReceipt === 'function' ? ladder.verifyReceipt : null,
+    evalRuns: typeof ladder.evalRuns === 'function' ? ladder.evalRuns : null,
+    arming: () => api('armingReport')(config),
+  });
+  const { url } = await viewer.listen();
+  out(`kolm code viewer  ${url}`);
+  out(`store             ${config.dbPath}`);
+  out('press ctrl-c to stop');
+  if (flags.open === true) openInBrowser(url);
+
+  await new Promise((resolve) => {
+    const stop = () => resolve();
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+  });
+  await viewer.close();
+  store.close();
+  return EXIT.OK;
+}
+
+// ---------------------------------------------------------------------------
+// truffle worker
+// ---------------------------------------------------------------------------
+
+async function cmdTruffleWorker(parsed) {
+  const flags = parsed.flags;
+  const config = await configForModels(flags);
+  const { createWorkerFromEnv, describeTruffleArming, truffleEnvFromConfig, REQUIRED_TRUFFLE_ENV } = await import('../src/ladder/truffle/worker.js');
+  const env = truffleEnvFromConfig(config);
+  const { armed, missing } = describeTruffleArming(env);
+  if (!armed) {
+    note('kolm code: not-armed: the Truffle partner worker is not configured');
+    note(`missing variables: ${missing.join(', ')}`);
+    // Only worth restating when some of the required set is already present.
+    if (missing.length < REQUIRED_TRUFFLE_ENV.length) {
+      note(`required: ${REQUIRED_TRUFFLE_ENV.join(', ')}`);
+    }
+    return EXIT.MISSING_PREREQ;
+  }
+
+  const store = openStoreFor(config);
+  const driver = api('createDriver')(config.driver, config);
+  const arming = api('armingReport')(config);
+  const ladders = api('effectiveLadders')(config, arming);
+  const createProvider = api('createProvider');
+  const controller = new AbortController();
+  const onSigint = () => controller.abort();
+  process.on('SIGINT', onSigint);
+
+  const handler = async (request, ctx = {}) => {
+    const result = await api('runTask')({
+      task: {
+        text: request.text ?? request.instructions ?? '',
+        title: truncate(request.text ?? request.taskId ?? 'kolm code task', 72),
+        repoUrl: request.repoUrl ?? undefined,
+        baseRef: request.baseRef ?? undefined,
+      },
+      repoPath: process.cwd(),
+      repoUrl: request.repoUrl ?? undefined,
+      baseRef: request.baseRef ?? undefined,
+      config,
+      store,
+      driver,
+      providers: {
+        orchestrator: createProvider(config.orchestratorRef, config),
+        judge: createProvider(config.judgeRef, config),
+        coders: ladders.coders.map((ref) => createProvider(ref, config)),
+        reviewer: ladders.reviewer ? createProvider(ladders.reviewer, config) : null,
+      },
+      logger: console,
+      signal: ctx.signal ?? controller.signal,
+      mode: config.mode,
+      onEvent: (event) => {
+        if (flags.quiet !== true) note(formatEvent(event));
+      },
+    });
+    return {
+      verdict: result.verdict,
+      receipt: result.receipt ?? null,
+      prUrl: result.prUrl ?? null,
+      costUsd: result.costUsd ?? 0,
+      summary: result.summary ?? result.receipt?.summary ?? null,
+      title: request.text ? truncate(request.text, 200) : null,
+      stages: result.funnel?.stages ?? null,
+      runId: result.runId,
+    };
+  };
+
+  try {
+    const maxTasks = flags.maxTasks === undefined ? null : Number(flags.maxTasks);
+    const stats = await createWorkerFromEnv({
+      config,
+      handler,
+      logger: console,
+      signal: controller.signal,
+      maxTasks: Number.isFinite(maxTasks) ? maxTasks : null,
+    });
+    out(`processed ${stats.processed}  failed ${stats.failed}  stopped by ${stats.stoppedBy}`);
+    return stats.failed > 0 ? EXIT.GATE_FAIL : EXIT.OK;
+  } finally {
+    process.off('SIGINT', onSigint);
+    store.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// dispatch
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {string[]} argv arguments after the `code` verb
+ * @returns {Promise<number>} process exit code
+ */
+export async function main(argv = []) {
+  const parsed = parseArgs(argv);
+  const verb = parsed.positional[0];
+
+  if (parsed.flags.version === true) {
+    out(ladder.VERSION ?? 'kolm-code');
+    return EXIT.OK;
+  }
+  if (!verb || verb === 'help' || parsed.flags.help === true) {
+    out(USAGE);
+    return EXIT.OK;
+  }
+  if (!VERBS.includes(verb)) {
+    note(`kolm code: unknown verb "${verb}"`);
+    note('');
+    note(USAGE);
+    return EXIT.USAGE;
+  }
+
+  try {
+    switch (verb) {
+      case 'run':
+        return await cmdRun(parsed);
+      case 'resume':
+        return await cmdResume(parsed);
+      case 'status':
+        return await cmdStatus(parsed);
+      case 'show':
+        return await cmdShow(parsed);
+      case 'funnel':
+        return await cmdFunnel(parsed);
+      case 'eval':
+        return await cmdEval(parsed);
+      case 'bands':
+        return await cmdBands(parsed);
+      case 'receipt':
+        return await cmdReceipt(parsed);
+      case 'doctor':
+        return await cmdDoctor(parsed);
+      case 'serve':
+        return await cmdServe(parsed);
+      case 'truffle-worker':
+        return await cmdTruffleWorker(parsed);
+      default:
+        out(USAGE);
+        return EXIT.USAGE;
+    }
+  } catch (err) {
+    return reportError(err);
+  }
+}
+
+/**
+ * LadderErrors print one legible line, never a stack trace.
+ * @param {unknown} err
+ * @returns {number}
+ */
+function reportError(err) {
+  if (isLadderError(err)) {
+    note(`kolm code: ${err.code}: ${err.message}`);
+    return CODE_EXIT[err.code] ?? EXIT.EXECUTION;
+  }
+  if (err && (err.name === 'AbortError' || err.code === 'ABORT_ERR')) {
+    note('kolm code: aborted');
+    return EXIT.EXECUTION;
+  }
+  const message = err && err.message ? err.message : String(err);
+  note(`kolm code: ${message}`);
+  if (process.env.KOLM_DEBUG === '1' && err && err.stack) note(err.stack);
+  return EXIT.EXECUTION;
+}
+
+export { USAGE, VERBS, REPO_ROOT };
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main(process.argv.slice(2)).then(
+    (code) => {
+      process.exitCode = code;
+    },
+    (err) => {
+      process.exitCode = reportError(err);
+    },
+  );
+}

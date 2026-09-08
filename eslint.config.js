@@ -32,6 +32,7 @@ export default [
     files: [
       'src/**/*.js',
       'cli/**/*.js',
+      'cli/**/*.mjs',
       'tests/**/*.js',
       'workers/**/*.js',
       'workers/**/*.mjs',

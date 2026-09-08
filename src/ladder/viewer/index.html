@@ -1,0 +1,605 @@
+<title>kolm code</title>
+<style>
+  :root {
+    --room: #08090A;
+    --panel: #0F1011;
+    --register: #15171A;
+    --ink: #F7F8F8;
+    --ink-2: #D0D6E0;
+    --ink-3: #8A8F98;
+    --accent: #3FE5A0;
+    --unsure: #C9A94B;
+    --bad: #E5634B;
+    --paper: #F4F2EC;
+    --hair: rgba(255, 255, 255, .07);
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    background: var(--room);
+    color: var(--ink-2);
+    font: 13px/1.45 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .mono { font-family: var(--mono); }
+  .dim { color: var(--ink-3); }
+  .good { color: var(--accent); }
+  .unsure { color: var(--unsure); }
+  .bad { color: var(--bad); }
+  .skip { color: var(--ink-3); }
+
+  #shell {
+    display: grid;
+    grid-template-columns: 300px minmax(0, 1fr);
+    grid-template-rows: 44px minmax(0, 1fr);
+    grid-template-areas: "top top" "rail main";
+    height: 100vh;
+  }
+
+  #top {
+    grid-area: top;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 0 14px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--hair);
+  }
+
+  #brand {
+    color: var(--ink);
+    font-weight: 600;
+    letter-spacing: .01em;
+  }
+
+  #top .spacer { flex: 1; }
+
+  button {
+    font: 12px var(--sans);
+    color: var(--ink-2);
+    background: var(--register);
+    border: 1px solid var(--hair);
+    border-radius: 2px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+
+  button:hover { color: var(--ink); }
+
+  button.paper {
+    background: var(--paper);
+    color: var(--room);
+    border-color: var(--paper);
+  }
+
+  #rail {
+    grid-area: rail;
+    overflow-y: auto;
+    background: var(--panel);
+    border-right: 1px solid var(--hair);
+  }
+
+  .run-row {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--hair);
+    border-radius: 0;
+    padding: 9px 12px;
+    cursor: pointer;
+  }
+
+  .run-row.sel { background: var(--register); }
+  .run-row .id { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+  .run-row .title { color: var(--ink); margin: 2px 0 3px; }
+  .run-row .meta { font-family: var(--mono); font-size: 11px; }
+
+  #main {
+    grid-area: main;
+    overflow-y: auto;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--hair);
+    border-radius: 3px;
+    padding: 12px;
+  }
+
+  .card h2 {
+    margin: 0 0 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .kv {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px 18px;
+  }
+
+  .kv .k { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+  .kv .v { font-family: var(--mono); color: var(--ink); word-break: break-word; }
+
+  #funnel-strip {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--hair);
+    border: 1px solid var(--hair);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .fcol { background: var(--panel); padding: 9px 10px; }
+  .fcol .name { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+  .fcol .counts { font-family: var(--mono); margin-top: 4px; }
+
+  table.grid { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 12px; }
+
+  table.grid th, table.grid td {
+    border: 1px solid var(--hair);
+    padding: 5px 8px;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  table.grid th { color: var(--ink-3); font-weight: 500; font-size: 11px; letter-spacing: .04em; }
+  table.grid td.cell { cursor: pointer; }
+  table.grid td.cell.sel { background: var(--register); }
+  .scroll-x { overflow-x: auto; }
+
+  #detail pre, #receipt pre {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-2);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+
+  ul.reasons { margin: 0 0 8px; padding-left: 16px; }
+  ul.reasons li { margin: 1px 0; }
+
+  #log {
+    background: var(--register);
+    border: 1px solid var(--hair);
+    border-radius: 2px;
+    height: 190px;
+    overflow-y: auto;
+    padding: 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+
+  #log .line { white-space: pre-wrap; word-break: break-word; }
+  #log .line .t { color: var(--ink-3); }
+  #log .line .ty { color: var(--ink); }
+
+  #hint { font-size: 11px; color: var(--ink-3); }
+  #err { color: var(--bad); font-family: var(--mono); font-size: 12px; }
+
+  @media (max-width: 1099px) {
+    #shell {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: 44px 168px minmax(0, 1fr);
+      grid-template-areas: "top" "rail" "main";
+    }
+
+    #rail { border-right: 0; border-bottom: 1px solid var(--hair); }
+    #funnel-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .kv { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+  }
+</style>
+
+<div id="shell">
+  <div id="top">
+    <span id="brand">kolm code</span>
+    <span id="hint">j/k move &middot; r refresh</span>
+    <span class="spacer"></span>
+    <span id="err"></span>
+    <button id="refresh" class="paper" type="button">refresh</button>
+  </div>
+  <div id="rail"></div>
+  <div id="main">
+    <div class="card" id="head"></div>
+    <div class="card">
+      <h2>funnel</h2>
+      <div id="funnel-strip"></div>
+    </div>
+    <div class="card">
+      <h2>candidates x stages</h2>
+      <div class="scroll-x"><table class="grid" id="matrix"></table></div>
+    </div>
+    <div class="card" id="detail"></div>
+    <div class="card" id="receipt"></div>
+    <div class="card">
+      <h2>events</h2>
+      <div id="log"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var STAGES = ['l0-meta', 'l1-static', 'l2-dynamic', 'l3-semantic', 'l4-judge'];
+  var SHORT = {
+    'l0-meta': 'L0 meta',
+    'l1-static': 'L1 static',
+    'l2-dynamic': 'L2 dynamic',
+    'l3-semantic': 'L3 semantic',
+    'l4-judge': 'L4 judge'
+  };
+
+  var state = { runs: [], sel: 0, detail: null, stream: null, cell: null };
+
+  function el(tag, cls, text) {
+    var node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    return node;
+  }
+
+  function clear(node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+  }
+
+  function decisionClass(decision) {
+    if (decision === 'good') return 'good';
+    if (decision === 'unsure') return 'unsure';
+    if (decision === 'bad') return 'bad';
+    return 'skip';
+  }
+
+  function verdictClass(verdict) {
+    if (verdict === 'PASS' || verdict === 'DONE') return 'good';
+    if (verdict === 'FAIL' || verdict === 'ERROR') return 'bad';
+    if (verdict === 'JUDGE') return 'unsure';
+    return 'dim';
+  }
+
+  function usd(n) {
+    var v = Number(n);
+    return '$' + (isFinite(v) ? v : 0).toFixed(4);
+  }
+
+  function short(text, n) {
+    var s = String(text === undefined || text === null ? '' : text);
+    return s.length > n ? s.slice(0, n - 1) + '~' : s;
+  }
+
+  function setError(message) {
+    document.getElementById('err').textContent = message ? String(message) : '';
+  }
+
+  function api(path) {
+    return fetch(path, { headers: { accept: 'application/json' } }).then(function (res) {
+      if (!res.ok) throw new Error(path + ' -> ' + res.status);
+      return res.json();
+    });
+  }
+
+  // ------------------------------------------------------------------ rail
+  function renderRail() {
+    var rail = document.getElementById('rail');
+    clear(rail);
+    if (state.runs.length === 0) {
+      rail.appendChild(el('div', 'dim', 'no runs recorded yet'));
+      return;
+    }
+    state.runs.forEach(function (run, i) {
+      var row = el('button', 'run-row' + (i === state.sel ? ' sel' : ''));
+      row.type = 'button';
+      row.appendChild(el('div', 'id', run.id));
+      var task = run.task || {};
+      row.appendChild(el('div', 'title', short(task.title || task.text || '(no task text)', 64)));
+      var meta = el('div', 'meta');
+      var status = String(run.status || 'unknown');
+      meta.appendChild(el('span', verdictClass(status.toUpperCase()), status));
+      meta.appendChild(el('span', 'dim', '  ' + usd(run.total_cost_usd)));
+      row.appendChild(meta);
+      row.addEventListener('click', function () { select(i); });
+      rail.appendChild(row);
+    });
+  }
+
+  // ------------------------------------------------------------------ head
+  function ladderOf(detail) {
+    var refs = [];
+    (detail.candidates || []).forEach(function (c) {
+      if (c.generator_ref && refs.indexOf(c.generator_ref) === -1) refs.push(c.generator_ref);
+    });
+    return refs.length > 0 ? refs.join(' > ') : '-';
+  }
+
+  function renderHead() {
+    var head = document.getElementById('head');
+    clear(head);
+    head.appendChild(el('h2', null, 'run'));
+    if (!state.detail) {
+      head.appendChild(el('div', 'dim', 'select a run'));
+      return;
+    }
+    var run = state.detail.run;
+    var task = run.task || {};
+    var kv = el('div', 'kv');
+    function pair(k, v, cls) {
+      var wrap = el('div');
+      wrap.appendChild(el('div', 'k', k));
+      wrap.appendChild(el('div', 'v' + (cls ? ' ' + cls : ''), v));
+      kv.appendChild(wrap);
+    }
+    pair('run id', run.id);
+    pair('title', short(task.title || task.text || '-', 90));
+    pair('status', run.status || '-', verdictClass(String(run.status || '').toUpperCase()));
+    pair('winner', run.winner_candidate || '-');
+    pair('cost', usd(state.detail.cost && state.detail.cost.total_usd));
+    pair('mode', run.mode || '-');
+    pair('driver', run.driver || '-');
+    pair('ladder', ladderOf(state.detail));
+    head.appendChild(kv);
+  }
+
+  // ---------------------------------------------------------------- funnel
+  function renderFunnel() {
+    var strip = document.getElementById('funnel-strip');
+    clear(strip);
+    var stages = (state.detail && state.detail.funnel && state.detail.funnel.stages) || {};
+    STAGES.forEach(function (stage) {
+      var bucket = stages[stage] || { good: 0, unsure: 0, bad: 0, skip: 0 };
+      var col = el('div', 'fcol');
+      col.appendChild(el('div', 'name', SHORT[stage]));
+      var counts = el('div', 'counts');
+      counts.appendChild(el('span', 'good', bucket.good + ' good'));
+      counts.appendChild(el('span', 'dim', '  '));
+      counts.appendChild(el('span', 'unsure', bucket.unsure + ' unsure'));
+      col.appendChild(counts);
+      var counts2 = el('div', 'counts');
+      counts2.appendChild(el('span', 'bad', bucket.bad + ' bad'));
+      counts2.appendChild(el('span', 'dim', '  '));
+      counts2.appendChild(el('span', 'skip', bucket.skip + ' skip'));
+      col.appendChild(counts2);
+      strip.appendChild(col);
+    });
+  }
+
+  // ---------------------------------------------------------------- matrix
+  function verdictOf(candidate, stage) {
+    var results = candidate.results || {};
+    var entry = results[stage];
+    return entry && entry.verdict ? entry.verdict : null;
+  }
+
+  function renderMatrix() {
+    var table = document.getElementById('matrix');
+    clear(table);
+    var detail = state.detail;
+    if (!detail || (detail.candidates || []).length === 0) {
+      var body = el('tbody');
+      var row = el('tr');
+      row.appendChild(el('td', 'dim', 'no candidates recorded'));
+      body.appendChild(row);
+      table.appendChild(body);
+      return;
+    }
+    var thead = el('thead');
+    var hr = el('tr');
+    hr.appendChild(el('th', null, 'candidate'));
+    hr.appendChild(el('th', null, 'generator'));
+    STAGES.forEach(function (stage) { hr.appendChild(el('th', null, SHORT[stage])); });
+    thead.appendChild(hr);
+    table.appendChild(thead);
+
+    var tbody = el('tbody');
+    detail.candidates.forEach(function (candidate) {
+      var tr = el('tr');
+      tr.appendChild(el('td', 'mono', candidate.candidate_id));
+      tr.appendChild(el('td', 'dim', short(candidate.generator_ref || '-', 34)));
+      STAGES.forEach(function (stage) {
+        var verdict = verdictOf(candidate, stage);
+        var decision = verdict ? (verdict.decision || 'skip') : 'skip';
+        var mark = verdict ? (decision === 'good' ? '[x] good' : decision) : '-';
+        var td = el('td', 'cell ' + decisionClass(decision), mark);
+        if (state.cell && state.cell.candidateId === candidate.candidate_id && state.cell.stage === stage) {
+          td.className = td.className + ' sel';
+        }
+        td.addEventListener('click', function () {
+          state.cell = { candidateId: candidate.candidate_id, stage: stage, verdict: verdict };
+          renderMatrix();
+          renderDetail();
+        });
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+  }
+
+  // ---------------------------------------------------------------- detail
+  function renderDetail() {
+    var panel = document.getElementById('detail');
+    clear(panel);
+    panel.appendChild(el('h2', null, 'stage detail'));
+    if (!state.cell) {
+      panel.appendChild(el('div', 'dim', 'click a cell in the grid'));
+      return;
+    }
+    var head = el('div', 'mono');
+    head.appendChild(el('span', null, state.cell.candidateId + '  ' + state.cell.stage + '  '));
+    var verdict = state.cell.verdict;
+    if (!verdict) {
+      head.appendChild(el('span', 'skip', 'stage did not run'));
+      panel.appendChild(head);
+      return;
+    }
+    head.appendChild(el('span', decisionClass(verdict.decision), verdict.decision || 'skip'));
+    panel.appendChild(head);
+
+    if (Array.isArray(verdict.reasons) && verdict.reasons.length > 0) {
+      var list = el('ul', 'reasons');
+      verdict.reasons.forEach(function (reason) {
+        list.appendChild(el('li', null, typeof reason === 'string' ? reason : JSON.stringify(reason)));
+      });
+      panel.appendChild(list);
+    }
+    if (Array.isArray(verdict.hits) && verdict.hits.length > 0) {
+      panel.appendChild(el('div', 'k dim', 'hits'));
+      var hits = el('ul', 'reasons');
+      verdict.hits.forEach(function (hit) {
+        hits.appendChild(el('li', 'mono', typeof hit === 'string' ? hit : JSON.stringify(hit)));
+      });
+      panel.appendChild(hits);
+    }
+    if (verdict.metrics && typeof verdict.metrics === 'object') {
+      panel.appendChild(el('div', 'k dim', 'metrics'));
+      panel.appendChild(el('pre', null, JSON.stringify(verdict.metrics, null, 2)));
+    }
+  }
+
+  // --------------------------------------------------------------- receipt
+  function renderReceipt(payload) {
+    var panel = document.getElementById('receipt');
+    clear(panel);
+    panel.appendChild(el('h2', null, 'receipt'));
+    if (!payload || !payload.receipt) {
+      panel.appendChild(el('div', 'dim', 'no receipt stored for this run'));
+      return;
+    }
+    var line = el('div', 'mono');
+    var verification = payload.verification;
+    if (verification && verification.ok) {
+      line.appendChild(el('span', 'good', 'VERIFIED'));
+      line.appendChild(el('span', 'dim', '  kid ' + (verification.kid || '-')));
+    } else {
+      line.appendChild(el('span', 'bad', 'UNVERIFIED'));
+      line.appendChild(el('span', 'dim', '  ' + ((verification && verification.reason) || 'no verifier wired')));
+    }
+    panel.appendChild(line);
+    panel.appendChild(el('pre', null, JSON.stringify(payload.receipt, null, 2)));
+  }
+
+  // ------------------------------------------------------------------- log
+  function logLine(event) {
+    var log = document.getElementById('log');
+    var stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 24;
+    var line = el('div', 'line');
+    line.appendChild(el('span', 't', String(event.ts || '').slice(11, 19) + ' '));
+    line.appendChild(el('span', 'ty', String(event.type || 'event')));
+    var payload = event.payload;
+    if (payload !== undefined && payload !== null) {
+      var text = typeof payload === 'string' ? payload : JSON.stringify(payload);
+      line.appendChild(el('span', 'dim', ' ' + short(text, 220)));
+    }
+    log.appendChild(line);
+    while (log.childNodes.length > 500) log.removeChild(log.firstChild);
+    if (stick) log.scrollTop = log.scrollHeight;
+  }
+
+  function closeStream() {
+    if (state.stream) {
+      state.stream.close();
+      state.stream = null;
+    }
+  }
+
+  function openStream(runId) {
+    closeStream();
+    if (!window.EventSource) return;
+    var source = new EventSource('/api/runs/' + encodeURIComponent(runId) + '/stream');
+    source.onmessage = function (message) {
+      try {
+        logLine(JSON.parse(message.data));
+      } catch (err) {
+        logLine({ type: 'event', payload: message.data });
+      }
+    };
+    source.onerror = function () { setError('event stream interrupted'); };
+    state.stream = source;
+  }
+
+  // ------------------------------------------------------------------ load
+  function loadRun(runId) {
+    clear(document.getElementById('log'));
+    closeStream();
+    api('/api/runs/' + encodeURIComponent(runId)).then(function (detail) {
+      state.detail = detail;
+      setError('');
+      renderHead();
+      renderFunnel();
+      renderMatrix();
+      renderDetail();
+      return api('/api/runs/' + encodeURIComponent(runId) + '/events?after=0&limit=200');
+    }).then(function (payload) {
+      (payload.events || []).forEach(logLine);
+      openStream(runId);
+      return api('/api/receipt/' + encodeURIComponent(runId));
+    }).then(renderReceipt).catch(function (err) {
+      setError(err.message || String(err));
+    });
+  }
+
+  function select(index) {
+    if (state.runs.length === 0) return;
+    state.sel = Math.max(0, Math.min(index, state.runs.length - 1));
+    state.cell = null;
+    renderRail();
+    loadRun(state.runs[state.sel].id);
+  }
+
+  function refresh() {
+    api('/api/runs?limit=60').then(function (payload) {
+      state.runs = payload.runs || [];
+      setError('');
+      if (state.runs.length === 0) {
+        state.detail = null;
+        renderRail();
+        renderHead();
+        renderFunnel();
+        renderMatrix();
+        renderDetail();
+        renderReceipt(null);
+        return;
+      }
+      var keep = state.detail ? state.detail.run.id : null;
+      var at = 0;
+      state.runs.forEach(function (run, i) { if (run.id === keep) at = i; });
+      select(at);
+    }).catch(function (err) {
+      setError(err.message || String(err));
+    });
+  }
+
+  document.getElementById('refresh').addEventListener('click', refresh);
+  document.addEventListener('keydown', function (event) {
+    var tag = event.target && event.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (event.key === 'j') select(state.sel + 1);
+    else if (event.key === 'k') select(state.sel - 1);
+    else if (event.key === 'r') refresh();
+  });
+
+  refresh();
+})();
+</script>

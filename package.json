@@ -231,10 +231,11 @@
     "capture:demo-timeline": "node scripts/capture-demo-timeline.mjs",
     "verify:demo-claims": "node scripts/demo-claim-verify.cjs",
     "lint": "eslint src cli scripts tests workers",
-    "lint:fix": "eslint --fix src cli scripts tests workers"
+    "lint:fix": "eslint --fix src cli scripts tests workers",
+    "test:ladder": "node --test --test-concurrency=1 tests/ladder-*.test.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "0.32.1",
+    "@anthropic-ai/sdk": "0.124.0",
     "@iarna/toml": "2.2.5",
     "adm-zip": "0.5.17",
     "apache-arrow": "21.1.0",

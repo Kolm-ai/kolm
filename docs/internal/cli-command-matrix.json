@@ -1,191 +1,191 @@
 {
   "command_functions": [
     {
-      "line": 17532,
+      "line": 17533,
       "name": "cmdActiveLearn"
     },
     {
-      "line": 20419,
+      "line": 20420,
       "name": "cmdAgent"
     },
     {
-      "line": 36917,
+      "line": 36920,
       "name": "cmdAgents"
     },
     {
-      "line": 34677,
+      "line": 34678,
       "name": "cmdAirgap"
     },
     {
-      "line": 39931,
+      "line": 39934,
       "name": "cmdAnonymize"
     },
     {
-      "line": 6408,
+      "line": 6409,
       "name": "cmdArtifact"
     },
     {
-      "line": 6266,
+      "line": 6267,
       "name": "cmdArtifacts"
     },
     {
-      "line": 29810,
+      "line": 29811,
       "name": "cmdAsk"
     },
     {
-      "line": 13062,
+      "line": 13063,
       "name": "cmdAssistant"
     },
     {
-      "line": 13642,
+      "line": 13643,
       "name": "cmdAssistantChat"
     },
     {
-      "line": 13438,
+      "line": 13439,
       "name": "cmdAssistantNlOneShot"
     },
     {
-      "line": 11563,
+      "line": 11564,
       "name": "cmdAssurance"
     },
     {
-      "line": 21328,
+      "line": 21329,
       "name": "cmdAudit"
     },
     {
-      "line": 21452,
+      "line": 21453,
       "name": "cmdAuditor"
     },
     {
-      "line": 21474,
+      "line": 21475,
       "name": "cmdAuditorKeygen"
     },
     {
-      "line": 21509,
+      "line": 21510,
       "name": "cmdAuditorSign"
     },
     {
-      "line": 21620,
+      "line": 21621,
       "name": "cmdAuditorVerify"
     },
     {
-      "line": 27108,
+      "line": 27109,
       "name": "cmdBakeoff"
     },
     {
-      "line": 10822,
+      "line": 10823,
       "name": "cmdBenchCompare"
     },
     {
-      "line": 10164,
+      "line": 10165,
       "name": "cmdBenchmark"
     },
     {
-      "line": 10720,
+      "line": 10721,
       "name": "cmdBenchmarkEvidence"
     },
     {
-      "line": 11024,
+      "line": 11025,
       "name": "cmdBenchReproduce"
     },
     {
-      "line": 7687,
+      "line": 7688,
       "name": "cmdBilling"
     },
     {
-      "line": 20580,
+      "line": 20581,
       "name": "cmdBootstrap"
     },
     {
-      "line": 19618,
+      "line": 19619,
       "name": "cmdBridges"
     },
     {
-      "line": 5707,
+      "line": 5708,
       "name": "cmdBuild"
     },
     {
-      "line": 5651,
+      "line": 5652,
       "name": "cmdBuildPlan"
     },
     {
-      "line": 34914,
+      "line": 34915,
       "name": "cmdBundle"
     },
     {
-      "line": 21906,
+      "line": 21907,
       "name": "cmdCapture"
     },
     {
-      "line": 24592,
+      "line": 24593,
       "name": "cmdCaptureImportance"
     },
     {
-      "line": 24883,
+      "line": 24884,
       "name": "cmdCapturesAnalyticsW811"
     },
     {
-      "line": 24680,
+      "line": 24681,
       "name": "cmdCapturesReview"
     },
     {
-      "line": 41469,
+      "line": 41472,
       "name": "cmdCarbon"
     },
     {
-      "line": 41201,
+      "line": 41204,
       "name": "cmdCc"
     },
     {
-      "line": 7620,
+      "line": 7621,
       "name": "cmdChangelog"
     },
     {
-      "line": 31847,
+      "line": 31848,
       "name": "cmdChat"
     },
     {
-      "line": 30982,
+      "line": 30983,
       "name": "cmdChatTui"
     },
     {
-      "line": 19865,
+      "line": 19866,
       "name": "cmdCheckpoint"
     },
     {
-      "line": 33045,
+      "line": 33046,
       "name": "cmdCloud"
     },
     {
-      "line": 34115,
+      "line": 34116,
       "name": "cmdCloudTrain"
     },
     {
-      "line": 8153,
+      "line": 8154,
       "name": "cmdCompile"
     },
     {
-      "line": 8122,
+      "line": 8123,
       "name": "cmdCompileOutputSchema"
     },
     {
-      "line": 45381,
+      "line": 45384,
       "name": "cmdCompileWorkload_w726"
     },
     {
-      "line": 38095,
+      "line": 38098,
       "name": "cmdCompletion"
     },
     {
-      "line": 38114,
+      "line": 38117,
       "name": "cmdCompletionInstall"
     },
     {
-      "line": 34367,
+      "line": 34368,
       "name": "cmdCompute"
     },
     {
-      "line": 15694,
+      "line": 15695,
       "name": "cmdConfig"
     },
     {
@@ -193,387 +193,387 @@
       "name": "cmdConfigMigrateKeys"
     },
     {
-      "line": 7092,
+      "line": 7093,
       "name": "cmdConnect"
     },
     {
-      "line": 7385,
+      "line": 7386,
       "name": "cmdConnectConfig"
     },
     {
-      "line": 7282,
+      "line": 7283,
       "name": "cmdConnectDoctor"
     },
     {
-      "line": 7156,
+      "line": 7157,
       "name": "cmdConnectStart"
     },
     {
-      "line": 7221,
+      "line": 7222,
       "name": "cmdConnectStatus"
     },
     {
-      "line": 7207,
+      "line": 7208,
       "name": "cmdConnectStop"
     },
     {
-      "line": 7439,
+      "line": 7440,
       "name": "cmdConnectTest"
     },
     {
-      "line": 20321,
+      "line": 20322,
       "name": "cmdData"
     },
     {
-      "line": 19246,
+      "line": 19247,
       "name": "cmdDataset"
     },
     {
-      "line": 18960,
+      "line": 18961,
       "name": "cmdDemo"
     },
     {
-      "line": 35017,
+      "line": 35018,
       "name": "cmdDeploy"
     },
     {
-      "line": 40646,
+      "line": 40649,
       "name": "cmdDevice"
     },
     {
-      "line": 40696,
+      "line": 40699,
       "name": "cmdDevices"
     },
     {
-      "line": 12121,
+      "line": 12122,
       "name": "cmdDiff"
     },
     {
-      "line": 22867,
+      "line": 22868,
       "name": "cmdDistill"
     },
     {
-      "line": 25552,
+      "line": 25553,
       "name": "cmdDistillAutoArch"
     },
     {
-      "line": 26588,
+      "line": 26589,
       "name": "cmdDistillContrastive"
     },
     {
-      "line": 25367,
+      "line": 25368,
       "name": "cmdDistillCurriculum"
     },
     {
-      "line": 25767,
+      "line": 25768,
       "name": "cmdDistillEfficiency"
     },
     {
-      "line": 24203,
+      "line": 24204,
       "name": "cmdDistillFromCaptures"
     },
     {
-      "line": 23876,
+      "line": 23877,
       "name": "cmdDistillGad"
     },
     {
-      "line": 23622,
+      "line": 23623,
       "name": "cmdDistillGrpo"
     },
     {
-      "line": 24992,
+      "line": 24993,
       "name": "cmdDistillImportanceWeighted"
     },
     {
-      "line": 22648,
+      "line": 22649,
       "name": "cmdDistillImprove"
     },
     {
-      "line": 26314,
+      "line": 26315,
       "name": "cmdDistillKvOptim"
     },
     {
-      "line": 27421,
+      "line": 27422,
       "name": "cmdDistillLocalWorker"
     },
     {
-      "line": 25797,
+      "line": 25798,
       "name": "cmdDistillMixedPrecision"
     },
     {
-      "line": 22529,
+      "line": 22530,
       "name": "cmdDistillMoeToDense"
     },
     {
-      "line": 23363,
+      "line": 23364,
       "name": "cmdDistillOnPolicy"
     },
     {
-      "line": 23435,
+      "line": 23436,
       "name": "cmdDistillPreference"
     },
     {
-      "line": 25117,
+      "line": 25118,
       "name": "cmdDistillProgressive"
     },
     {
-      "line": 24403,
+      "line": 24404,
       "name": "cmdDistillResumeFromActiveQueue"
     },
     {
-      "line": 23753,
+      "line": 23754,
       "name": "cmdDistillRopd"
     },
     {
-      "line": 24056,
+      "line": 24057,
       "name": "cmdDistillRuns"
     },
     {
-      "line": 26018,
+      "line": 26019,
       "name": "cmdDistillSparseAttention"
     },
     {
-      "line": 22482,
+      "line": 22483,
       "name": "cmdDistillStrategy"
     },
     {
-      "line": 23228,
+      "line": 23229,
       "name": "cmdDistillTeacherCouncil"
     },
     {
-      "line": 22387,
+      "line": 22388,
       "name": "cmdDistillUpgrade"
     },
     {
-      "line": 44724,
+      "line": 44727,
       "name": "cmdDo"
     },
     {
-      "line": 29409,
+      "line": 29410,
       "name": "cmdDoc"
     },
     {
-      "line": 29437,
+      "line": 29438,
       "name": "cmdDocCheck"
     },
     {
-      "line": 28094,
+      "line": 28095,
       "name": "cmdDoctor"
     },
     {
-      "line": 29421,
+      "line": 29422,
       "name": "cmdDocTypes"
     },
     {
-      "line": 21730,
+      "line": 21731,
       "name": "cmdDrift"
     },
     {
-      "line": 21818,
+      "line": 21819,
       "name": "cmdDriftCron"
     },
     {
-      "line": 21750,
+      "line": 21751,
       "name": "cmdDriftDetect"
     },
     {
-      "line": 21872,
+      "line": 21873,
       "name": "cmdDriftVerify"
     },
     {
-      "line": 11879,
+      "line": 11880,
       "name": "cmdEject"
     },
     {
-      "line": 31783,
+      "line": 31784,
       "name": "cmdEmailOutbox"
     },
     {
-      "line": 10092,
+      "line": 10093,
       "name": "cmdEval"
     },
     {
-      "line": 33838,
+      "line": 33839,
       "name": "cmdEvidence"
     },
     {
-      "line": 34037,
+      "line": 34038,
       "name": "cmdEvidenceRevoke"
     },
     {
-      "line": 34007,
+      "line": 34008,
       "name": "cmdEvidenceShow"
     },
     {
-      "line": 33928,
+      "line": 33929,
       "name": "cmdEvidenceTrace"
     },
     {
-      "line": 16516,
+      "line": 16517,
       "name": "cmdExperts"
     },
     {
-      "line": 16680,
+      "line": 16681,
       "name": "cmdExpertsInspect"
     },
     {
-      "line": 16618,
+      "line": 16619,
       "name": "cmdExpertsList"
     },
     {
-      "line": 16816,
+      "line": 16817,
       "name": "cmdExpertsPin"
     },
     {
-      "line": 16642,
+      "line": 16643,
       "name": "cmdExpertsPrune"
     },
     {
-      "line": 44856,
+      "line": 44859,
       "name": "cmdExplain"
     },
     {
-      "line": 42354,
+      "line": 42357,
       "name": "cmdExport"
     },
     {
-      "line": 37327,
+      "line": 37330,
       "name": "cmdExtension"
     },
     {
-      "line": 29347,
+      "line": 29348,
       "name": "cmdExtract"
     },
     {
-      "line": 18525,
+      "line": 18526,
       "name": "cmdFailureModes"
     },
     {
-      "line": 41283,
+      "line": 41286,
       "name": "cmdFederated"
     },
     {
-      "line": 16417,
+      "line": 16418,
       "name": "cmdFit"
     },
     {
-      "line": 44955,
+      "line": 44958,
       "name": "cmdFix"
     },
     {
-      "line": 41240,
+      "line": 41243,
       "name": "cmdFl"
     },
     {
-      "line": 20242,
+      "line": 20243,
       "name": "cmdGate"
     },
     {
-      "line": 37924,
+      "line": 37927,
       "name": "cmdGpu"
     },
     {
-      "line": 32349,
+      "line": 32350,
       "name": "cmdGroup"
     },
     {
-      "line": 16382,
+      "line": 16383,
       "name": "cmdHardware"
     },
     {
-      "line": 6750,
+      "line": 6751,
       "name": "cmdHealth"
     },
     {
-      "line": 57689,
+      "line": 57697,
       "name": "cmdHfModelcard"
     },
     {
-      "line": 15977,
+      "line": 15978,
       "name": "cmdHmac"
     },
     {
-      "line": 14977,
+      "line": 14978,
       "name": "cmdHub"
     },
     {
-      "line": 19900,
+      "line": 19901,
       "name": "cmdImportChat"
     },
     {
-      "line": 42869,
+      "line": 42872,
       "name": "cmdImprove"
     },
     {
-      "line": 5310,
+      "line": 5311,
       "name": "cmdInit"
     },
     {
-      "line": 20476,
+      "line": 20477,
       "name": "cmdInitAgent"
     },
     {
-      "line": 11171,
+      "line": 11172,
       "name": "cmdInspect"
     },
     {
-      "line": 27900,
+      "line": 27901,
       "name": "cmdInstall"
     },
     {
-      "line": 37020,
+      "line": 37023,
       "name": "cmdInstallDevAgent"
     },
     {
-      "line": 41158,
+      "line": 41161,
       "name": "cmdInstallDevice"
     },
     {
-      "line": 43026,
+      "line": 43029,
       "name": "cmdInstant"
     },
     {
-      "line": 45048,
+      "line": 45051,
       "name": "cmdInteractive"
     },
     {
-      "line": 40591,
+      "line": 40594,
       "name": "cmdIr"
     },
     {
-      "line": 18637,
+      "line": 18638,
       "name": "cmdJobs"
     },
     {
-      "line": 7491,
+      "line": 7492,
       "name": "cmdKey"
     },
     {
-      "line": 16043,
+      "line": 16044,
       "name": "cmdKeygen"
     },
     {
-      "line": 16155,
+      "line": 16156,
       "name": "cmdKeys"
     },
     {
-      "line": 19400,
+      "line": 19401,
       "name": "cmdLabel"
     },
     {
-      "line": 22213,
+      "line": 22214,
       "name": "cmdLabels"
     },
     {
-      "line": 18724,
+      "line": 18725,
       "name": "cmdLake"
     },
     {
-      "line": 12029,
+      "line": 12030,
       "name": "cmdList"
     },
     {
-      "line": 6006,
+      "line": 6007,
       "name": "cmdLogin"
     },
     {
@@ -581,759 +581,759 @@
       "name": "cmdLogout"
     },
     {
-      "line": 28913,
+      "line": 28914,
       "name": "cmdLogs"
     },
     {
-      "line": 28088,
+      "line": 28089,
       "name": "cmdLoop"
     },
     {
-      "line": 44506,
+      "line": 44509,
       "name": "cmdMake"
     },
     {
-      "line": 15403,
+      "line": 15404,
       "name": "cmdMarketplace"
     },
     {
-      "line": 39269,
+      "line": 39272,
       "name": "cmdMedia"
     },
     {
-      "line": 31712,
+      "line": 31713,
       "name": "cmdMenu"
     },
     {
-      "line": 19921,
+      "line": 19922,
       "name": "cmdMerge"
     },
     {
-      "line": 20073,
+      "line": 20074,
       "name": "cmdMergeAdapters"
     },
     {
-      "line": 20965,
+      "line": 20966,
       "name": "cmdMesh"
     },
     {
-      "line": 7576,
+      "line": 7577,
       "name": "cmdMetrics"
     },
     {
-      "line": 21092,
+      "line": 21093,
       "name": "cmdMigrate"
     },
     {
-      "line": 37487,
+      "line": 37490,
       "name": "cmdModels"
     },
     {
-      "line": 28985,
+      "line": 28986,
       "name": "cmdMoe"
     },
     {
-      "line": 29131,
+      "line": 29132,
       "name": "cmdMoeCompose"
     },
     {
-      "line": 29209,
+      "line": 29210,
       "name": "cmdMoeInspect"
     },
     {
-      "line": 41723,
+      "line": 41726,
       "name": "cmdNamespace"
     },
     {
-      "line": 41904,
+      "line": 41907,
       "name": "cmdNamespaceSet"
     },
     {
-      "line": 5371,
+      "line": 5372,
       "name": "cmdNew"
     },
     {
-      "line": 44831,
+      "line": 44834,
       "name": "cmdNext"
     },
     {
-      "line": 29003,
+      "line": 29004,
       "name": "cmdNl"
     },
     {
-      "line": 19210,
+      "line": 19211,
       "name": "cmdOpportunities"
     },
     {
-      "line": 19109,
+      "line": 19110,
       "name": "cmdOptimize"
     },
     {
-      "line": 32456,
+      "line": 32457,
       "name": "cmdOrg"
     },
     {
-      "line": 33818,
+      "line": 33819,
       "name": "cmdPackages"
     },
     {
-      "line": 11361,
+      "line": 11362,
       "name": "cmdPassport"
     },
     {
-      "line": 36519,
+      "line": 36522,
       "name": "cmdPipeline"
     },
     {
-      "line": 43300,
+      "line": 43303,
       "name": "cmdPlay"
     },
     {
-      "line": 41616,
+      "line": 41619,
       "name": "cmdPlugin"
     },
     {
-      "line": 36035,
+      "line": 36038,
       "name": "cmdPrivacy"
     },
     {
-      "line": 11710,
+      "line": 11711,
       "name": "cmdProcurement"
     },
     {
-      "line": 19789,
+      "line": 19790,
       "name": "cmdProfile"
     },
     {
-      "line": 20799,
+      "line": 20800,
       "name": "cmdProxy"
     },
     {
-      "line": 16085,
+      "line": 16086,
       "name": "cmdPubkey"
     },
     {
-      "line": 14806,
+      "line": 14807,
       "name": "cmdPublish"
     },
     {
-      "line": 14915,
+      "line": 14916,
       "name": "cmdPull"
     },
     {
-      "line": 16876,
+      "line": 16877,
       "name": "cmdQuantize"
     },
     {
-      "line": 21243,
+      "line": 21244,
       "name": "cmdQuantizeLocalWorker"
     },
     {
-      "line": 16334,
+      "line": 16335,
       "name": "cmdQuantizeOracle"
     },
     {
-      "line": 31046,
+      "line": 31047,
       "name": "cmdQuickstart"
     },
     {
-      "line": 29596,
+      "line": 29597,
       "name": "cmdRag"
     },
     {
-      "line": 39175,
+      "line": 39178,
       "name": "cmdRedact"
     },
     {
-      "line": 39885,
+      "line": 39888,
       "name": "cmdReinject"
     },
     {
-      "line": 20853,
+      "line": 20854,
       "name": "cmdRemote"
     },
     {
-      "line": 43188,
+      "line": 43191,
       "name": "cmdRepl"
     },
     {
-      "line": 26850,
+      "line": 26851,
       "name": "cmdReplay"
     },
     {
-      "line": 26801,
+      "line": 26802,
       "name": "cmdReplaySubverbLocal"
     },
     {
-      "line": 44479,
+      "line": 44482,
       "name": "cmdRescue"
     },
     {
-      "line": 44464,
+      "line": 44467,
       "name": "cmdResume"
     },
     {
-      "line": 17116,
+      "line": 17117,
       "name": "cmdRoute"
     },
     {
-      "line": 17412,
+      "line": 17413,
       "name": "cmdRouteDoctor"
     },
     {
-      "line": 17297,
+      "line": 17298,
       "name": "cmdRouteRetrain"
     },
     {
-      "line": 17363,
+      "line": 17364,
       "name": "cmdRouteRollback"
     },
     {
-      "line": 17164,
+      "line": 17165,
       "name": "cmdRouteTrain"
     },
     {
-      "line": 9896,
+      "line": 9897,
       "name": "cmdRun"
     },
     {
-      "line": 45184,
+      "line": 45187,
       "name": "cmdRunAutoPlace_w724"
     },
     {
-      "line": 16921,
+      "line": 16922,
       "name": "cmdRuntime"
     },
     {
-      "line": 45307,
+      "line": 45310,
       "name": "cmdRunWorkloadProbe_w726"
     },
     {
-      "line": 51260,
+      "line": 51268,
       "name": "cmdS4BenchCompare"
     },
     {
-      "line": 51357,
+      "line": 51365,
       "name": "cmdS4BenchSuites"
     },
     {
-      "line": 7946,
+      "line": 7947,
       "name": "cmdSavings"
     },
     {
-      "line": 11153,
+      "line": 11154,
       "name": "cmdScore"
     },
     {
-      "line": 15313,
+      "line": 15314,
       "name": "cmdSdk"
     },
     {
-      "line": 40152,
+      "line": 40155,
       "name": "cmdSeeds"
     },
     {
-      "line": 40308,
+      "line": 40311,
       "name": "cmdSeedsActive"
     },
     {
-      "line": 40272,
+      "line": 40275,
       "name": "cmdSeedsAugment"
     },
     {
-      "line": 39104,
+      "line": 39107,
       "name": "cmdSeedsBootstrap"
     },
     {
-      "line": 40208,
+      "line": 40211,
       "name": "cmdSeedsFrom"
     },
     {
-      "line": 38890,
+      "line": 38893,
       "name": "cmdSeedsGenerate"
     },
     {
-      "line": 39029,
+      "line": 39032,
       "name": "cmdSeedsList"
     },
     {
-      "line": 38669,
+      "line": 38672,
       "name": "cmdSeedsNew"
     },
     {
-      "line": 38770,
+      "line": 38773,
       "name": "cmdSeedsNewFromBrief"
     },
     {
-      "line": 40331,
+      "line": 40334,
       "name": "cmdSeedsSanitize"
     },
     {
-      "line": 40353,
+      "line": 40356,
       "name": "cmdSeedsScore"
     },
     {
-      "line": 40044,
+      "line": 40047,
       "name": "cmdSeedsValidate"
     },
     {
-      "line": 13936,
+      "line": 13937,
       "name": "cmdServe"
     },
     {
-      "line": 20521,
+      "line": 20522,
       "name": "cmdServices"
     },
     {
-      "line": 44446,
+      "line": 44449,
       "name": "cmdSessions"
     },
     {
-      "line": 21390,
+      "line": 21391,
       "name": "cmdSettings"
     },
     {
-      "line": 36887,
+      "line": 36890,
       "name": "cmdShellInit"
     },
     {
-      "line": 44594,
+      "line": 44597,
       "name": "cmdShip"
     },
     {
-      "line": 6051,
+      "line": 6052,
       "name": "cmdSignup"
     },
     {
-      "line": 12468,
+      "line": 12469,
       "name": "cmdSigstoreAttest"
     },
     {
-      "line": 27026,
+      "line": 27027,
       "name": "cmdSim"
     },
     {
-      "line": 41394,
+      "line": 41397,
       "name": "cmdSla"
     },
     {
-      "line": 23997,
+      "line": 23998,
       "name": "cmdSpecDecode"
     },
     {
-      "line": 6221,
+      "line": 6222,
       "name": "cmdStatus"
     },
     {
-      "line": 31544,
+      "line": 31545,
       "name": "cmdStudio"
     },
     {
-      "line": 7510,
+      "line": 7511,
       "name": "cmdSupportBundle"
     },
     {
-      "line": 33682,
+      "line": 33683,
       "name": "cmdSurfaces"
     },
     {
-      "line": 19697,
+      "line": 19698,
       "name": "cmdSync"
     },
     {
-      "line": 36218,
+      "line": 36221,
       "name": "cmdSyncCloud"
     },
     {
-      "line": 26972,
+      "line": 26973,
       "name": "cmdSynth"
     },
     {
-      "line": 19526,
+      "line": 19527,
       "name": "cmdTail"
     },
     {
-      "line": 6869,
+      "line": 6870,
       "name": "cmdTeacher"
     },
     {
-      "line": 32542,
+      "line": 32543,
       "name": "cmdTeam"
     },
     {
-      "line": 36316,
+      "line": 36319,
       "name": "cmdTeamLocal"
     },
     {
-      "line": 12587,
+      "line": 12588,
       "name": "cmdTest"
     },
     {
-      "line": 12740,
+      "line": 12741,
       "name": "cmdTestCloud"
     },
     {
-      "line": 41035,
+      "line": 41038,
       "name": "cmdTestDevice"
     },
     {
-      "line": 12894,
+      "line": 12895,
       "name": "cmdTestE2E"
     },
     {
-      "line": 41099,
+      "line": 41102,
       "name": "cmdTestQuants"
     },
     {
-      "line": 12832,
+      "line": 12833,
       "name": "cmdTestShipGate"
     },
     {
-      "line": 29233,
+      "line": 29234,
       "name": "cmdTokenize"
     },
     {
-      "line": 29313,
+      "line": 29314,
       "name": "cmdTokenizeDecode"
     },
     {
-      "line": 29298,
+      "line": 29299,
       "name": "cmdTokenizeEncode"
     },
     {
-      "line": 29326,
+      "line": 29327,
       "name": "cmdTokenizeInspect"
     },
     {
-      "line": 29266,
+      "line": 29267,
       "name": "cmdTokenizeTrain"
     },
     {
-      "line": 40415,
+      "line": 40418,
       "name": "cmdTrace"
     },
     {
-      "line": 8064,
+      "line": 8065,
       "name": "cmdTrain"
     },
     {
-      "line": 27301,
+      "line": 27302,
       "name": "cmdTrainPlan"
     },
     {
-      "line": 44642,
+      "line": 44645,
       "name": "cmdTrainWatch"
     },
     {
-      "line": 43318,
+      "line": 43321,
       "name": "cmdTui"
     },
     {
-      "line": 29484,
+      "line": 29485,
       "name": "cmdTune"
     },
     {
-      "line": 32857,
+      "line": 32858,
       "name": "cmdTunnel"
     },
     {
-      "line": 32908,
+      "line": 32909,
       "name": "cmdTunnelAgent"
     },
     {
-      "line": 42067,
+      "line": 42070,
       "name": "cmdUpdate"
     },
     {
-      "line": 38220,
+      "line": 38223,
       "name": "cmdUpgrade"
     },
     {
-      "line": 32751,
+      "line": 32752,
       "name": "cmdVault"
     },
     {
-      "line": 12218,
+      "line": 12219,
       "name": "cmdVerify"
     },
     {
-      "line": 29730,
+      "line": 29731,
       "name": "cmdVersion"
     },
     {
-      "line": 45511,
+      "line": 45514,
       "name": "cmdW727Accelerate"
     },
     {
-      "line": 45666,
+      "line": 45669,
       "name": "cmdW728InferenceScale"
     },
     {
-      "line": 45418,
+      "line": 45421,
       "name": "cmdW729LoadStatus"
     },
     {
-      "line": 45785,
+      "line": 45788,
       "name": "cmdW730Metrics"
     },
     {
-      "line": 45862,
+      "line": 45865,
       "name": "cmdW731VscodeInstall"
     },
     {
-      "line": 46161,
+      "line": 46164,
       "name": "cmdW732Diff"
     },
     {
-      "line": 46016,
+      "line": 46019,
       "name": "cmdW732YamlSync"
     },
     {
-      "line": 46209,
+      "line": 46212,
       "name": "cmdW733OtelStatus"
     },
     {
-      "line": 46294,
+      "line": 46297,
       "name": "cmdW734RagCapture"
     },
     {
-      "line": 46551,
+      "line": 46554,
       "name": "cmdW735ToolPatterns"
     },
     {
-      "line": 47027,
+      "line": 47030,
       "name": "cmdW736Guardrails"
     },
     {
-      "line": 46791,
+      "line": 46794,
       "name": "cmdW737Marketplace"
     },
     {
-      "line": 47205,
+      "line": 47208,
       "name": "cmdW738Pipeline"
     },
     {
-      "line": 47755,
+      "line": 47758,
       "name": "cmdW739Diff"
     },
     {
-      "line": 47654,
+      "line": 47657,
       "name": "cmdW739Lineage"
     },
     {
-      "line": 47492,
+      "line": 47495,
       "name": "cmdW740Import"
     },
     {
-      "line": 47863,
+      "line": 47866,
       "name": "cmdW741Diagnose"
     },
     {
-      "line": 48007,
+      "line": 48010,
       "name": "cmdW742Gateway"
     },
     {
-      "line": 48660,
+      "line": 48663,
       "name": "cmdW743Migrate"
     },
     {
-      "line": 48489,
+      "line": 48492,
       "name": "cmdW745FailureModes"
     },
     {
-      "line": 48224,
+      "line": 48227,
       "name": "cmdW746Staleness"
     },
     {
-      "line": 48842,
+      "line": 48845,
       "name": "cmdW747DriftAlert"
     },
     {
-      "line": 49211,
+      "line": 49214,
       "name": "cmdW748Seasonal"
     },
     {
-      "line": 49363,
+      "line": 49366,
       "name": "cmdW749Synthetic"
     },
     {
-      "line": 49027,
+      "line": 49030,
       "name": "cmdW750Copyright"
     },
     {
-      "line": 49592,
+      "line": 49595,
       "name": "cmdW751Verticals"
     },
     {
-      "line": 51605,
+      "line": 51613,
       "name": "cmdW756Kolmbench"
     },
     {
-      "line": 51405,
+      "line": 51413,
       "name": "cmdW757Lake"
     },
     {
-      "line": 50951,
+      "line": 50959,
       "name": "cmdW758Bench"
     },
     {
-      "line": 50741,
+      "line": 50749,
       "name": "cmdW759Numeric"
     },
     {
-      "line": 51871,
+      "line": 51879,
       "name": "cmdW760Lang"
     },
     {
-      "line": 52042,
+      "line": 52050,
       "name": "cmdW761Poison"
     },
     {
-      "line": 52258,
+      "line": 52266,
       "name": "cmdW762Redteam"
     },
     {
-      "line": 52647,
+      "line": 52655,
       "name": "cmdW763Sbom"
     },
     {
-      "line": 52862,
+      "line": 52870,
       "name": "cmdW764Mit"
     },
     {
-      "line": 52445,
+      "line": 52453,
       "name": "cmdW765Pextract"
     },
     {
-      "line": 53566,
+      "line": 53574,
       "name": "cmdW766AiAct"
     },
     {
-      "line": 53898,
+      "line": 53906,
       "name": "cmdW767Cert"
     },
     {
-      "line": 53133,
+      "line": 53141,
       "name": "cmdW768ModelCard"
     },
     {
-      "line": 54714,
+      "line": 54722,
       "name": "cmdW769Residency"
     },
     {
-      "line": 53348,
+      "line": 53356,
       "name": "cmdW770AuditExport"
     },
     {
-      "line": 55330,
+      "line": 55338,
       "name": "cmdW771Vlm"
     },
     {
-      "line": 55630,
+      "line": 55638,
       "name": "cmdW772Audio"
     },
     {
-      "line": 56672,
+      "line": 56680,
       "name": "cmdW773Video"
     },
     {
-      "line": 55933,
+      "line": 55941,
       "name": "cmdW774Xlang"
     },
     {
-      "line": 17818,
+      "line": 17819,
       "name": "cmdW775Autopilot"
     },
     {
-      "line": 18128,
+      "line": 18129,
       "name": "cmdW777Ab"
     },
     {
-      "line": 18292,
+      "line": 18293,
       "name": "cmdW778StatSig"
     },
     {
-      "line": 35549,
+      "line": 35550,
       "name": "cmdW779Sneakernet"
     },
     {
-      "line": 55075,
+      "line": 55083,
       "name": "cmdW780Region"
     },
     {
-      "line": 56970,
+      "line": 56978,
       "name": "cmdW781LongCtx"
     },
     {
-      "line": 57110,
+      "line": 57118,
       "name": "cmdW782Approval"
     },
     {
-      "line": 57360,
+      "line": 57368,
       "name": "cmdW783Chargeback"
     },
     {
-      "line": 56382,
+      "line": 56390,
       "name": "cmdW813Drift"
     },
     {
-      "line": 51076,
+      "line": 51084,
       "name": "cmdW814Bench"
     },
     {
-      "line": 18395,
+      "line": 18396,
       "name": "cmdW816Loop"
     },
     {
-      "line": 57516,
+      "line": 57524,
       "name": "cmdW821Pipeline"
     },
     {
-      "line": 54535,
+      "line": 54543,
       "name": "cmdW830FederatedConsortium"
     },
     {
-      "line": 17662,
+      "line": 17663,
       "name": "cmdW832Meta"
     },
     {
-      "line": 56141,
+      "line": 56149,
       "name": "cmdW833Lingual"
     },
     {
-      "line": 54073,
+      "line": 54081,
       "name": "cmdW834Regulatory"
     },
     {
-      "line": 35279,
+      "line": 35280,
       "name": "cmdW888eFleet"
     },
     {
-      "line": 35445,
+      "line": 35446,
       "name": "cmdW888eNamespaceUpdates"
     },
     {
-      "line": 10520,
+      "line": 10521,
       "name": "cmdW916BenchSpeed"
     },
     {
-      "line": 19475,
+      "line": 19476,
       "name": "cmdWatch"
     },
     {
-      "line": 44771,
+      "line": 44774,
       "name": "cmdWhat"
     },
     {
-      "line": 6105,
+      "line": 6106,
       "name": "cmdWhoami"
     },
     {
-      "line": 21170,
+      "line": 21171,
       "name": "cmdWrap"
     },
     {
-      "line": 37061,
+      "line": 37064,
       "name": "cmdWrapAgent"
     }
   ],
@@ -1381,6 +1381,7 @@
     "chat-tui",
     "checkpoint",
     "cloud",
+    "code",
     "compile",
     "completion",
     "compute",
@@ -1599,7 +1600,7 @@
       "in_completion_verbs": false,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50648,
+      "line": 50656,
       "verb": "--help"
     },
     {
@@ -1607,7 +1608,7 @@
       "in_completion_verbs": false,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50645,
+      "line": 50653,
       "verb": "--version"
     },
     {
@@ -1615,7 +1616,7 @@
       "in_completion_verbs": false,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50649,
+      "line": 50657,
       "verb": "-h"
     },
     {
@@ -1623,7 +1624,7 @@
       "in_completion_verbs": false,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50646,
+      "line": 50654,
       "verb": "-v"
     },
     {
@@ -1631,7 +1632,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50249,
+      "line": 50252,
       "verb": "ab"
     },
     {
@@ -1639,7 +1640,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50192,
+      "line": 50195,
       "verb": "accelerate"
     },
     {
@@ -1647,7 +1648,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50204,
+      "line": 50207,
       "verb": "active-learn"
     },
     {
@@ -1655,7 +1656,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50057,
+      "line": 50060,
       "verb": "ae"
     },
     {
@@ -1663,7 +1664,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50306,
+      "line": 50314,
       "verb": "agent"
     },
     {
@@ -1671,7 +1672,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50643,
+      "line": 50651,
       "verb": "agents"
     },
     {
@@ -1679,7 +1680,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50616,
+      "line": 50624,
       "verb": "ai-act"
     },
     {
@@ -1687,7 +1688,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50617,
+      "line": 50625,
       "verb": "aiact"
     },
     {
@@ -1695,7 +1696,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50344,
+      "line": 50352,
       "verb": "airgap"
     },
     {
@@ -1703,7 +1704,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50441,
+      "line": 50449,
       "verb": "anonymize"
     },
     {
@@ -1711,7 +1712,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50069,
+      "line": 50072,
       "verb": "approval"
     },
     {
@@ -1719,7 +1720,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50068,
+      "line": 50071,
       "verb": "approvals"
     },
     {
@@ -1727,7 +1728,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49817,
+      "line": 49820,
       "verb": "artifact"
     },
     {
@@ -1735,7 +1736,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49818,
+      "line": 49821,
       "verb": "artifacts"
     },
     {
@@ -1743,7 +1744,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50357,
+      "line": 50365,
       "verb": "ask"
     },
     {
@@ -1751,7 +1752,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50472,
+      "line": 50480,
       "verb": "assistant"
     },
     {
@@ -1759,7 +1760,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49939,
+      "line": 49942,
       "verb": "assurance"
     },
     {
@@ -1767,7 +1768,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49949,
+      "line": 49952,
       "verb": "attest"
     },
     {
@@ -1775,7 +1776,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50093,
+      "line": 50096,
       "verb": "audio"
     },
     {
@@ -1783,7 +1784,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50049,
+      "line": 50052,
       "verb": "audit"
     },
     {
@@ -1791,7 +1792,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50056,
+      "line": 50059,
       "verb": "audit-export"
     },
     {
@@ -1799,7 +1800,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50041,
+      "line": 50044,
       "verb": "auditor"
     },
     {
@@ -1807,7 +1808,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50219,
+      "line": 50222,
       "verb": "autopilot"
     },
     {
@@ -1815,7 +1816,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50458,
+      "line": 50466,
       "verb": "bakeoff"
     },
     {
@@ -1823,7 +1824,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 49906,
+      "line": 49909,
       "verb": "bench"
     },
     {
@@ -1831,7 +1832,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49905,
+      "line": 49908,
       "verb": "benchmark"
     },
     {
@@ -1839,7 +1840,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 49856,
+      "line": 49859,
       "verb": "billing"
     },
     {
@@ -1847,7 +1848,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50309,
+      "line": 50317,
       "verb": "bootstrap"
     },
     {
@@ -1855,7 +1856,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50324,
+      "line": 50332,
       "verb": "bridges"
     },
     {
@@ -1863,7 +1864,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": true,
-      "line": 49862,
+      "line": 49865,
       "verb": "build"
     },
     {
@@ -1871,7 +1872,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50345,
+      "line": 50353,
       "verb": "bundle"
     },
     {
@@ -1879,7 +1880,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49945,
+      "line": 49948,
       "verb": "caiq"
     },
     {
@@ -1887,7 +1888,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 49986,
+      "line": 49989,
       "verb": "capture"
     },
     {
@@ -1895,7 +1896,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49990,
+      "line": 49993,
       "verb": "captures"
     },
     {
@@ -1903,7 +1904,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50411,
+      "line": 50419,
       "verb": "carbon"
     },
     {
@@ -1911,7 +1912,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50401,
+      "line": 50409,
       "verb": "cc"
     },
     {
@@ -1919,7 +1920,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50599,
+      "line": 50607,
       "verb": "cert"
     },
     {
@@ -1927,7 +1928,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49854,
+      "line": 49857,
       "verb": "changelog"
     },
     {
@@ -1935,7 +1936,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50074,
+      "line": 50077,
       "verb": "chargeback"
     },
     {
@@ -1943,7 +1944,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50362,
+      "line": 50370,
       "verb": "chat"
     },
     {
@@ -1951,7 +1952,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": false,
-      "line": 50389,
+      "line": 50397,
       "verb": "chat-tui"
     },
     {
@@ -1959,7 +1960,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50290,
+      "line": 50293,
       "verb": "checkpoint"
     },
     {
@@ -1967,15 +1968,23 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50338,
+      "line": 50346,
       "verb": "cloud"
+    },
+    {
+      "family": "platform_misc",
+      "in_completion_verbs": true,
+      "in_product_graph_cli": false,
+      "in_product_graph_proof": false,
+      "line": 50309,
+      "verb": "code"
     },
     {
       "family": "compile_artifact",
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 49863,
+      "line": 49866,
       "verb": "compile"
     },
     {
@@ -1983,7 +1992,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50390,
+      "line": 50398,
       "verb": "completion"
     },
     {
@@ -1991,7 +2000,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50351,
+      "line": 50359,
       "verb": "compute"
     },
     {
@@ -1999,7 +2008,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50025,
+      "line": 50028,
       "verb": "config"
     },
     {
@@ -2007,7 +2016,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50312,
+      "line": 50320,
       "verb": "connect"
     },
     {
@@ -2015,7 +2024,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50525,
+      "line": 50533,
       "verb": "copyright-scan"
     },
     {
@@ -2023,7 +2032,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50462,
+      "line": 50470,
       "verb": "data"
     },
     {
@@ -2031,7 +2040,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50280,
+      "line": 50283,
       "verb": "dataset"
     },
     {
@@ -2039,7 +2048,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50283,
+      "line": 50286,
       "verb": "demo"
     },
     {
@@ -2047,7 +2056,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50350,
+      "line": 50358,
       "verb": "deploy"
     },
     {
@@ -2055,7 +2064,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50400,
+      "line": 50408,
       "verb": "device"
     },
     {
@@ -2063,7 +2072,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50464,
+      "line": 50472,
       "verb": "devices"
     },
     {
@@ -2071,7 +2080,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50505,
+      "line": 50513,
       "verb": "diagnose"
     },
     {
@@ -2079,7 +2088,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": false,
-      "line": 49917,
+      "line": 49920,
       "verb": "diff"
     },
     {
@@ -2087,7 +2096,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50018,
+      "line": 50021,
       "verb": "distill"
     },
     {
@@ -2095,7 +2104,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50450,
+      "line": 50458,
       "verb": "do"
     },
     {
@@ -2103,7 +2112,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50024,
+      "line": 50027,
       "verb": "doc"
     },
     {
@@ -2111,7 +2120,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50352,
+      "line": 50360,
       "verb": "doctor"
     },
     {
@@ -2119,7 +2128,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50328,
+      "line": 50336,
       "verb": "drift"
     },
     {
@@ -2127,7 +2136,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50520,
+      "line": 50528,
       "verb": "drift-alert"
     },
     {
@@ -2135,7 +2144,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49911,
+      "line": 49914,
       "verb": "eject"
     },
     {
@@ -2143,7 +2152,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50375,
+      "line": 50383,
       "verb": "email"
     },
     {
@@ -2151,7 +2160,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49904,
+      "line": 49907,
       "verb": "eval"
     },
     {
@@ -2159,7 +2168,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50343,
+      "line": 50351,
       "verb": "evidence"
     },
     {
@@ -2167,7 +2176,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50109,
+      "line": 50112,
       "verb": "experts"
     },
     {
@@ -2175,7 +2184,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50453,
+      "line": 50461,
       "verb": "explain"
     },
     {
@@ -2183,7 +2192,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50396,
+      "line": 50404,
       "verb": "export"
     },
     {
@@ -2191,7 +2200,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50418,
+      "line": 50426,
       "verb": "ext"
     },
     {
@@ -2199,7 +2208,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50417,
+      "line": 50425,
       "verb": "extension"
     },
     {
@@ -2207,7 +2216,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50023,
+      "line": 50026,
       "verb": "extract"
     },
     {
@@ -2215,7 +2224,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50232,
+      "line": 50235,
       "verb": "failure-modes"
     },
     {
@@ -2223,7 +2232,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50242,
+      "line": 50245,
       "verb": "failure-to-capture-loop"
     },
     {
@@ -2231,7 +2240,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50403,
+      "line": 50411,
       "verb": "federated"
     },
     {
@@ -2239,7 +2248,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50108,
+      "line": 50111,
       "verb": "fit"
     },
     {
@@ -2247,7 +2256,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50454,
+      "line": 50462,
       "verb": "fix"
     },
     {
@@ -2255,7 +2264,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50402,
+      "line": 50410,
       "verb": "fl"
     },
     {
@@ -2263,7 +2272,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50470,
+      "line": 50478,
       "verb": "fleet"
     },
     {
@@ -2271,7 +2280,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50116,
+      "line": 50119,
       "verb": "forge"
     },
     {
@@ -2279,7 +2288,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50574,
+      "line": 50582,
       "verb": "forget"
     },
     {
@@ -2287,7 +2296,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50461,
+      "line": 50469,
       "verb": "gate"
     },
     {
@@ -2295,7 +2304,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50509,
+      "line": 50517,
       "verb": "gateway"
     },
     {
@@ -2303,7 +2312,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50395,
+      "line": 50403,
       "verb": "gpu"
     },
     {
@@ -2311,7 +2320,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50339,
+      "line": 50347,
       "verb": "group"
     },
     {
@@ -2319,7 +2328,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49852,
+      "line": 49855,
       "verb": "guardrails"
     },
     {
@@ -2327,7 +2336,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50107,
+      "line": 50110,
       "verb": "hardware"
     },
     {
@@ -2335,7 +2344,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49820,
+      "line": 49823,
       "verb": "health"
     },
     {
@@ -2343,7 +2352,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50647,
+      "line": 50655,
       "verb": "help"
     },
     {
@@ -2351,7 +2360,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50170,
+      "line": 50173,
       "verb": "hf"
     },
     {
@@ -2359,7 +2368,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50037,
+      "line": 50040,
       "verb": "hmac"
     },
     {
@@ -2367,7 +2376,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 49957,
+      "line": 49960,
       "verb": "hub"
     },
     {
@@ -2375,7 +2384,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50171,
+      "line": 50174,
       "verb": "huggingface"
     },
     {
@@ -2383,7 +2392,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50295,
+      "line": 50298,
       "verb": "import"
     },
     {
@@ -2391,7 +2400,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50304,
+      "line": 50307,
       "verb": "import-chat"
     },
     {
@@ -2399,7 +2408,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50446,
+      "line": 50454,
       "verb": "improve"
     },
     {
@@ -2407,7 +2416,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49805,
+      "line": 49808,
       "verb": "init"
     },
     {
@@ -2415,7 +2424,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50307,
+      "line": 50315,
       "verb": "init-agent"
     },
     {
@@ -2423,7 +2432,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49910,
+      "line": 49913,
       "verb": "inspect"
     },
     {
@@ -2431,7 +2440,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50329,
+      "line": 50337,
       "verb": "install"
     },
     {
@@ -2439,7 +2448,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": false,
-      "line": 50465,
+      "line": 50473,
       "verb": "install-device"
     },
     {
@@ -2447,7 +2456,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50447,
+      "line": 50455,
       "verb": "instant"
     },
     {
@@ -2455,7 +2464,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50358,
+      "line": 50366,
       "verb": "intent"
     },
     {
@@ -2463,7 +2472,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50399,
+      "line": 50407,
       "verb": "ir"
     },
     {
@@ -2471,7 +2480,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50198,
+      "line": 50201,
       "verb": "its"
     },
     {
@@ -2479,7 +2488,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50259,
+      "line": 50262,
       "verb": "jobs"
     },
     {
@@ -2487,7 +2496,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50546,
+      "line": 50554,
       "verb": "kb"
     },
     {
@@ -2495,7 +2504,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49860,
+      "line": 49863,
       "verb": "key"
     },
     {
@@ -2503,7 +2512,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50038,
+      "line": 50041,
       "verb": "keygen"
     },
     {
@@ -2511,7 +2520,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50040,
+      "line": 50043,
       "verb": "keys"
     },
     {
@@ -2519,7 +2528,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50545,
+      "line": 50553,
       "verb": "kolmbench"
     },
     {
@@ -2527,7 +2536,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50281,
+      "line": 50284,
       "verb": "label"
     },
     {
@@ -2535,7 +2544,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50017,
+      "line": 50020,
       "verb": "labels"
     },
     {
@@ -2543,7 +2552,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50266,
+      "line": 50269,
       "verb": "lake"
     },
     {
@@ -2551,7 +2560,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50557,
+      "line": 50565,
       "verb": "lang"
     },
     {
@@ -2559,7 +2568,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49920,
+      "line": 49923,
       "verb": "lineage"
     },
     {
@@ -2567,7 +2576,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50642,
+      "line": 50650,
       "verb": "lingual"
     },
     {
@@ -2575,7 +2584,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49908,
+      "line": 49911,
       "verb": "list"
     },
     {
@@ -2583,7 +2592,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50176,
+      "line": 50179,
       "verb": "load"
     },
     {
@@ -2591,7 +2600,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49807,
+      "line": 49810,
       "verb": "login"
     },
     {
@@ -2599,7 +2608,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49811,
+      "line": 49814,
       "verb": "logout"
     },
     {
@@ -2607,7 +2616,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50356,
+      "line": 50364,
       "verb": "logs"
     },
     {
@@ -2615,7 +2624,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50062,
+      "line": 50065,
       "verb": "long-context"
     },
     {
@@ -2623,7 +2632,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50063,
+      "line": 50066,
       "verb": "longctx"
     },
     {
@@ -2631,7 +2640,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50355,
+      "line": 50363,
       "verb": "loop"
     },
     {
@@ -2639,7 +2648,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49909,
+      "line": 49912,
       "verb": "ls"
     },
     {
@@ -2647,7 +2656,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49878,
+      "line": 49881,
       "verb": "make"
     },
     {
@@ -2655,7 +2664,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49958,
+      "line": 49961,
       "verb": "marketplace"
     },
     {
@@ -2663,7 +2672,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50593,
+      "line": 50601,
       "verb": "mc"
     },
     {
@@ -2671,7 +2680,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50444,
+      "line": 50452,
       "verb": "media"
     },
     {
@@ -2679,7 +2688,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50371,
+      "line": 50379,
       "verb": "menu"
     },
     {
@@ -2687,7 +2696,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50305,
+      "line": 50308,
       "verb": "merge"
     },
     {
@@ -2695,7 +2704,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50314,
+      "line": 50322,
       "verb": "mesh"
     },
     {
@@ -2703,7 +2712,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50211,
+      "line": 50214,
       "verb": "meta"
     },
     {
@@ -2711,7 +2720,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49821,
+      "line": 49824,
       "verb": "metrics"
     },
     {
@@ -2719,7 +2728,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50316,
+      "line": 50324,
       "verb": "migrate"
     },
     {
@@ -2727,7 +2736,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50575,
+      "line": 50583,
       "verb": "mit"
     },
     {
@@ -2735,7 +2744,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50592,
+      "line": 50600,
       "verb": "model-card"
     },
     {
@@ -2743,7 +2752,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50394,
+      "line": 50402,
       "verb": "models"
     },
     {
@@ -2751,7 +2760,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50020,
+      "line": 50023,
       "verb": "moe"
     },
     {
@@ -2759,7 +2768,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50636,
+      "line": 50644,
       "verb": "multilingual"
     },
     {
@@ -2767,7 +2776,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50421,
+      "line": 50429,
       "verb": "namespace"
     },
     {
@@ -2775,7 +2784,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49861,
+      "line": 49864,
       "verb": "new"
     },
     {
@@ -2783,7 +2792,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50452,
+      "line": 50460,
       "verb": "next"
     },
     {
@@ -2791,7 +2800,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50021,
+      "line": 50024,
       "verb": "nl"
     },
     {
@@ -2799,7 +2808,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50422,
+      "line": 50430,
       "verb": "ns"
     },
     {
@@ -2807,7 +2816,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50552,
+      "line": 50560,
       "verb": "num"
     },
     {
@@ -2815,7 +2824,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50551,
+      "line": 50559,
       "verb": "numeric"
     },
     {
@@ -2823,7 +2832,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": true,
-      "line": 50279,
+      "line": 50282,
       "verb": "opportunities"
     },
     {
@@ -2831,7 +2840,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50275,
+      "line": 50278,
       "verb": "optimize"
     },
     {
@@ -2839,7 +2848,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50336,
+      "line": 50344,
       "verb": "org"
     },
     {
@@ -2847,7 +2856,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49838,
+      "line": 49841,
       "verb": "otel"
     },
     {
@@ -2855,7 +2864,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50080,
+      "line": 50083,
       "verb": "pack"
     },
     {
@@ -2863,7 +2872,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50342,
+      "line": 50350,
       "verb": "package"
     },
     {
@@ -2871,7 +2880,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50341,
+      "line": 50349,
       "verb": "packages"
     },
     {
@@ -2879,7 +2888,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49935,
+      "line": 49938,
       "verb": "passport"
     },
     {
@@ -2887,7 +2896,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50581,
+      "line": 50589,
       "verb": "pextract"
     },
     {
@@ -2895,7 +2904,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": false,
-      "line": 50482,
+      "line": 50490,
       "verb": "pipeline"
     },
     {
@@ -2903,7 +2912,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49953,
+      "line": 49956,
       "verb": "play"
     },
     {
@@ -2911,7 +2920,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50414,
+      "line": 50422,
       "verb": "plugin"
     },
     {
@@ -2919,7 +2928,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50561,
+      "line": 50569,
       "verb": "poison"
     },
     {
@@ -2927,7 +2936,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50474,
+      "line": 50482,
       "verb": "privacy"
     },
     {
@@ -2935,7 +2944,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49940,
+      "line": 49943,
       "verb": "procurement"
     },
     {
@@ -2943,7 +2952,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50327,
+      "line": 50335,
       "verb": "profile"
     },
     {
@@ -2951,7 +2960,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50310,
+      "line": 50318,
       "verb": "proxy"
     },
     {
@@ -2959,7 +2968,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50039,
+      "line": 50042,
       "verb": "pubkey"
     },
     {
@@ -2967,7 +2976,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": false,
-      "line": 49955,
+      "line": 49958,
       "verb": "publish"
     },
     {
@@ -2975,7 +2984,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49956,
+      "line": 49959,
       "verb": "pull"
     },
     {
@@ -2983,7 +2992,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50582,
+      "line": 50590,
       "verb": "px"
     },
     {
@@ -2991,7 +3000,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50103,
+      "line": 50106,
       "verb": "quantize"
     },
     {
@@ -2999,7 +3008,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50366,
+      "line": 50374,
       "verb": "quickstart"
     },
     {
@@ -3007,7 +3016,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49844,
+      "line": 49847,
       "verb": "rag"
     },
     {
@@ -3015,7 +3024,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50429,
+      "line": 50437,
       "verb": "receipt"
     },
     {
@@ -3023,7 +3032,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50428,
+      "line": 50436,
       "verb": "receipts"
     },
     {
@@ -3031,7 +3040,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50442,
+      "line": 50450,
       "verb": "redact"
     },
     {
@@ -3039,7 +3048,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50566,
+      "line": 50574,
       "verb": "redteam"
     },
     {
@@ -3047,7 +3056,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50609,
+      "line": 50617,
       "verb": "reg"
     },
     {
@@ -3055,7 +3064,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50629,
+      "line": 50637,
       "verb": "region"
     },
     {
@@ -3063,7 +3072,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50608,
+      "line": 50616,
       "verb": "regulatory"
     },
     {
@@ -3071,7 +3080,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50445,
+      "line": 50453,
       "verb": "reinject"
     },
     {
@@ -3079,7 +3088,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50313,
+      "line": 50321,
       "verb": "remote"
     },
     {
@@ -3087,7 +3096,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49954,
+      "line": 49957,
       "verb": "repl"
     },
     {
@@ -3095,7 +3104,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50325,
+      "line": 50333,
       "verb": "replay"
     },
     {
@@ -3103,7 +3112,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50288,
+      "line": 50291,
       "verb": "rescue"
     },
     {
@@ -3111,7 +3120,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50622,
+      "line": 50630,
       "verb": "residency"
     },
     {
@@ -3119,7 +3128,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50287,
+      "line": 50290,
       "verb": "resume"
     },
     {
@@ -3127,7 +3136,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50187,
+      "line": 50190,
       "verb": "route"
     },
     {
@@ -3135,7 +3144,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50567,
+      "line": 50575,
       "verb": "rt"
     },
     {
@@ -3143,7 +3152,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 49880,
+      "line": 49883,
       "verb": "run"
     },
     {
@@ -3151,7 +3160,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": false,
-      "line": 50172,
+      "line": 50175,
       "verb": "runtime"
     },
     {
@@ -3159,7 +3168,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49858,
+      "line": 49861,
       "verb": "savings"
     },
     {
@@ -3167,7 +3176,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50586,
+      "line": 50594,
       "verb": "sbom"
     },
     {
@@ -3175,7 +3184,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49907,
+      "line": 49910,
       "verb": "score"
     },
     {
@@ -3183,7 +3192,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49985,
+      "line": 49988,
       "verb": "sdk"
     },
     {
@@ -3191,7 +3200,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50530,
+      "line": 50538,
       "verb": "seasonal"
     },
     {
@@ -3199,7 +3208,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50397,
+      "line": 50405,
       "verb": "seeds"
     },
     {
@@ -3207,7 +3216,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50393,
+      "line": 50401,
       "verb": "self-update"
     },
     {
@@ -3215,7 +3224,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 49951,
+      "line": 49954,
       "verb": "serve"
     },
     {
@@ -3223,7 +3232,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50308,
+      "line": 50316,
       "verb": "services"
     },
     {
@@ -3231,7 +3240,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50289,
+      "line": 50292,
       "verb": "sessions"
     },
     {
@@ -3239,7 +3248,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50102,
+      "line": 50105,
       "verb": "settings"
     },
     {
@@ -3247,7 +3256,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50368,
+      "line": 50376,
       "verb": "setup"
     },
     {
@@ -3255,7 +3264,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50644,
+      "line": 50652,
       "verb": "shell-init"
     },
     {
@@ -3263,7 +3272,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49879,
+      "line": 49882,
       "verb": "ship"
     },
     {
@@ -3271,7 +3280,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49944,
+      "line": 49947,
       "verb": "sig"
     },
     {
@@ -3279,7 +3288,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49806,
+      "line": 49809,
       "verb": "signup"
     },
     {
@@ -3287,7 +3296,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49948,
+      "line": 49951,
       "verb": "sigstore-attest"
     },
     {
@@ -3295,7 +3304,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": false,
-      "line": 50457,
+      "line": 50465,
       "verb": "sim"
     },
     {
@@ -3303,7 +3312,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50407,
+      "line": 50415,
       "verb": "sla"
     },
     {
@@ -3311,7 +3320,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50019,
+      "line": 50022,
       "verb": "spec-decode"
     },
     {
@@ -3319,7 +3328,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50516,
+      "line": 50524,
       "verb": "staleness"
     },
     {
@@ -3327,7 +3336,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50256,
+      "line": 50259,
       "verb": "stat-sig"
     },
     {
@@ -3335,7 +3344,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49819,
+      "line": 49822,
       "verb": "status"
     },
     {
@@ -3343,7 +3352,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50370,
+      "line": 50378,
       "verb": "studio"
     },
     {
@@ -3351,7 +3360,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49859,
+      "line": 49862,
       "verb": "support-bundle"
     },
     {
@@ -3359,7 +3368,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50340,
+      "line": 50348,
       "verb": "surfaces"
     },
     {
@@ -3367,7 +3376,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50326,
+      "line": 50334,
       "verb": "sync"
     },
     {
@@ -3375,7 +3384,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50456,
+      "line": 50464,
       "verb": "synth"
     },
     {
@@ -3383,7 +3392,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50535,
+      "line": 50543,
       "verb": "synthetic"
     },
     {
@@ -3391,7 +3400,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50323,
+      "line": 50331,
       "verb": "tail"
     },
     {
@@ -3399,7 +3408,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50354,
+      "line": 50362,
       "verb": "teacher"
     },
     {
@@ -3407,7 +3416,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": false,
-      "line": 50334,
+      "line": 50342,
       "verb": "team"
     },
     {
@@ -3415,7 +3424,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49950,
+      "line": 49953,
       "verb": "test"
     },
     {
@@ -3423,7 +3432,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50467,
+      "line": 50475,
       "verb": "test-device"
     },
     {
@@ -3431,7 +3440,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50468,
+      "line": 50476,
       "verb": "test-quants"
     },
     {
@@ -3439,7 +3448,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50022,
+      "line": 50025,
       "verb": "tokenize"
     },
     {
@@ -3447,7 +3456,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49848,
+      "line": 49851,
       "verb": "tool"
     },
     {
@@ -3455,7 +3464,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50398,
+      "line": 50406,
       "verb": "trace"
     },
     {
@@ -3463,7 +3472,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 49876,
+      "line": 49879,
       "verb": "train"
     },
     {
@@ -3471,7 +3480,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": true,
-      "line": 49952,
+      "line": 49955,
       "verb": "tui"
     },
     {
@@ -3479,7 +3488,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50330,
+      "line": 50338,
       "verb": "tune"
     },
     {
@@ -3487,7 +3496,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 50337,
+      "line": 50345,
       "verb": "tunnel"
     },
     {
@@ -3495,7 +3504,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50081,
+      "line": 50084,
       "verb": "unpack"
     },
     {
@@ -3503,7 +3512,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50392,
+      "line": 50400,
       "verb": "update"
     },
     {
@@ -3511,7 +3520,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50391,
+      "line": 50399,
       "verb": "upgrade"
     },
     {
@@ -3519,7 +3528,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50335,
+      "line": 50343,
       "verb": "vault"
     },
     {
@@ -3527,7 +3536,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49941,
+      "line": 49944,
       "verb": "vendor-pack"
     },
     {
@@ -3535,7 +3544,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 49921,
+      "line": 49924,
       "verb": "verify"
     },
     {
@@ -3543,7 +3552,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50448,
+      "line": 50456,
       "verb": "version"
     },
     {
@@ -3551,7 +3560,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50540,
+      "line": 50548,
       "verb": "vertical"
     },
     {
@@ -3559,7 +3568,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50099,
+      "line": 50102,
       "verb": "video"
     },
     {
@@ -3567,7 +3576,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50087,
+      "line": 50090,
       "verb": "vision"
     },
     {
@@ -3575,7 +3584,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50086,
+      "line": 50089,
       "verb": "vlm"
     },
     {
@@ -3583,7 +3592,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 49834,
+      "line": 49837,
       "verb": "vscode"
     },
     {
@@ -3591,7 +3600,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50284,
+      "line": 50287,
       "verb": "watch"
     },
     {
@@ -3599,7 +3608,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50451,
+      "line": 50459,
       "verb": "what"
     },
     {
@@ -3607,7 +3616,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": true,
       "in_product_graph_proof": true,
-      "line": 49812,
+      "line": 49815,
       "verb": "whoami"
     },
     {
@@ -3615,7 +3624,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50367,
+      "line": 50375,
       "verb": "wizard"
     },
     {
@@ -3623,7 +3632,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50318,
+      "line": 50326,
       "verb": "wrap"
     },
     {
@@ -3631,7 +3640,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50512,
+      "line": 50520,
       "verb": "wrapper"
     },
     {
@@ -3639,7 +3648,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50635,
+      "line": 50643,
       "verb": "xlang"
     },
     {
@@ -3647,7 +3656,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50030,
+      "line": 50033,
       "verb": "yaml"
     },
     {
@@ -3655,7 +3664,7 @@
       "in_completion_verbs": true,
       "in_product_graph_cli": false,
       "in_product_graph_proof": false,
-      "line": 50036,
+      "line": 50039,
       "verb": "yaml-diff"
     }
   ],
@@ -3666,7 +3675,7 @@
     "governance_security": 14,
     "identity_access": 10,
     "infra_device": 13,
-    "platform_misc": 157,
+    "platform_misc": 158,
     "runtime_serving": 12,
     "training_eval": 12
   },
@@ -4537,13 +4546,13 @@
     "tests/wrapper-smoke.test.js"
   ],
   "summary": {
-    "cli_bytes": 2659842,
-    "cli_lines": 57820,
+    "cli_bytes": 2660309,
+    "cli_lines": 57828,
     "command_function_count": 334,
-    "completion_verb_count": 254,
+    "completion_verb_count": 255,
     "completion_without_dispatch": 0,
     "dispatch_without_completion": 0,
-    "dispatcher_case_count": 258,
+    "dispatcher_case_count": 259,
     "dispatcher_family_count": 9,
     "failed_safety_guards": 0,
     "missing_product_graph_proof_verbs": 0,
