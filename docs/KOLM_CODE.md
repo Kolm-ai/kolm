@@ -36,7 +36,7 @@ The verdict rule is deliberately blunt:
 
 A rung's `good`/`bad`/`unsure` call comes from a *band*: a numeric threshold
 pair per metric. The good edge is inclusive, the bad edge is exclusive. See
-section 9 for reading and calibrating them.
+section 10 for reading and calibrating them.
 
 **The generation ladder** decides who writes the patch. `KOLM_CODE_CODER_LADDER`
 is an ordered list of model refs, cheapest first. Candidate 0 is written by the
@@ -73,20 +73,151 @@ orchestrator, at least one coder, the worktree driver and the store are armed.
 
 ---
 
-## 3. Environment variables
+## 3. Your own keys
+
+Nothing in `kolm code` ships with a key. You bring your own, and there are
+three ways to hand one over:
+
+1. **An environment variable** - `export ANTHROPIC_API_KEY=...`. Right for CI,
+   for a container, and for a shell you have already set up.
+2. **The keystore** - `kolm code keys set anthropic`, typed once and read by
+   every later run from a file in your home directory.
+3. **Neither** - the rung stays unarmed, and `doctor` names the variable that
+   is missing and the `keys set` command that would fill it.
+
+**The environment wins over the keystore.** That is the same precedence `gh`
+and the AWS CLI use, and for the same reason: a stored key is a convenience for
+one machine, while a job that exports a variable - CI, a container, a one-off
+`ANTHROPIC_API_KEY=... kolm code run ...` - has to be able to override it
+without editing a file first. `kolm code keys list` shows which one is winning.
+
+The keystore holds exactly six names: `anthropic`, `cerebras`, `deepseek`,
+`openrouter`, `github`, `sandbox`. Any other name is refused.
+
+### Storing a key
+
+```
+kolm code keys set openrouter                  # prompts, and does not echo
+printf '%s' "$KEY" | kolm code keys set openrouter
+kolm code keys set openrouter --from-env MY_KEY
+kolm code keys set openrouter --from-file ~/secrets/openrouter.txt
+```
+
+The value comes from `--from-env VAR`, from the first line of `--from-file`,
+from stdin when stdin is a pipe (or with `--stdin`), or from a hidden terminal
+prompt - in that order. **A key is never accepted as a command-line argument**:
+`kolm code keys set openrouter sk-...` exits with a usage error, because
+arguments land in shell history, in `ps` output and in CI logs. On success the
+command prints the name, the fingerprint and the file, and nothing else:
+
+```
+set openrouter (fingerprint sha256:d9cd1f5fbd1c) at /home/you/.kolm/code/keys.json
+```
+
+The fingerprint is the first 12 hex characters of the SHA-256 of the value. It
+is enough to tell two keys apart or to confirm that a rotation landed, and it
+is not enough to reconstruct the key.
+
+The other subcommands:
+
+| Command | What it does |
+|---------|--------------|
+| `kolm code keys list` | one row per name: source, fingerprint, when it was set |
+| `kolm code keys list --json` | the same as JSON, for scripts |
+| `kolm code keys unset <name>` | removes one entry (removing an absent one is fine) |
+| `kolm code keys path` | prints the keystore path and nothing else |
+| `kolm code keys test [name]` | one live authenticated request per key that is set |
+
+### Where the file lives
+
+```
+<KOLM_DATA_DIR or ~/.kolm>/code/keys.json
+```
+
+| Variable | Effect |
+|----------|--------|
+| `KOLM_CODE_KEYS_PATH` | use this file instead (`~` expands); handy for a test or a second profile |
+| `KOLM_CODE_NO_KEYSTORE=1` | never read the file at all - CI and the Truffle worker set it |
+
+The file is JSON, written whole through a temp file and a rename so a reader
+never sees a half-written keystore:
+
+```json
+{
+  "version": 1,
+  "keys": {
+    "openrouter": {
+      "value": "...",
+      "set_at": "2026-09-09T04:06:24.271Z",
+      "fingerprint": "sha256:d9cd1f5fbd1c"
+    }
+  }
+}
+```
+
+It is created with mode `0600` - owner read/write only - so another account on
+a shared POSIX box cannot read it. **On Windows the mode is ignored**: NTFS
+uses ACLs, and Node's `chmod` is a no-op there. What protects the file on
+Windows is the ACL of your user profile directory, which is where it sits by
+default. If that is not enough for your threat model, keep the key in an
+environment variable your session manager supplies, or point
+`KOLM_CODE_KEYS_PATH` at a location you have locked down yourself. `kolm code`
+does not shell out to `icacls` on your behalf.
+
+A keystore that is corrupt, or that is not a JSON object, is reported by path
+with an instruction to fix or delete it - never as a raw parse error. A missing
+file is not an error at all: it reads as an empty keystore.
+
+### Checking a key
+
+`kolm code keys test` makes one cheap authenticated request per key that is
+actually set - `GET /v1/models` for Anthropic, `GET <base>/models` for
+Cerebras, DeepSeek and OpenRouter, `GET /user` for GitHub, `GET /health` for
+the sandbox - with a 10-second timeout each:
+
+```
+NAME        SOURCE    RESULT    DETAIL
+----------  --------  --------  --------
+anthropic   env       ok        ok
+openrouter  keystore  bad-key   rejected with HTTP 401
+```
+
+`ok` means the key was accepted, `bad-key` means the provider rejected it (401
+or 403), and `error <status>` means something else went wrong - a timeout, a
+network failure, a provider outage - which is not a verdict on the key. The
+command exits non-zero when any tested key came back `bad-key`. This is the one
+verb here that reaches the network; every other `keys` subcommand is local.
+
+### What never happens to a key
+
+A key value is never printed, and never leaves the process except as an
+`Authorization` (or `x-api-key`) header to the provider it belongs to. It does
+not appear in a run receipt, in the SQLite store, in `doctor` output, in
+`keys list`, in the viewer or in any log line. Both `loadConfig` and
+`readKeystore` hold their values in a non-enumerable property, so
+`JSON.stringify(config)` and `JSON.stringify(readKeystore(env))` are safe to
+paste into an issue. What is reported anywhere is a name, a source (`env` or
+`keystore`) and, at most, a fingerprint.
+
+---
+
+## 4. Environment variables
 
 The ARMS column says what the variable turns on. Nothing here is read at
 import time; `loadConfig(env)` reads it once per process and freezes the result,
 and secrets are held non-enumerably so they cannot be logged by accident.
 
+The six credentials marked (+) below can also come from the keystore instead of
+the environment (section 3); the variable wins when both are set.
+
 ### Models
 
 | Variable | Default | ARMS |
 |----------|---------|------|
-| `ANTHROPIC_API_KEY` | - | every `anthropic:*` ref (orchestrator, judge, top coder rung) |
-| `CEREBRAS_API_KEY` (or `KOLM_CEREBRAS_TOKEN`) | - | every `cerebras:*` ref |
-| `DEEPSEEK_API_KEY` | - | every `deepseek:*` ref |
-| `OPENROUTER_API_KEY` | - | every `openrouter:*` ref |
+| `ANTHROPIC_API_KEY` (+) | - | every `anthropic:*` ref (orchestrator, judge, top coder rung) |
+| `CEREBRAS_API_KEY` (or `KOLM_CEREBRAS_TOKEN`) (+) | - | every `cerebras:*` ref |
+| `DEEPSEEK_API_KEY` (+) | - | every `deepseek:*` ref |
+| `OPENROUTER_API_KEY` (+) | - | every `openrouter:*` ref |
 | `KOLM_CODE_OLLAMA_URL` | `http://127.0.0.1:11434/v1` | every `ollama:*` ref, if `GET /api/tags` answers |
 | `KOLM_CEREBRAS_URL` | Cerebras public API | a self-hosted or proxied Cerebras endpoint |
 | `KOLM_CODE_DEEPSEEK_URL` | DeepSeek public API | a proxied DeepSeek endpoint |
@@ -101,7 +232,7 @@ and secrets are held non-enumerably so they cannot be logged by accident.
 | `KOLM_CODE_JUDGE` | same as the orchestrator | the L4 judge |
 | `KOLM_CODE_CODER_LADDER` | `cerebras:qwen-3.8-27b,deepseek:deepseek-v4-flash,anthropic:claude-opus-5` | generation, cheapest rung first; unarmed refs are dropped with a reason |
 | `KOLM_CODE_REVIEWER_LADDER` | `ollama:qwen3.8:latest,cerebras:gpt-oss-120b,deepseek:deepseek-v4-flash` | L3; the first armed ref is used, and L3 returns `skip` if none is |
-| `KOLM_CODE_MODE` | `cascade` | `cascade` or `direct` (see section 9) |
+| `KOLM_CODE_MODE` | `cascade` | `cascade` or `direct` (see section 10) |
 
 ### Budgets and shape
 
@@ -123,15 +254,17 @@ and secrets are held non-enumerably so they cannot be logged by accident.
 | `KOLM_DATA_DIR` | `~/.kolm` | the data root; the store lands at `<root>/code/ladder.db` |
 | `KOLM_CODE_HOME` | `<KOLM_DATA_DIR>/code` | overrides just the kolm code directory |
 | `KOLM_CODE_DB_PATH` | `<code home>/ladder.db` | an explicit store path |
+| `KOLM_CODE_KEYS_PATH` | `<code home>/keys.json` | an explicit keystore path (section 3) |
+| `KOLM_CODE_NO_KEYSTORE` | unset | `1` makes every verb ignore the keystore file |
 | `KOLM_CODE_DRIVER` | `local` | `local` (git worktrees), `cloudflare` (sandbox), `fake` (tests) |
 | `KOLM_CODE_SANDBOX_URL` | - | the Cloudflare sandbox worker; required by the `cloudflare` driver |
-| `KOLM_CODE_SANDBOX_TOKEN` | - | bearer token for that worker |
+| `KOLM_CODE_SANDBOX_TOKEN` (+) | - | bearer token for that worker |
 
 ### GitHub pull requests
 
 | Variable | Default | ARMS |
 |----------|---------|------|
-| `KOLM_GITHUB_TOKEN` | - | `--pr`, highest precedence |
+| `KOLM_GITHUB_TOKEN` (+) | - | `--pr`, highest precedence |
 | `GITHUB_TOKEN` | - | `--pr`, fallback |
 | `KOLM_GITHUB_APP_ID` + `KOLM_GITHUB_APP_INSTALLATION_ID` | - | `--pr` via a GitHub App installation token |
 | `KOLM_GITHUB_APP_PRIVATE_KEY` or `KOLM_GITHUB_APP_PRIVATE_KEY_PATH` | `~/.truffle/truffle-pr-authority.private-key.pem` if present | the App's signing key |
@@ -156,7 +289,7 @@ and secrets are held non-enumerably so they cannot be logged by accident.
 
 ---
 
-## 4. Verbs
+## 5. Verbs
 
 ### `run`
 
@@ -275,6 +408,21 @@ kolm code receipt verify ./receipts/r_20260908_bdc3b49a.json
 Exit 0 if the signature verifies, 2 if it does not, 5 if the receipt is not
 there.
 
+### `keys`
+
+```
+kolm code keys set <name>      # value on stdin, --from-env, --from-file, or a hidden prompt
+kolm code keys list [--json]
+kolm code keys unset <name>
+kolm code keys path
+kolm code keys test [name] [--json]
+```
+
+The bring-your-own-key store: section 3 covers the file, the precedence and
+the Windows permission caveat in full. `set`, `list`, `unset` and `path` are
+local; `test` is the one subcommand that reaches the network, and it exits
+non-zero when a key it tested came back `bad-key`.
+
 ### `doctor`
 
 ```
@@ -285,7 +433,8 @@ kolm code doctor --live
 
 An ASCII table with one row per orchestrator, judge, coder rung, reviewer rung,
 plus the driver, GitHub, Truffle, SQLite and git. Every row is ARMED or
-NOT ARMED with the reason. **Reasons name variables, never values.**
+NOT ARMED with the reason. The KEY column says where a provider secret came
+from - `env`, `keystore` or blank. **Reasons name variables, never values.**
 
 `--live` is opt-in and makes real network calls: an Ollama reachability probe,
 `gh auth token`, a one-token `ping` completion against every armed provider
@@ -303,7 +452,7 @@ kolm code serve
 kolm code serve --port 8080 --host 127.0.0.1 --open
 ```
 
-Starts the read-only viewer (section 11) and prints its URL. It binds
+Starts the read-only viewer (section 12) and prints its URL. It binds
 `127.0.0.1` and refuses `0.0.0.0` unless `KOLM_CODE_VIEWER_PUBLIC=1` is set,
 because the viewer exposes diffs and stage output with no authentication.
 
@@ -325,7 +474,7 @@ verb prints the same text and exits 64.
 
 ---
 
-## 5. Exit codes
+## 6. Exit codes
 
 | Code | Meaning |
 |------|---------|
@@ -342,7 +491,7 @@ A `LadderError` never reaches you as a stack trace. It prints as
 
 ---
 
-## 6. Arming matrix
+## 7. Arming matrix
 
 You can run the whole cascade with no paid API at all; you trade judgement
 quality for it.
@@ -363,7 +512,7 @@ so `ollama:qwen3.8:latest` is provider `ollama`, model `qwen3.8:latest`.
 
 ---
 
-## 7. Worktree drivers
+## 8. Worktree drivers
 
 `local` (default) uses real `git worktree` checkouts under
 `<code home>/worktrees/<runId>/<candidateId>`. It is the right choice when the
@@ -379,7 +528,7 @@ then set `KOLM_CODE_SANDBOX_URL` and `KOLM_CODE_SANDBOX_TOKEN`.
 
 ---
 
-## 8. Receipts
+## 9. Receipts
 
 Every run writes a signed evidence receipt to
 `<code home>/receipts/<runId>.json`. It records the task, the arming report as
@@ -400,7 +549,7 @@ id that signed it. It does not re-run the cascade.
 
 ---
 
-## 9. Cascade versus direct, and calibration
+## 10. Cascade versus direct, and calibration
 
 `--mode direct` skips L3 and sends every candidate to the judge. It is the
 control arm: the point of the cascade is only made by measuring it against the
@@ -433,7 +582,7 @@ exclusive.
 
 ---
 
-## 10. Cost controls
+## 11. Cost controls
 
 * `--max-cost <usd>` / `KOLM_CODE_MAX_COST_USD` stops the run at a hard ceiling.
 * `--candidates <n>` is the biggest single lever: cost is roughly linear in it.
@@ -447,7 +596,7 @@ exclusive.
 
 ---
 
-## 11. The viewer
+## 12. The viewer
 
 ```
 kolm code serve --open
@@ -470,7 +619,7 @@ Bind address is `127.0.0.1`. `--host 0.0.0.0` is refused unless
 
 ---
 
-## 12. Resumability
+## 13. Resumability
 
 A run is a row in SQLite from the moment it starts, and every candidate,
 stage decision, cost line and event is written as it happens rather than at the
@@ -485,7 +634,7 @@ end. So:
 
 ---
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 **`sqlite-unavailable` / exit 3 from every store verb.** `node:sqlite` needs
 Node 22.5 or newer. Check with `node -v`. There is no fallback driver; upgrade
@@ -506,10 +655,18 @@ root such as `C:\k`.
 Docker daemon. Without Docker, use `--driver local`.
 
 **`--pr` says not armed.** Token order is `KOLM_GITHUB_TOKEN`, then
-`GITHUB_TOKEN`, then a GitHub App installation token, then `gh auth token`.
+`GITHUB_TOKEN`, then the keystore (`kolm code keys set github`), then a GitHub
+App installation token, then `gh auth token`.
 `doctor` prints which of those is present. Note that the Truffle GitHub App is
 a settlement identity, not a pull request author; arm the kolm App or a token
 for `--pr`.
+
+**A key I stored is not being used.** `kolm code keys list` says which
+source wins. `env+keystore(env wins)` means a variable in this shell is
+shadowing the stored key; unset it, or accept it. `(disabled by
+KOLM_CODE_NO_KEYSTORE)` means the whole file is being ignored on purpose.
+A stored key that reaches the provider but is rejected shows as `bad-key` in
+`kolm code keys test`.
 
 **A run ends FAIL immediately with no candidate diff.** The coder produced no
 change, so L0 called it bad. Check the plan line in the event stream and make
@@ -517,7 +674,7 @@ the task text more specific about which file to touch.
 
 ---
 
-## 14. Caveats
+## 15. Caveats
 
 What is proven locally, on this machine, with no network:
 
@@ -547,7 +704,7 @@ What the cascade does **not** claim:
 * The L3 and L4 rungs are model opinions. They are recorded with their reasoning
   so you can disagree with them, which is the point of the receipt.
 
-## 15. Limitations
+## 16. Limitations
 
 * Single repository per run. Cross-repository changes are not modelled.
 * The coder works through a fixed tool set (read, write, list, run) inside its

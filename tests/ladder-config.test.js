@@ -17,6 +17,7 @@ import {
   DEFAULT_REVIEWER_LADDER,
   DEFAULT_OLLAMA_URL,
   DEFAULT_TRUFFLE_KEY_FILE,
+  FILE_SECRET_NAMES,
   PROVIDER_KEY_ENV,
   parseRef,
   expandHome,
@@ -390,6 +391,220 @@ test('no secret value ever appears in JSON.stringify(config)', () => {
   assert.throws(
     () => c.getSecret('nope'),
     (e) => isLadderError(e, 'bad-config'),
+  );
+});
+
+// --- file secrets (the keystore overlay) -----------------------------------
+//
+// loadConfig stays pure: the CLI reads <codeDir>/keys.json and hands the values
+// in as opts.fileSecrets. These tests cover the overlay only.
+
+/** Synthetic, assembled at runtime: never a fixture that looks like a real key. */
+function fake(prefix, tag) {
+  return `${prefix}${tag}${'x'.repeat(16)}`;
+}
+
+test('FILE_SECRET_NAMES is the closed set a keystore may carry', () => {
+  assert.deepEqual([...FILE_SECRET_NAMES], [
+    'anthropic',
+    'cerebras',
+    'deepseek',
+    'openrouter',
+    'github',
+    'sandbox',
+  ]);
+  assert.equal(Object.isFrozen(FILE_SECRET_NAMES), true);
+});
+
+test('a file secret arms a provider exactly like its environment variable', () => {
+  const values = {
+    anthropic: fake('sk-ant-', 'file'),
+    cerebras: fake('csk-', 'file'),
+    deepseek: fake('sk-ds-', 'file'),
+    openrouter: fake('sk-or-', 'file'),
+    github: fake('ghp_', 'file'),
+    sandbox: fake('sbx-', 'file'),
+  };
+  const c = loadConfig(env(), { fileSecrets: values });
+
+  assert.deepEqual(c.hasKey, {
+    anthropic: true,
+    cerebras: true,
+    deepseek: true,
+    openrouter: true,
+  });
+  for (const name of ['anthropic', 'cerebras', 'deepseek', 'openrouter']) {
+    assert.equal(c.getSecret(name), values[name], `${name} secret is readable`);
+  }
+  assert.equal(c.getSecret('githubToken'), values.github);
+  assert.equal(c.github.token, true);
+  assert.equal(c.github.tokenSource, 'keystore');
+  assert.equal(c.hasSandboxToken, true);
+  assert.equal(c.sandboxToken, values.sandbox);
+  assert.equal(c.sandboxTokenSource, 'keystore');
+});
+
+test('the environment wins over a file secret, for every name', () => {
+  const fromEnv = {
+    ANTHROPIC_API_KEY: fake('sk-ant-', 'env'),
+    CEREBRAS_API_KEY: fake('csk-', 'env'),
+    DEEPSEEK_API_KEY: fake('sk-ds-', 'env'),
+    OPENROUTER_API_KEY: fake('sk-or-', 'env'),
+    KOLM_GITHUB_TOKEN: fake('ghp_', 'env'),
+    KOLM_CODE_SANDBOX_TOKEN: fake('sbx-', 'env'),
+  };
+  const fileSecrets = {
+    anthropic: fake('sk-ant-', 'file'),
+    cerebras: fake('csk-', 'file'),
+    deepseek: fake('sk-ds-', 'file'),
+    openrouter: fake('sk-or-', 'file'),
+    github: fake('ghp_', 'file'),
+    sandbox: fake('sbx-', 'file'),
+  };
+  const c = loadConfig(env(fromEnv), { fileSecrets });
+
+  assert.equal(c.getSecret('anthropic'), fromEnv.ANTHROPIC_API_KEY);
+  assert.equal(c.getSecret('cerebras'), fromEnv.CEREBRAS_API_KEY);
+  assert.equal(c.getSecret('deepseek'), fromEnv.DEEPSEEK_API_KEY);
+  assert.equal(c.getSecret('openrouter'), fromEnv.OPENROUTER_API_KEY);
+  assert.equal(c.getSecret('githubToken'), fromEnv.KOLM_GITHUB_TOKEN);
+  assert.equal(c.sandboxToken, fromEnv.KOLM_CODE_SANDBOX_TOKEN);
+  assert.equal(c.github.tokenSource, 'KOLM_GITHUB_TOKEN');
+  assert.equal(c.sandboxTokenSource, 'KOLM_CODE_SANDBOX_TOKEN');
+  assert.deepEqual(c.keySource, {
+    anthropic: 'env',
+    cerebras: 'env',
+    deepseek: 'env',
+    openrouter: 'env',
+    github: 'env',
+    sandbox: 'env',
+  });
+
+  // The alias variable counts as the environment too.
+  const alias = loadConfig(env({ KOLM_CEREBRAS_TOKEN: fromEnv.CEREBRAS_API_KEY }), { fileSecrets });
+  assert.equal(alias.getSecret('cerebras'), fromEnv.CEREBRAS_API_KEY);
+  assert.equal(alias.keySource.cerebras, 'env');
+});
+
+test('keySource reports env, keystore or null per name', () => {
+  const bare = loadConfig(env());
+  assert.deepEqual(bare.keySource, {
+    anthropic: null,
+    cerebras: null,
+    deepseek: null,
+    openrouter: null,
+    github: null,
+    sandbox: null,
+  });
+
+  const mixed = loadConfig(env({ ANTHROPIC_API_KEY: fake('sk-ant-', 'env') }), {
+    fileSecrets: { anthropic: fake('sk-ant-', 'file'), openrouter: fake('sk-or-', 'file') },
+  });
+  assert.equal(mixed.keySource.anthropic, 'env');
+  assert.equal(mixed.keySource.openrouter, 'keystore');
+  assert.equal(mixed.keySource.deepseek, null);
+  assert.equal(mixed.hasKey.openrouter, true);
+});
+
+test('a blank or absent file secret is the same as no file secret', () => {
+  const c = loadConfig(env(), {
+    fileSecrets: {
+      anthropic: '   ',
+      cerebras: '',
+      deepseek: null,
+      openrouter: undefined,
+      github: '\n',
+      sandbox: '  ',
+    },
+  });
+  assert.equal(c.hasKey.anthropic, false);
+  assert.equal(c.hasKey.cerebras, false);
+  assert.equal(c.github.token, false);
+  assert.equal(c.hasSandboxToken, false);
+  assert.equal(c.keySource.anthropic, null);
+
+  // A name outside the closed set is ignored rather than fatal.
+  const stray = loadConfig(env(), { fileSecrets: { openai: fake('sk-', 'stray') } });
+  assert.deepEqual(stray.hasKey, {
+    anthropic: false,
+    cerebras: false,
+    deepseek: false,
+    openrouter: false,
+  });
+});
+
+test('file secrets are trimmed and BOM-stripped like environment values', () => {
+  const value = fake('sk-or-', 'trim');
+  const c = loadConfig(env(), { fileSecrets: { openrouter: `\uFEFF  ${value}  ` } });
+  assert.equal(c.getSecret('openrouter'), value);
+});
+
+test('loadConfig rejects opts, or opts.fileSecrets, that is not an object', () => {
+  for (const bad of ['nope', 42, true]) {
+    assert.throws(
+      () => loadConfig(env(), bad),
+      (e) => isLadderError(e, 'bad-config'),
+      `expected bad-config for opts ${JSON.stringify(bad)}`,
+    );
+    assert.throws(
+      () => loadConfig(env(), { fileSecrets: bad }),
+      (e) => isLadderError(e, 'bad-config'),
+      `expected bad-config for fileSecrets ${JSON.stringify(bad)}`,
+    );
+  }
+  // Omitted, empty and null are all fine.
+  assert.equal(loadConfig(env()).hasKey.anthropic, false);
+  assert.equal(loadConfig(env(), {}).hasKey.anthropic, false);
+  assert.equal(loadConfig(env(), { fileSecrets: null }).hasKey.anthropic, false);
+});
+
+test('no file secret value ever appears in JSON.stringify(config)', () => {
+  const fileSecrets = {
+    anthropic: fake('sk-ant-', 'leakA'),
+    cerebras: fake('csk-', 'leakB'),
+    deepseek: fake('sk-ds-', 'leakC'),
+    openrouter: fake('sk-or-', 'leakD'),
+    github: fake('ghp_', 'leakE'),
+    sandbox: fake('sbx-', 'leakF'),
+  };
+  const c = loadConfig(env(), { fileSecrets });
+  const dump = JSON.stringify(c);
+  for (const [name, value] of Object.entries(fileSecrets)) {
+    assert.equal(dump.includes(value), false, `config leaked the ${name} file secret`);
+  }
+  assert.equal(dump.includes('secrets'), false, 'config exposed a secrets key');
+  assert.equal(Object.keys(c).includes('secrets'), false);
+
+  // withOllamaReachable must not spill them either.
+  const next = withOllamaReachable(c, true);
+  const nextDump = JSON.stringify(next);
+  for (const value of Object.values(fileSecrets)) {
+    assert.equal(nextDump.includes(value), false, 'withOllamaReachable leaked a file secret');
+  }
+  assert.equal(next.getSecret('anthropic'), fileSecrets.anthropic);
+  assert.equal(next.sandboxToken, fileSecrets.sandbox);
+});
+
+test('arming says where a key came from, and how to set a missing one', () => {
+  const fromFile = loadConfig(env(), {
+    fileSecrets: { anthropic: fake('sk-ant-', 'arm'), cerebras: fake('csk-', 'arm') },
+  });
+  const armed = armingReport(fromFile);
+  assert.equal(rung(armed, 'orchestrator').armed, true);
+  assert.equal(rung(armed, 'orchestrator').reason, 'ANTHROPIC_API_KEY set (keystore)');
+  assert.equal(
+    rung(armed, 'coder0').reason,
+    'CEREBRAS_API_KEY (or KOLM_CEREBRAS_TOKEN) set (keystore)',
+  );
+
+  const fromEnv = loadConfig(env({ ANTHROPIC_API_KEY: fake('sk-ant-', 'arm') }));
+  assert.equal(rung(armingReport(fromEnv), 'orchestrator').reason, 'ANTHROPIC_API_KEY set');
+
+  const missing = rung(armingReport(loadConfig(env())), 'orchestrator');
+  assert.equal(missing.armed, false);
+  assert.equal(
+    missing.reason,
+    'ANTHROPIC_API_KEY missing (set it, or: kolm code keys set anthropic)',
   );
 });
 

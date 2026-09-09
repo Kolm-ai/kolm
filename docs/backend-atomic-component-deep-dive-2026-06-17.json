@@ -39,8 +39,8 @@
     "frontier_improvement_or_invention"
   ],
   "summary": {
-    "component_count": 1023,
-    "test_referenced_components": 1023,
+    "component_count": 1024,
+    "test_referenced_components": 1024,
     "components_without_direct_test_reference": 0,
     "high_priority_components": 70,
     "domains": {
@@ -49,7 +49,7 @@
       "capture_data_eval": 86,
       "compile_artifact_runtime": 152,
       "developer_distribution": 71,
-      "identity_access": 34,
+      "identity_access": 35,
       "infra_cloud_device": 72,
       "platform_support": 252,
       "runtime_serving_routing": 28,
@@ -60,23 +60,23 @@
     "surfaces": {
       "api-http": 31,
       "cli": 4,
-      "core-backend": 681,
+      "core-backend": 682,
       "package-distribution": 93,
       "service": 3,
       "worker": 211
     },
     "risk_signals": {
       "auth_or_tenant_boundary": 25,
-      "cryptographic_or_proof_boundary": 494,
+      "cryptographic_or_proof_boundary": 495,
       "distribution_or_worker_surface": 308,
-      "environment_configuration_boundary": 385,
+      "environment_configuration_boundary": 386,
       "execution_or_subprocess_boundary": 335,
       "http_route_surface": 41,
       "large_component_contract_risk": 48,
       "money_or_entitlement_path": 17,
-      "network_or_provider_boundary": 190,
+      "network_or_provider_boundary": 191,
       "open_marker_requires_owner_review": 4,
-      "stateful_storage_boundary": 134
+      "stateful_storage_boundary": 135
     },
     "top_review_targets": [
       {
@@ -7840,8 +7840,8 @@
         "tests/finalized-c3-real-dsir-hashed-ngram-importance-resampling.test.js",
         "tests/ladder-config.test.js",
         "tests/ladder-e2e.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-providers.test.js"
+        "tests/ladder-keystore.test.js",
+        "tests/ladder-orchestrator.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -9556,18 +9556,18 @@
       "surface": "cli",
       "domain": "developer_distribution",
       "language": "javascript",
-      "sha256": "cdeb8a637f34e73d77e3440ff5c6fe174163aefe2e919ea234af085c1564f51f",
+      "sha256": "8b83f121ebcb3867b427eadca63a9e86b6f4b140e64512747a9372ce8bf1e3a2",
       "metrics": {
-        "bytes": 48122,
-        "lines": 1369,
-        "imports": 12,
+        "bytes": 57710,
+        "lines": 1638,
+        "imports": 14,
         "exports": 5,
         "routes": 0,
-        "env_refs": 3,
+        "env_refs": 4,
         "fs_writes": 1,
         "subprocess_refs": 6,
         "network_refs": 0,
-        "crypto_refs": 1,
+        "crypto_refs": 2,
         "markers": 0
       },
       "test_refs": [
@@ -22454,6 +22454,7 @@
       "test_refs": [
         "tests/ladder-cli.test.js",
         "tests/ladder-config.test.js",
+        "tests/ladder-keystore.test.js",
         "tests/ladder-providers.test.js",
         "tests/wave697-cerebras-adapter-contract.test.js",
         "tests/wave888b-cloud-providers.test.js",
@@ -23858,6 +23859,7 @@
       "test_refs": [
         "tests/ladder-cli.test.js",
         "tests/ladder-config.test.js",
+        "tests/ladder-keystore.test.js",
         "tests/ladder-providers.test.js",
         "tests/wave697-cerebras-adapter-contract.test.js",
         "tests/wave888b-cloud-providers.test.js",
@@ -36266,11 +36268,11 @@
         "tests/wave409bb-test-hardening.test.js",
         "tests/wave918-openrouter-importer.test.js",
         "tests/agent-audit-ingest.test.js",
+        "tests/ladder-cli.test.js",
         "tests/ladder-config.test.js",
+        "tests/ladder-keystore.test.js",
         "tests/ladder-providers.test.js",
-        "tests/model-provenance-analyzer.test.js",
-        "tests/subprocessor-inventory.test.js",
-        "tests/wave242-enterprise-proxy.test.js"
+        "tests/model-provenance-analyzer.test.js"
       ],
       "risk_signals": [],
       "priority_score": 0,
@@ -38915,12 +38917,12 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "e8eb1db77597f9f4a839f4e1031b64b5bc0de087949eeb3392d11b0e360ef668",
+      "sha256": "f2ba5a6efba9240aded126960de8efd9370024bd66c7d9a915206864f7d888c5",
       "metrics": {
-        "bytes": 24286,
-        "lines": 673,
+        "bytes": 28077,
+        "lines": 760,
         "imports": 5,
-        "exports": 15,
+        "exports": 16,
         "routes": 0,
         "env_refs": 1,
         "fs_writes": 0,
@@ -39256,13 +39258,13 @@
       },
       "test_refs": [
         "tests/ladder-config.test.js",
+        "tests/ladder-keystore.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-providers.test.js",
         "tests/ladder-stages.test.js",
         "tests/agent-audit-ingest.test.js",
         "tests/agent-audit-pipeline.test.js",
-        "tests/agent-evidence-tier.test.js",
-        "tests/artifact-end-to-end.test.js"
+        "tests/agent-evidence-tier.test.js"
       ],
       "risk_signals": [],
       "priority_score": 0,
@@ -39489,10 +39491,10 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "e2950e208d09a07259342887d13a69ac6c0565158cdf018955f7205cfd1fdf1b",
+      "sha256": "31f6ad4734f00911f6d33331b2b3b8c3d892c363f745d61cc02bc81980f6e389",
       "metrics": {
-        "bytes": 3389,
-        "lines": 99,
+        "bytes": 3707,
+        "lines": 116,
         "imports": 0,
         "exports": 1,
         "routes": 0,
@@ -39541,6 +39543,69 @@
         "npm run verify:intent-contract-matrix",
         "npm run verify:otel-matrix",
         "npm run verify:codegraph"
+      ]
+    },
+    {
+      "path": "src/ladder/keystore.js",
+      "id": "src-ladder-keystore-js",
+      "surface": "core-backend",
+      "domain": "identity_access",
+      "language": "javascript",
+      "sha256": "03044932bd45a6c8f37f734d0b2f075d787244d8a21326ae471bef098707023d",
+      "metrics": {
+        "bytes": 15997,
+        "lines": 435,
+        "imports": 6,
+        "exports": 13,
+        "routes": 0,
+        "env_refs": 4,
+        "fs_writes": 2,
+        "subprocess_refs": 0,
+        "network_refs": 2,
+        "crypto_refs": 9,
+        "markers": 0
+      },
+      "test_refs": [
+        "tests/ladder-keystore.test.js",
+        "tests/ladder-cli.test.js",
+        "tests/ladder-config.test.js"
+      ],
+      "risk_signals": [
+        "cryptographic_or_proof_boundary",
+        "environment_configuration_boundary",
+        "network_or_provider_boundary",
+        "stateful_storage_boundary"
+      ],
+      "priority_score": 6,
+      "deep_dive": {
+        "status": "atomic_deep_dive_complete",
+        "reviewed_at": "2026-06-17",
+        "lenses": [
+          "source_to_route_import_wiring",
+          "security_privacy_failure_abuse",
+          "state_storage_idempotency",
+          "claim_scope_evidence_and_tests",
+          "frontier_improvement_or_invention"
+        ],
+        "evidence_basis": [
+          "live_file_tree",
+          "static_import_export_route_scan",
+          "test_reference_scan",
+          "risk_signal_scan",
+          "existing_backend_frontier_and_readiness_docs"
+        ],
+        "exit_criteria": [
+          "component_is_named_in_atomic_ledger",
+          "risk_signals_are_explicit",
+          "improvement_track_is_assigned",
+          "claim_scope_stays_local_until_external_evidence_exists"
+        ]
+      },
+      "improvement_track": "extend_generated_auth_boundary_matrix_rbac_sso_and_key_lifecycle_tests",
+      "innovation_opportunity": "Keep the generated auth boundary matrix as the RBAC, SSO, SCIM, key-rotation, and tenant-isolation contract, then make access decisions replayable as policy data.",
+      "suggested_verification": [
+        "npm run verify:auth-boundary-matrix",
+        "node --test --test-concurrency=1 tests/*auth*.test.js tests/*rbac*.test.js tests/*org*.test.js"
       ]
     },
     {
@@ -52733,9 +52798,9 @@
         "tests/artifact-end-to-end.test.js",
         "tests/finalized-c1-recipe-synthesis-engine.test.js",
         "tests/finalized-c2-real-escape-probe-test-suite.test.js",
+        "tests/ladder-cli.test.js",
         "tests/ladder-config.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-truffle.test.js"
+        "tests/ladder-keystore.test.js"
       ],
       "risk_signals": [
         "execution_or_subprocess_boundary",
@@ -57096,6 +57161,7 @@
       "test_refs": [
         "tests/ladder-cli.test.js",
         "tests/ladder-config.test.js",
+        "tests/ladder-keystore.test.js",
         "tests/ladder-providers.test.js",
         "tests/wave697-cerebras-adapter-contract.test.js",
         "tests/wave888b-cloud-providers.test.js",

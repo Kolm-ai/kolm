@@ -58,6 +58,7 @@ const VERBS = Object.freeze([
   'eval',
   'bands',
   'receipt',
+  'keys',
   'doctor',
   'serve',
   'truffle-worker',
@@ -82,6 +83,7 @@ const BOOLEAN_FLAGS = new Set([
   'suggest',
   'apply',
   'yes',
+  'stdin',
   'help',
   'version',
 ]);
@@ -271,8 +273,22 @@ export function envOverlay(flags = {}, base = process.env) {
   return env;
 }
 
+/**
+ * Secrets an operator stored with `kolm code keys set`, ready to hand to
+ * `loadConfig` as `opts.fileSecrets`. `KOLM_CODE_NO_KEYSTORE=1` makes this an
+ * empty object, so CI and the Truffle worker stay env-only. A corrupt keystore
+ * raises a LadderError naming the file rather than silently arming nothing.
+ * @param {Record<string, string|undefined>} env
+ * @returns {Record<string, string>}
+ */
+function fileSecretsFrom(env) {
+  const store = api('readKeystore')(env);
+  return store.enabled ? store.secrets : {};
+}
+
 function configFrom(flags) {
-  return api('loadConfig')(envOverlay(flags));
+  const env = envOverlay(flags);
+  return api('loadConfig')(env, { fileSecrets: fileSecretsFrom(env) });
 }
 
 /**
@@ -313,6 +329,8 @@ verbs:
   eval                    cascade vs direct comparison over stored runs
   bands                   print, suggest or apply the confidence bands
   receipt verify|show     verify or print a signed evidence receipt
+  keys set|list|unset|path|test
+                          store your own provider keys once, in <data>/code/keys.json
   doctor                  arming table for every model rung, the driver and the store
   serve                   run the local viewer
   truffle-worker          claim and settle Truffle partner tasks
@@ -335,6 +353,16 @@ run options:
   --pr-base <branch>      base branch for that pull request (default: main)
   --json                  print the run summary as JSON
   --quiet                 do not stream stage events to stderr
+
+keys options:
+  names                   anthropic cerebras deepseek openrouter github sandbox
+  --from-env <VAR>        keys set: take the value from that variable, unprinted
+  --from-file <path>      keys set: take the first line of that file
+  --stdin                 keys set: read the value from stdin (the default when
+                          stdin is a pipe; a TTY gets a hidden prompt instead)
+  --json                  keys list / keys test: machine readable output
+  environment             KOLM_CODE_KEYS_PATH moves the file,
+                          KOLM_CODE_NO_KEYSTORE=1 makes every verb env-only
 
 other options:
   --since <iso>           funnel/eval window
@@ -957,6 +985,216 @@ async function cmdReceipt(parsed) {
 }
 
 // ---------------------------------------------------------------------------
+// keys - the bring-your-own-key keystore
+//
+// The value never travels as a command-line argument (shell history, `ps`, CI
+// logs), is never echoed back and never appears in a table. Only the SHA-256
+// fingerprint prefix is ever printed.
+// ---------------------------------------------------------------------------
+
+const KEYS_SUBVERBS = Object.freeze(['set', 'list', 'unset', 'path', 'test']);
+
+/** Read all of stdin. Used when the value is piped in. */
+async function readStdin() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+/**
+ * Ask for a value on a terminal without echoing it: the prompt goes to stdout
+ * directly and readline writes its echo into a sink that discards everything.
+ * @param {string} label
+ * @returns {Promise<string>}
+ */
+async function promptHiddenValue(label) {
+  const readline = await import('node:readline');
+  const { Writable } = await import('node:stream');
+  const sink = new Writable({
+    write(_chunk, _encoding, done) {
+      done();
+    },
+  });
+  process.stdout.write(`${label}: `);
+  const rl = readline.createInterface({ input: process.stdin, output: sink, terminal: true });
+  try {
+    return await new Promise((resolve) => {
+      rl.question('', resolve);
+    });
+  } finally {
+    rl.close();
+    process.stdout.write('\n');
+  }
+}
+
+/** First line of a file, trimmed. Keys are one line by definition. */
+function firstLineOf(file) {
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    throw new LadderError('bad-args', `--from-file ${file} could not be read (${err.code ?? err.message})`, {
+      path: file,
+    });
+  }
+  return String(text).split(/\r?\n/, 1)[0].trim();
+}
+
+/**
+ * Where the value for `keys set` comes from, in the documented order.
+ * @param {string} name
+ * @param {Record<string, any>} flags
+ * @returns {Promise<string>}
+ */
+async function collectKeyValue(name, flags) {
+  if (typeof flags.fromEnv === 'string') {
+    const varName = flags.fromEnv;
+    const value = process.env[varName];
+    if (value === undefined || String(value).trim() === '') {
+      throw new LadderError('bad-args', `--from-env ${varName}: that variable is not set in this shell`, {
+        variable: varName,
+      });
+    }
+    return String(value);
+  }
+  if (typeof flags.fromFile === 'string') return firstLineOf(flags.fromFile);
+  if (flags.stdin === true || process.stdin.isTTY !== true) {
+    const piped = await readStdin();
+    return String(piped).split(/\r?\n/, 1)[0];
+  }
+  return await promptHiddenValue(`${name} key (not echoed)`);
+}
+
+async function cmdKeys(parsed) {
+  const flags = parsed.flags;
+  const sub = parsed.positional[1] ?? 'list';
+  if (!KEYS_SUBVERBS.includes(sub)) {
+    throw new LadderError('bad-args', `keys takes a subcommand: kolm code keys ${KEYS_SUBVERBS.join('|')}`, {
+      sub,
+    });
+  }
+  const env = envOverlay(flags);
+  const keyNames = ladder.KEY_NAMES ?? [];
+
+  if (sub === 'path') {
+    const store = api('readKeystore')(env);
+    out(store.path);
+    if (!store.enabled) note('note: KOLM_CODE_NO_KEYSTORE=1 is set, so no verb reads this file');
+    else if (!fs.existsSync(store.path)) note('note: no keystore file yet; kolm code keys set <name> creates it');
+    return EXIT.OK;
+  }
+
+  if (sub === 'set') {
+    const name = parsed.positional[2];
+    if (!name) {
+      throw new LadderError('bad-args', `keys set needs a name: kolm code keys set <${keyNames.join('|')}>`, {});
+    }
+    if (parsed.positional[3] !== undefined) {
+      note('kolm code: pass the key on stdin, --from-env or --from-file; never on the command line (shell history)');
+      return EXIT.USAGE;
+    }
+    api('assertKeyName')(name);
+    const value = await collectKeyValue(name, flags);
+    const result = api('setKey')(env, name, value);
+    out(`set ${result.name} (fingerprint ${result.fingerprint}) at ${result.path}`);
+    if (api('keystoreDisabled')(env)) {
+      note('note: KOLM_CODE_NO_KEYSTORE=1 is set, so this file is written but not read');
+    }
+    return EXIT.OK;
+  }
+
+  if (sub === 'unset') {
+    const name = parsed.positional[2];
+    if (!name) {
+      throw new LadderError('bad-args', `keys unset needs a name: kolm code keys unset <${keyNames.join('|')}>`, {});
+    }
+    const result = api('unsetKey')(env, name);
+    out(result.removed ? `unset ${result.name} at ${result.path}` : `${result.name} was not in ${result.path}`);
+    return EXIT.OK;
+  }
+
+  if (sub === 'list') {
+    const described = api('describeKeys')(env);
+    if (flags.json) {
+      jsonOut({
+        path: described.path,
+        enabled: described.enabled,
+        keys: described.rows.map(({ name, source, fingerprint: fp, set_at: setAt }) => ({
+          name,
+          source,
+          fingerprint: fp,
+          set_at: setAt,
+        })),
+      });
+      return EXIT.OK;
+    }
+    out(`keystore ${described.path}${described.enabled ? '' : '  (disabled by KOLM_CODE_NO_KEYSTORE)'}`);
+    out('');
+    out(
+      renderTable(
+        ['NAME', 'SOURCE', 'FINGERPRINT', 'SET AT'],
+        described.rows.map((row) => [row.name, row.source, row.fingerprint ?? '-', row.set_at ?? '-']),
+      ),
+    );
+    out('');
+    out('values are never printed; the fingerprint is the first 12 hex of sha256');
+    return EXIT.OK;
+  }
+
+  // keys test - one authenticated GET per key that is actually set.
+  const only = parsed.positional[2];
+  if (only) api('assertKeyName')(only);
+  const config = configFrom(flags);
+  const described = api('describeKeys')(env);
+  const rows = described.rows.filter((row) => row.source !== 'none' && (!only || row.name === only));
+  if (rows.length === 0) {
+    const scope = only ? `${only} is not set` : 'no keys are set';
+    if (flags.json) jsonOut({ ok: true, results: [], reason: scope });
+    else out(`${scope}; nothing to test`);
+    return EXIT.OK;
+  }
+
+  const secretFor = (name) => config.getSecret(name === 'github' ? 'githubToken' : name);
+  const results = [];
+  for (const row of rows) {
+    results.push({
+      source: row.source,
+      ...(await api('probeKey')({ name: row.name, secret: secretFor(row.name), config })),
+    });
+  }
+  const bad = results.filter((r) => r.status === 'bad-key');
+
+  if (flags.json) {
+    jsonOut({
+      ok: bad.length === 0,
+      results: results.map(({ name, source, status, httpStatus, detail }) => ({
+        name,
+        source,
+        status,
+        httpStatus,
+        detail,
+      })),
+    });
+    return bad.length === 0 ? EXIT.OK : EXIT.GATE_FAIL;
+  }
+
+  out(
+    renderTable(
+      ['NAME', 'SOURCE', 'RESULT', 'DETAIL'],
+      results.map((r) => [
+        r.name,
+        r.source,
+        r.status === 'error' ? `error ${r.httpStatus ?? r.detail}` : r.status,
+        truncate(r.detail, 50),
+      ]),
+    ),
+  );
+  out('');
+  out(bad.length === 0 ? 'no key was rejected' : `rejected: ${bad.map((r) => r.name).join(', ')}`);
+  return bad.length === 0 ? EXIT.OK : EXIT.GATE_FAIL;
+}
+
+// ---------------------------------------------------------------------------
 // doctor
 // ---------------------------------------------------------------------------
 
@@ -1006,6 +1244,7 @@ async function liveProbeDriver(config) {
 
 async function cmdDoctor(parsed) {
   const flags = parsed.flags;
+  const env = envOverlay(flags);
   const config = configFrom(flags);
   const live = flags.live === true;
 
@@ -1028,13 +1267,24 @@ async function cmdDoctor(parsed) {
   const sqliteOk = typeof ladder.sqliteAvailable === 'function' ? ladder.sqliteAvailable() : false;
   const git = gitAvailable();
 
-  const rows = arming.rungs.map((rung) => ({
-    id: rung.id,
-    kind: rung.kind,
-    ref: rung.ref,
-    armed: rung.armed,
-    reason: rung.reason,
-  }));
+  const providerKinds = ['orchestrator', 'judge', 'coder', 'reviewer'];
+  const rows = arming.rungs.map((rung) => {
+    const row = {
+      id: rung.id,
+      kind: rung.kind,
+      ref: rung.ref,
+      armed: rung.armed,
+      reason: rung.reason,
+    };
+    // Which of env / keystore supplied the key behind this rung (never the key).
+    if (providerKinds.includes(rung.kind) && typeof rung.ref === 'string') {
+      const provider = rung.ref.split(':', 1)[0];
+      row.keySource = effectiveConfig.keySource?.[provider] ?? null;
+    }
+    if (rung.id === 'github') row.keySource = effectiveConfig.keySource?.github ?? null;
+    if (rung.id === 'driver') row.keySource = effectiveConfig.keySource?.sandbox ?? null;
+    return row;
+  });
 
   const github = rows.find((r) => r.id === 'github');
   if (github) {
@@ -1042,9 +1292,10 @@ async function cmdDoctor(parsed) {
     // `sources` lists only credential sources actually present (gh cli is
     // reported separately as unknown), so an unarmed row names the variables.
     const real = githubDetail.sources ?? [];
+    const fromKeystore = effectiveConfig.github?.tokenSource === 'keystore';
     github.reason = github.armed
-      ? `token from ${real.join(', ') || 'gh cli'}`
-      : 'set KOLM_GITHUB_TOKEN or GITHUB_TOKEN, install the App, or run gh auth login';
+      ? `token from ${fromKeystore ? 'keystore' : real.join(', ') || 'gh cli'}`
+      : 'set KOLM_GITHUB_TOKEN or GITHUB_TOKEN, run kolm code keys set github, install the App, or run gh auth login';
   }
   const truffle = rows.find((r) => r.id === 'truffle');
   if (truffle) {
@@ -1112,6 +1363,8 @@ async function cmdDoctor(parsed) {
       node: process.version,
       dbPath: effectiveConfig.dbPath,
       dataDir: effectiveConfig.dataDir,
+      keystore: { path: api('keystorePath')(env), enabled: !api('keystoreDisabled')(env) },
+      keySource: effectiveConfig.keySource,
       driver: effectiveConfig.driver,
       mode: effectiveConfig.mode,
       mockProvider: effectiveConfig.mockProvider === true,
@@ -1123,19 +1376,33 @@ async function cmdDoctor(parsed) {
 
   out(`kolm code doctor  node ${process.version}  data ${effectiveConfig.codeDir}`);
   out('');
-  const headers = live ? ['ROW', 'KIND', 'REF', 'STATUS', 'REASON', 'LIVE'] : ['ROW', 'KIND', 'REF', 'STATUS', 'REASON'];
+  const headers = live
+    ? ['ROW', 'KIND', 'REF', 'STATUS', 'KEY', 'REASON', 'LIVE']
+    : ['ROW', 'KIND', 'REF', 'STATUS', 'KEY', 'REASON'];
   out(
     renderTable(
       headers,
       rows.map((row) => {
-        const base = [row.id, row.kind, truncate(row.ref ?? '-', 40), row.armed ? 'ARMED' : 'NOT ARMED', truncate(row.reason ?? '-', 60)];
+        const base = [
+          row.id,
+          row.kind,
+          truncate(row.ref ?? '-', 40),
+          row.armed ? 'ARMED' : 'NOT ARMED',
+          row.keySource ?? '-',
+          truncate(row.reason ?? '-', 60),
+        ];
         return live ? [...base, truncate(row.live ?? '-', 40)] : base;
       }),
     ),
   );
   out('');
   if (effectiveConfig.mockProvider === true) out('note: KOLM_TEST_MOCK_PROVIDER=1 is set; every provider call is short-circuited');
-  out(ok ? 'ready: orchestrator, a coder rung, the driver and the store are armed' : 'not ready: see the NOT ARMED rows above (env var names only, never values)');
+  if (ok) {
+    out('ready: orchestrator, a coder rung, the driver and the store are armed');
+  } else {
+    out('not ready: see the NOT ARMED rows above (env var names only, never values)');
+    out('hint: export the variable, or store the key once with: kolm code keys set <provider>');
+  }
   return ok ? EXIT.OK : EXIT.MISSING_PREREQ;
 }
 
@@ -1319,6 +1586,8 @@ export async function main(argv = []) {
         return await cmdBands(parsed);
       case 'receipt':
         return await cmdReceipt(parsed);
+      case 'keys':
+        return await cmdKeys(parsed);
       case 'doctor':
         return await cmdDoctor(parsed);
       case 'serve':

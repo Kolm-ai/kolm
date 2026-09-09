@@ -3,7 +3,9 @@
 // `loadConfig(env)` is pure with respect to the environment object it is given:
 // it reads only that object plus the filesystem existence check for the default
 // Truffle GitHub App key path. It never reads a credential from a file, never
-// spawns a process and never touches the network.
+// spawns a process and never touches the network. Keys an operator stored with
+// `kolm code keys set` reach it as `loadConfig(env, { fileSecrets })` — the
+// caller (cli/kolm-code.mjs) does the reading, src/ladder/keystore.js owns it.
 //
 // Secrets discipline: no secret value is ever an enumerable own property of the
 // returned config. `JSON.stringify(config)` is safe to log, embed in a receipt
@@ -36,6 +38,20 @@ export const PROVIDER_KEY_ENV = Object.freeze({
   deepseek: 'DEEPSEEK_API_KEY',
   openrouter: 'OPENROUTER_API_KEY',
 });
+
+/**
+ * Names `loadConfig(env, { fileSecrets })` accepts. This is the canonical list
+ * the keystore re-exports as KEY_NAMES; it lives here so config.js never has to
+ * import the keystore (which would be a cycle: the keystore imports expandHome).
+ */
+export const FILE_SECRET_NAMES = Object.freeze([
+  'anthropic',
+  'cerebras',
+  'deepseek',
+  'openrouter',
+  'github',
+  'sandbox',
+]);
 
 // ---------------------------------------------------------------------------
 // ref grammar
@@ -178,13 +194,50 @@ function deepFreeze(value) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Read one name out of an `opts.fileSecrets` bag with the same trimming the env
+ * reader uses. Returns null for anything absent, blank or not a string.
+ * @param {object} bag
+ * @param {string} name
+ * @returns {string|null}
+ */
+function fileSecret(bag, name) {
+  const raw = bag[name];
+  if (raw === undefined || raw === null) return null;
+  const value = String(raw).replace(/^\uFEFF+/, '').trim();
+  return value === '' ? null : value;
+}
+
+/**
+ * `loadConfig` stays pure: it reads the env object it is given plus one
+ * existence check for the default Truffle key path, and NEVER opens the
+ * keystore file. The CLI reads `<codeDir>/keys.json` (src/ladder/keystore.js)
+ * and hands the result in as `opts.fileSecrets`.
+ *
+ * Precedence is env-wins-over-file, matching `gh` and the AWS CLI: a variable
+ * exported for one command, or injected by CI, must be able to override a key
+ * an operator once stored on the machine without editing that file.
+ *
  * @param {Record<string,string|undefined>} [env]
+ * @param {{fileSecrets?: Record<string,string|null|undefined>}} [opts]
  * @returns {object} deep-frozen config
  */
-export function loadConfig(env = process.env) {
+export function loadConfig(env = process.env, opts = {}) {
   if (!env || typeof env !== 'object') {
     throw new LadderError('bad-config', 'loadConfig expects an environment object', {});
   }
+  if (opts === null || typeof opts !== 'object') {
+    throw new LadderError('bad-config', 'loadConfig options must be an object', {});
+  }
+  const rawFileSecrets = opts.fileSecrets;
+  if (rawFileSecrets !== undefined && rawFileSecrets !== null && typeof rawFileSecrets !== 'object') {
+    throw new LadderError(
+      'bad-config',
+      `loadConfig fileSecrets must be an object, got ${typeof rawFileSecrets}`,
+      {},
+    );
+  }
+  const bag = rawFileSecrets ?? {};
+  const fromFile = (name) => (FILE_SECRET_NAMES.includes(name) ? fileSecret(bag, name) : null);
   const home = resolveHome(env);
 
   // --- orchestration -------------------------------------------------------
@@ -224,14 +277,27 @@ export function loadConfig(env = process.env) {
   const worktreesDir = path.join(codeDir, 'worktrees');
   const runsDir = path.join(codeDir, 'runs');
   const sandboxUrl = str(env, 'KOLM_CODE_SANDBOX_URL', null);
-  const sandboxTokenValue = str(env, 'KOLM_CODE_SANDBOX_TOKEN', null);
+  const sandboxTokenEnv = str(env, 'KOLM_CODE_SANDBOX_TOKEN', null);
+  const sandboxTokenValue = sandboxTokenEnv || fromFile('sandbox');
+  const sandboxTokenSource = sandboxTokenEnv
+    ? 'KOLM_CODE_SANDBOX_TOKEN'
+    : fromFile('sandbox')
+      ? 'keystore'
+      : null;
   const bandsPath = str(env, 'KOLM_CODE_BANDS_PATH', null);
 
   // --- providers -----------------------------------------------------------
-  const anthropicKey = str(env, 'ANTHROPIC_API_KEY', null);
-  const cerebrasKey = str(env, 'CEREBRAS_API_KEY', null) || str(env, 'KOLM_CEREBRAS_TOKEN', null);
-  const deepseekKey = str(env, 'DEEPSEEK_API_KEY', null);
-  const openrouterKey = str(env, 'OPENROUTER_API_KEY', null);
+  // Each key: the environment first, the keystore file second (see the note on
+  // loadConfig), and `keySource` records which of the two actually won.
+  const anthropicEnvKey = str(env, 'ANTHROPIC_API_KEY', null);
+  const cerebrasEnvKey =
+    str(env, 'CEREBRAS_API_KEY', null) || str(env, 'KOLM_CEREBRAS_TOKEN', null);
+  const deepseekEnvKey = str(env, 'DEEPSEEK_API_KEY', null);
+  const openrouterEnvKey = str(env, 'OPENROUTER_API_KEY', null);
+  const anthropicKey = anthropicEnvKey || fromFile('anthropic');
+  const cerebrasKey = cerebrasEnvKey || fromFile('cerebras');
+  const deepseekKey = deepseekEnvKey || fromFile('deepseek');
+  const openrouterKey = openrouterEnvKey || fromFile('openrouter');
   const ollamaUrl = str(env, 'KOLM_CODE_OLLAMA_URL', DEFAULT_OLLAMA_URL);
   const deepseekOffpeak = boolValue(env, 'KOLM_CODE_DEEPSEEK_OFFPEAK', false);
   const mockProvider = boolValue(env, 'KOLM_TEST_MOCK_PROVIDER', false);
@@ -271,12 +337,15 @@ export function loadConfig(env = process.env) {
     privateKeySource = 'default-truffle-path';
   }
 
-  const ghToken = str(env, 'KOLM_GITHUB_TOKEN', null) || str(env, 'GITHUB_TOKEN', null);
+  const ghTokenEnv = str(env, 'KOLM_GITHUB_TOKEN', null) || str(env, 'GITHUB_TOKEN', null);
+  const ghToken = ghTokenEnv || fromFile('github');
   const ghTokenSource = str(env, 'KOLM_GITHUB_TOKEN', null)
     ? 'KOLM_GITHUB_TOKEN'
     : str(env, 'GITHUB_TOKEN', null)
       ? 'GITHUB_TOKEN'
-      : null;
+      : fromFile('github')
+        ? 'keystore'
+        : null;
 
   const github = {
     appId: ghAppId,
@@ -350,6 +419,7 @@ export function loadConfig(env = process.env) {
     runsDir,
     sandboxUrl,
     hasSandboxToken: Boolean(sandboxTokenValue),
+    sandboxTokenSource,
     bandsPath,
     // providers
     ollamaUrl,
@@ -368,6 +438,16 @@ export function loadConfig(env = process.env) {
       cerebras: 'CEREBRAS_API_KEY (or KOLM_CEREBRAS_TOKEN)',
       deepseek: 'DEEPSEEK_API_KEY',
       openrouter: 'OPENROUTER_API_KEY',
+    },
+    // 'env' | 'keystore' | null per name. Enumerable on purpose: it says where
+    // a secret came from, never what it is, so it is safe in doctor and JSON.
+    keySource: {
+      anthropic: anthropicEnvKey ? 'env' : anthropicKey ? 'keystore' : null,
+      cerebras: cerebrasEnvKey ? 'env' : cerebrasKey ? 'keystore' : null,
+      deepseek: deepseekEnvKey ? 'env' : deepseekKey ? 'keystore' : null,
+      openrouter: openrouterEnvKey ? 'env' : openrouterKey ? 'keystore' : null,
+      github: ghTokenEnv ? 'env' : ghToken ? 'keystore' : null,
+      sandbox: sandboxTokenEnv ? 'env' : sandboxTokenValue ? 'keystore' : null,
     },
     // integrations
     github,
@@ -465,7 +545,14 @@ function armingForRef(config, ref, ollamaProbe) {
     return { armed: false, reason: `unknown provider "${provider}"` };
   }
   const has = Boolean(config.hasKey?.[provider]);
-  return { armed: has, reason: has ? `${envName} set` : `${envName} missing` };
+  if (!has) {
+    return {
+      armed: false,
+      reason: `${envName} missing (set it, or: kolm code keys set ${provider})`,
+    };
+  }
+  const source = config.keySource?.[provider] ?? null;
+  return { armed: true, reason: source === 'keystore' ? `${envName} set (keystore)` : `${envName} set` };
 }
 
 /**

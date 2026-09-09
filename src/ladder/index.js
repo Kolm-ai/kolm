@@ -25,7 +25,24 @@ export {
   DEFAULT_ORCHESTRATOR,
   DEFAULT_CODER_LADDER,
   DEFAULT_REVIEWER_LADDER,
+  FILE_SECRET_NAMES,
 } from './config.js';
+
+// --- keystore (bring your own key) -----------------------------------------
+export {
+  keystorePath,
+  keystoreDisabled,
+  readKeystore,
+  setKey,
+  unsetKey,
+  describeKeys,
+  assertKeyName,
+  fingerprint,
+  probeKey,
+  KEY_NAMES,
+  KEY_ENV_NAMES,
+  KEYSTORE_VERSION,
+} from './keystore.js';
 
 // --- providers --------------------------------------------------------------
 export {

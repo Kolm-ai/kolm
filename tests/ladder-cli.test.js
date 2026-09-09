@@ -48,6 +48,8 @@ const SECRET_ENV_NAMES = [
   'KOLM_CODE_JUDGE',
   'KOLM_CODE_CODER_LADDER',
   'KOLM_CODE_REVIEWER_LADDER',
+  'KOLM_CODE_KEYS_PATH',
+  'KOLM_CODE_NO_KEYSTORE',
 ];
 
 const tempDirs = [];
@@ -74,11 +76,12 @@ function scrubbedEnv(home, extra = {}) {
   return { ...env, ...extra };
 }
 
-function runCli(args, { home, extra = {}, cwd = REPO_ROOT, cli = CLI } = {}) {
+function runCli(args, { home, extra = {}, cwd = REPO_ROOT, cli = CLI, input } = {}) {
   const res = spawnSync(process.execPath, [cli, ...args], {
     env: scrubbedEnv(home, extra),
     encoding: 'utf8',
     cwd,
+    input,
     timeout: 180_000,
   });
   return {
@@ -251,6 +254,217 @@ describe('kolm code doctor', () => {
     assert.ok(res.stdout.includes('ANTHROPIC_API_KEY set'), 'the reason names the variable only');
   });
 });
+
+describe('kolm code keys', () => {
+  let home;
+  let keysPath;
+
+  /** A synthetic value, assembled here so no fixture looks like a real key. */
+  function fake(prefix, tag) {
+    return `${prefix}${tag}${'x'.repeat(16)}`;
+  }
+
+  /** Run the CLI against a keystore that lives in this suite's temp dir. */
+  function keys(args, opts = {}) {
+    const { store = keysPath, extra = {}, ...rest } = opts;
+    return runCli(args, { home, extra: { KOLM_CODE_KEYS_PATH: store, ...extra }, ...rest });
+  }
+
+  before(() => {
+    home = makeTempDir('kolm-cli-keys-');
+    keysPath = path.join(makeTempDir('kolm-keys-'), 'keys.json');
+  });
+
+  it('prints the keystore path and says the file is not there yet', () => {
+    const res = keys(['keys', 'path']);
+    assert.equal(res.status, EXIT.OK);
+    assert.equal(res.stdout.trim(), keysPath);
+    assert.ok(res.stderr.includes('no keystore file yet'));
+  });
+
+  it('sets a key from stdin, printing the fingerprint and never the value', () => {
+    const value = fake('sk-or-', 'stdin');
+    const res = keys(['keys', 'set', 'openrouter'], { input: `${value}\n` });
+    assert.equal(res.status, EXIT.OK);
+    assert.equal(res.all.includes(value), false, 'the value never reaches stdout or stderr');
+    assert.match(res.stdout, /^set openrouter \(fingerprint sha256:[0-9a-f]{12}\) at /m);
+    assert.ok(res.stdout.includes(keysPath));
+    assert.ok(/^[\x20-\x7e\n\r]*$/.test(res.stdout), 'the confirmation is printable ascii');
+
+    const stored = JSON.parse(fs.readFileSync(keysPath, 'utf8'));
+    assert.equal(stored.version, 1);
+    assert.equal(stored.keys.openrouter.value, value);
+  });
+
+  it('lists the keystore as an ascii table and as json, without any value', () => {
+    const table = keys(['keys', 'list']);
+    assert.equal(table.status, EXIT.OK);
+    assert.ok(table.stdout.includes(`keystore ${keysPath}`));
+    assert.ok(table.stdout.includes('NAME'));
+    assert.ok(table.stdout.includes('FINGERPRINT'));
+    const row = table.stdout.split('\n').find((line) => line.startsWith('openrouter'));
+    assert.ok(row, 'the table has an openrouter row');
+    assert.ok(row.includes('keystore'));
+    assert.match(row, /sha256:[0-9a-f]{12}/);
+    assert.ok(table.stdout.split('\n').find((line) => line.startsWith('deepseek')).includes('none'));
+    assert.ok(/^[\x20-\x7e\n\r]*$/.test(table.stdout), 'keys list is printable ascii');
+
+    const json = keys(['keys', 'list', '--json']);
+    assert.equal(json.status, EXIT.OK);
+    const report = JSON.parse(json.stdout);
+    assert.equal(report.path, keysPath);
+    assert.equal(report.enabled, true);
+    assert.deepEqual(
+      report.keys.map((k) => k.name),
+      ['anthropic', 'cerebras', 'deepseek', 'openrouter', 'github', 'sandbox'],
+    );
+    const entry = report.keys.find((k) => k.name === 'openrouter');
+    assert.equal(entry.source, 'keystore');
+    assert.match(entry.fingerprint, /^sha256:[0-9a-f]{12}$/);
+    assert.equal(json.stdout.includes('value'), false, 'no value field is emitted');
+  });
+
+  it('reads a value out of a named variable with --from-env', () => {
+    const value = fake('csk-', 'fromenv');
+    const res = keys(['keys', 'set', 'cerebras', '--from-env', 'MY_CEREBRAS_KEY'], {
+      extra: { MY_CEREBRAS_KEY: value },
+    });
+    assert.equal(res.status, EXIT.OK);
+    assert.equal(res.all.includes(value), false, 'the value is never echoed');
+    assert.ok(res.stdout.startsWith('set cerebras (fingerprint sha256:'));
+
+    const missing = keys(['keys', 'set', 'cerebras', '--from-env', 'NOT_SET_ANYWHERE']);
+    assert.equal(missing.status, EXIT.BAD_ARGS);
+    assert.ok(missing.stderr.includes('NOT_SET_ANYWHERE'));
+  });
+
+  it('reads the first line of a file with --from-file', () => {
+    const value = fake('sk-ds-', 'fromfile');
+    const file = path.join(makeTempDir('kolm-keys-file-'), 'secret.txt');
+    fs.writeFileSync(file, `${value}\ntrailing junk\n`, 'utf8');
+    const res = keys(['keys', 'set', 'deepseek', '--from-file', file]);
+    assert.equal(res.status, EXIT.OK);
+    assert.equal(res.all.includes(value), false);
+
+    const list = keys(['keys', 'list', '--json']);
+    const entry = JSON.parse(list.stdout).keys.find((k) => k.name === 'deepseek');
+    assert.equal(entry.source, 'keystore');
+  });
+
+  it('refuses a value passed as a positional argument', () => {
+    const res = keys(['keys', 'set', 'anthropic', fake('sk-ant-', 'positional')]);
+    assert.equal(res.status, EXIT.USAGE);
+    assert.ok(
+      res.stderr.includes(
+        'pass the key on stdin, --from-env or --from-file; never on the command line (shell history)',
+      ),
+    );
+    const list = keys(['keys', 'list', '--json']);
+    assert.equal(
+      JSON.parse(list.stdout).keys.find((k) => k.name === 'anthropic').source,
+      'none',
+      'nothing was written',
+    );
+  });
+
+  it('rejects an unknown name, a missing name and an unknown subcommand', () => {
+    const unknown = keys(['keys', 'set', 'openai'], { input: 'x\n' });
+    assert.equal(unknown.status, EXIT.BAD_ARGS);
+    assert.ok(unknown.stderr.includes('unknown key name'));
+
+    const nameless = keys(['keys', 'set']);
+    assert.equal(nameless.status, EXIT.BAD_ARGS);
+    assert.ok(nameless.stderr.includes('keys set needs a name'));
+
+    const sub = keys(['keys', 'frobnicate']);
+    assert.equal(sub.status, EXIT.BAD_ARGS);
+    assert.ok(sub.stderr.includes('keys takes a subcommand'));
+  });
+
+  it('refuses an empty piped value and writes nothing', () => {
+    const snapshot = fs.readFileSync(keysPath, 'utf8');
+    const res = keys(['keys', 'set', 'github'], { input: '\n' });
+    assert.equal(res.status, EXIT.BAD_ARGS);
+    assert.ok(res.stderr.includes('empty'));
+    assert.equal(fs.readFileSync(keysPath, 'utf8'), snapshot, 'the keystore is untouched');
+  });
+
+  it('unsets a key and says so again when it was already gone', () => {
+    const first = keys(['keys', 'unset', 'deepseek']);
+    assert.equal(first.status, EXIT.OK);
+    assert.equal(first.stdout.trim(), `unset deepseek at ${keysPath}`);
+
+    const second = keys(['keys', 'unset', 'deepseek']);
+    assert.equal(second.status, EXIT.OK);
+    assert.equal(second.stdout.trim(), `deepseek was not in ${keysPath}`);
+
+    const list = keys(['keys', 'list', '--json']);
+    assert.equal(JSON.parse(list.stdout).keys.find((k) => k.name === 'deepseek').source, 'none');
+  });
+
+  it('says the environment wins when a name is set in both places', () => {
+    const res = keys(['keys', 'list'], { extra: { OPENROUTER_API_KEY: fake('sk-or-', 'env') } });
+    const row = res.stdout.split('\n').find((line) => line.startsWith('openrouter'));
+    assert.ok(row.includes('env+keystore(env wins)'));
+  });
+
+  it('reads nothing at all while KOLM_CODE_NO_KEYSTORE is set', () => {
+    const res = keys(['keys', 'list'], { extra: { KOLM_CODE_NO_KEYSTORE: '1' } });
+    assert.equal(res.status, EXIT.OK);
+    assert.ok(res.stdout.includes('(disabled by KOLM_CODE_NO_KEYSTORE)'));
+    const row = res.stdout.split('\n').find((line) => line.startsWith('openrouter'));
+    assert.ok(row.includes('none'), 'a stored key is invisible while the keystore is off');
+  });
+
+  it('tests nothing, and touches no network, when no key is set', () => {
+    // A separate empty keystore: `keys test` only probes names that are set, so
+    // this exercises the argument handling without opening a socket.
+    const empty = path.join(makeTempDir('kolm-keys-empty-'), 'keys.json');
+    const res = keys(['keys', 'test'], { store: empty });
+    assert.equal(res.status, EXIT.OK);
+    assert.ok(res.stdout.includes('no keys are set'));
+
+    const one = keys(['keys', 'test', 'openrouter'], { store: empty });
+    assert.equal(one.status, EXIT.OK);
+    assert.ok(one.stdout.includes('openrouter is not set'));
+
+    const json = keys(['keys', 'test', '--json'], { store: empty });
+    assert.equal(json.status, EXIT.OK);
+    const report = JSON.parse(json.stdout);
+    assert.equal(report.ok, true);
+    assert.deepEqual(report.results, []);
+
+    const bad = keys(['keys', 'test', 'openai'], { store: empty });
+    assert.equal(bad.status, EXIT.BAD_ARGS);
+    assert.ok(bad.stderr.includes('unknown key name'));
+  });
+
+  it('lets doctor arm a rung from the keystore without printing the value', () => {
+    const store = path.join(makeTempDir('kolm-keys-doctor-'), 'keys.json');
+    const value = fake('sk-ant-', 'doctor');
+    const written = keys(['keys', 'set', 'anthropic'], { store, input: `${value}\n` });
+    assert.equal(written.status, EXIT.OK);
+
+    const res = keys(['doctor'], { store });
+    assert.equal(res.all.includes(value), false, 'doctor never prints a key value');
+    assert.ok(res.stdout.includes('ANTHROPIC_API_KEY set (keystore)'));
+    const row = res.stdout.split('\n').find((line) => line.startsWith('orchestrator'));
+    assert.ok(row.includes('keystore'), 'the doctor table names the source');
+    assert.ok(/^[\x20-\x7e\n\r]*$/.test(res.stdout), 'doctor output is printable ascii');
+
+    const json = keys(['doctor', '--json'], { store });
+    const report = JSON.parse(json.stdout);
+    assert.equal(report.keystore.path, store);
+    assert.equal(report.keystore.enabled, true);
+    assert.equal(report.keySource.anthropic, 'keystore');
+    assert.equal(json.stdout.includes(value), false, 'doctor --json never carries a value');
+
+    const off = keys(['doctor'], { store, extra: { KOLM_CODE_NO_KEYSTORE: '1' } });
+    assert.ok(off.stdout.includes('ANTHROPIC_API_KEY missing'));
+    assert.ok(off.stdout.includes('kolm code keys set'), 'the hint names the keys verb');
+  });
+});
+
 
 describe('kolm code bands and receipts', () => {
   let home;
