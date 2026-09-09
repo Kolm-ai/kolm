@@ -1,0 +1,16 @@
+{
+  "id": "multi-file-rename",
+  "title": "Rename writeMsg to writeMessage across the source tree",
+  "text": "writeMsg is a bad name. Rename it to writeMessage everywhere it appears:\nsrc/log.js (the definition and the export) and its three callers\nsrc/a.js, src/b.js and src/c.js.\n\nBehaviour must not change and no other API may change; after the rename\nthe string \"writeMsg\" must not appear in any of those four files.",
+  "language": "javascript",
+  "expect": {
+    "verdict": "PASS",
+    "changedFiles": [
+      "src/log.js",
+      "src/a.js",
+      "src/b.js",
+      "src/c.js"
+    ],
+    "hiddenTest": "tests/hidden.test.js"
+  }
+}

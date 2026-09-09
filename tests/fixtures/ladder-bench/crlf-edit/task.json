@@ -1,0 +1,13 @@
+{
+  "id": "crlf-edit",
+  "title": "Add a timeoutMs default without breaking CRLF endings",
+  "text": "Add a timeoutMs default of 30000 to defaults() in src/config.js, so\ndefaults().timeoutMs === 30000 and withDefaults({ timeoutMs: 5 }).timeoutMs\n=== 5. Leave the other defaults alone.\n\nEvery file in this repository uses CRLF line endings and must keep them:\na file that comes back with bare LF endings counts as a failure, even if\nthe tests pass.",
+  "language": "javascript",
+  "expect": {
+    "verdict": "PASS",
+    "changedFiles": [
+      "src/config.js"
+    ],
+    "hiddenTest": "tests/hidden.test.js"
+  }
+}

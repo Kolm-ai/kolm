@@ -1,0 +1,24 @@
+{
+  "id": "python-fix-if-available",
+  "title": "Restore the seconds part of seconds_to_label",
+  "text": "duration.py has seconds_to_label(seconds). For durations of a minute or\nmore it drops the remaining seconds, so 90 renders as \"1m\" instead of\n\"1m 30s\".\n\nMake it return \"<m>m <s>s\" for durations of a minute or more:\n90 -> \"1m 30s\", 120 -> \"2m 0s\", 3661 -> \"61m 1s\". Keep the sub-minute\nbehaviour exactly as it is (0 -> \"0s\", 45 -> \"45s\", negatives -> \"0s\").",
+  "language": "python",
+  "requires": [
+    "python",
+    "pytest"
+  ],
+  "expect": {
+    "verdict": "PASS",
+    "changedFiles": [
+      "duration.py"
+    ],
+    "hiddenTest": "tests/test_hidden.py",
+    "hiddenCommand": [
+      "python",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/test_hidden.py"
+    ]
+  }
+}

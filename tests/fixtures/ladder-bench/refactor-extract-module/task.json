@@ -1,0 +1,14 @@
+{
+  "id": "refactor-extract-module",
+  "title": "Extract the three range helpers into src/range.js",
+  "text": "src/index.js has grown six functions. Move three of them -- parseRange,\nclampRange and formatRange -- into a new file src/range.js, and re-export\nthem from src/index.js so every existing caller keeps working.\n\nAfter the move src/index.js must still export all six names\n(parseRange, clampRange, formatRange, rangeLength, containsValue,\ndescribeRange) and must no longer define the three moved functions.\nBehaviour must not change and test/index.test.js must not be edited.",
+  "language": "javascript",
+  "expect": {
+    "verdict": "PASS",
+    "changedFiles": [
+      "src/index.js",
+      "src/range.js"
+    ],
+    "hiddenTest": "tests/hidden.test.js"
+  }
+}

@@ -22,7 +22,16 @@ import { rubricToPrompt, scoreRubric, blockingFailures } from '../rubric.js';
 import { briefToPrompt } from '../context/repo-brief.js';
 import { runCommand } from '../context/baseline.js';
 import { assembleVerdict } from '../verdict.js';
-import { capText } from './l3-semantic.js';
+import {
+  capText,
+  ACCEPTANCE_SCHEMA,
+  ACCEPTANCE_CONTRACT,
+  acceptanceList,
+  acceptanceBlock,
+  normalizeAcceptance,
+  unmetIndices,
+  unmetPrefix,
+} from './l3-semantic.js';
 
 export const id = 'l4-judge';
 export const level = 4;
@@ -68,10 +77,19 @@ export const JUDGMENT_SCHEMA = Object.freeze({
       blocking: { type: 'array', items: { type: 'string' } },
       rationale: { type: 'string' },
       decision: { type: 'string', enum: ['PASS', 'FAIL'] },
+      // Optional and deliberately NOT in `required`: a plan may carry no
+      // acceptance list, and a judge that answers without this field keeps
+      // exactly the behaviour it had before per-criterion attestation.
+      acceptance: ACCEPTANCE_SCHEMA,
     },
     additionalProperties: false,
   },
 });
+
+/** Rubric item that owns "did the patch satisfy the plan" (rubric.json, blocking). */
+export const SPEC_COMPLIANCE_ID = 'spec_compliance';
+/** An unmet criterion caps spec_compliance here, well under BLOCKING_THRESHOLD. */
+export const ACCEPTANCE_FAIL_SCORE = 0.2;
 
 function clamp01(value, fallback = 0) {
   const n = Number(value);
@@ -102,11 +120,16 @@ export function evidenceSummary(priorResults) {
   return lines.length > 0 ? lines.join('\n') : '- (no cheap-rung results recorded)';
 }
 
-function buildUserPrompt({ plan, brief, diff, priorResults, testOutput }) {
+function buildUserPrompt({ plan, brief, diff, priorResults, testOutput, criteria }) {
+  const criteriaBlock = acceptanceBlock(criteria, plan);
   const parts = [];
   parts.push('TASK / PLAN');
   parts.push(typeof plan === 'string' ? plan : JSON.stringify(plan ?? {}, null, 2));
   parts.push('');
+  if (criteriaBlock) {
+    parts.push(criteriaBlock);
+    parts.push('');
+  }
   parts.push(capText(briefToPrompt(brief), BRIEF_CAP));
   parts.push('');
   parts.push('CHEAP RUNG EVIDENCE (already computed; these are the facts, not opinions)');
@@ -124,6 +147,7 @@ function buildUserPrompt({ plan, brief, diff, priorResults, testOutput }) {
   parts.push('Return JSON matching the schema. Every rubric item id appears exactly once in "items".');
   parts.push(`A BLOCKING item scored below ${BLOCKING_THRESHOLD} fails the patch: put its id in "blocking" and set "decision" to "FAIL".`);
   parts.push('"rationale" is at most six sentences and must name the decisive evidence.');
+  if (criteriaBlock) for (const line of ACCEPTANCE_CONTRACT) parts.push(line);
   return parts.join('\n');
 }
 
@@ -159,7 +183,8 @@ async function askJudge({ judge, system, prompt, config, signal }) {
  * @param {AbortSignal} [ctx.signal]
  * @param {'unsure'|'calibration'|'final'} [ctx.reason]
  * @returns {Promise<{decision:'good'|'bad', score:number, items:Array, rationale:string,
- *   blocking:string[], model:string|null, costUsd:number, latencyMs:number}>}
+ *   blocking:string[], acceptance:Array<{index:number, text:string, met:boolean, evidence:string}>,
+ *   unmet:number[], model:string|null, costUsd:number, latencyMs:number}>}
  */
 export async function runJudge({
   runId,
@@ -208,8 +233,9 @@ export async function runJudge({
     }
   }
 
+  const criteria = acceptanceList(plan);
   const system = `${SYSTEM}\n\n${rubricToPrompt(rubric)}`;
-  const prompt = buildUserPrompt({ plan, brief, diff, priorResults, testOutput });
+  const prompt = buildUserPrompt({ plan, brief, diff, priorResults, testOutput, criteria });
 
   let res = null;
   let costUsd = 0;
@@ -254,6 +280,22 @@ export async function runJudge({
     .filter((it) => it && typeof it.id === 'string')
     .map((it) => ({ id: it.id, score: clamp01(it.score), evidence: String(it.evidence ?? '').slice(0, 600) }));
 
+  // Per-criterion attestation. `acceptance` is empty whenever the plan has no
+  // criteria OR the judge answered without the optional field, and everything
+  // below is then a no-op: this rung behaves exactly as it did before.
+  const acceptance = normalizeAcceptance(criteria, json.acceptance);
+  const unmet = unmetIndices(acceptance);
+  if (unmet.length > 0) {
+    // The rubric already owns "did the patch satisfy the plan"; cap that item
+    // so the arithmetic in scoreRubric reflects the miss instead of leaving a
+    // 0.95 overall next to a failing criterion. Add the item when the judge
+    // omitted it, otherwise the cap would silently do nothing.
+    const spec = items.find((it) => it.id === SPEC_COMPLIANCE_ID);
+    const evidence = `acceptance criteria not shown met: ${unmet.map((n) => `#${n}`).join(', ')}`;
+    if (spec) spec.score = Math.min(spec.score, ACCEPTANCE_FAIL_SCORE);
+    else items.push({ id: SPEC_COMPLIANCE_ID, score: ACCEPTANCE_FAIL_SCORE, evidence });
+  }
+
   const computed = scoreRubric(rubric, items);
   const score = items.length > 0 ? computed : clamp01(json.overall);
   // Trust scored blocking failures over the model's own list, but keep any id
@@ -262,8 +304,17 @@ export async function runJudge({
   const scoredBlocking = blockingFailures(rubric, items, BLOCKING_THRESHOLD);
   const declared = (Array.isArray(json.blocking) ? json.blocking : []).filter((b) => typeof b === 'string');
   const blocking = [...new Set([...scoredBlocking, ...declared.filter((b) => scoredBlocking.includes(b))])];
+  // Belt and braces: the capped score is already under BLOCKING_THRESHOLD, but
+  // an unmet criterion must block whatever that threshold is later tuned to.
+  if (unmet.length > 0 && !blocking.includes(SPEC_COMPLIANCE_ID)) blocking.push(SPEC_COMPLIANCE_ID);
   const declaredFail = String(json.decision || '').toUpperCase() === 'FAIL';
-  const decision = blocking.length > 0 || declaredFail ? 'bad' : 'good';
+  const decision = blocking.length > 0 || declaredFail || unmet.length > 0 ? 'bad' : 'good';
+
+  // The unmet criteria ride at the front of the rationale because that is the
+  // field the orchestrator copies into the repair session's feedback.reasons.
+  const prefix = unmetPrefix(acceptance);
+  const rawRationale = String(json.rationale ?? '').slice(0, 4000);
+  const rationale = prefix ? `${prefix}. ${rawRationale}`.slice(0, 4000) : rawRationale;
 
   const verdict = {
     stage: id,
@@ -272,13 +323,17 @@ export async function runJudge({
     score,
     items,
     blocking,
-    rationale: String(json.rationale ?? '').slice(0, 4000),
+    rationale,
+    acceptance,
+    unmet,
     declaredDecision: declaredFail ? 'FAIL' : 'PASS',
     declaredBlocking: declared,
     model: judge.id ?? res.model ?? null,
     costUsd,
     latencyMs: Date.now() - started,
     reason,
+    // The adapter's one retry after an empty length-capped reply, when it happened.
+    emptyRetry: res.meta?.emptyRetry ?? null,
   };
 
   if (store && runId) {
@@ -300,6 +355,8 @@ export async function runJudge({
     items,
     rationale: verdict.rationale,
     blocking,
+    acceptance,
+    unmet,
     model: verdict.model,
     costUsd,
     latencyMs: verdict.latencyMs,

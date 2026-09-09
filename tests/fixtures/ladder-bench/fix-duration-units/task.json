@@ -1,0 +1,13 @@
+{
+  "id": "fix-duration-units",
+  "title": "Fix the seconds divisor in formatDuration",
+  "text": "src/duration.js formats a millisecond duration for the run log. The\ncontract is:\n\n  ms < 1000    -> Math.round(ms) + \"ms\"        (e.g. 250 -> \"250ms\")\n  ms < 60000   -> (ms / 1000).toFixed(1) + \"s\" (e.g. 1500 -> \"1.5s\")\n  otherwise    -> \"<m>m <s>s\" with m = Math.floor(ms / 60000) and\n                  s = Math.round((ms % 60000) / 1000)  (90000 -> \"1m 30s\")\n\nThe seconds conversion divides by 100 instead of 1000, so every\nduration above a second is reported ten times too large. Fix\nsrc/duration.js only. Keep the existing tests in test/ passing.",
+  "language": "javascript",
+  "expect": {
+    "verdict": "PASS",
+    "changedFiles": [
+      "src/duration.js"
+    ],
+    "hiddenTest": "tests/hidden.test.js"
+  }
+}

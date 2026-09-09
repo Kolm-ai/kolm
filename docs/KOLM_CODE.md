@@ -242,6 +242,31 @@ the environment (section 3); the variable wins when both are set.
 | `KOLM_CODE_REVIEWER_LADDER` | `ollama:qwen3.8:latest,cerebras:gpt-oss-120b,deepseek:deepseek-v4-flash` | L3; the first armed ref is used, and L3 returns `skip` if none is |
 | `KOLM_CODE_MODE` | `cascade` | `cascade` or `direct` (see section 10) |
 
+### Coordination
+
+How a run is sized, split, and taught. All seven are on by default, so a plain
+`kolm code run` already plans, splits, self-reviews, coaches, audits its own
+plan and remembers; set any of them to `0` to get the older single-shot
+behaviour back.
+
+| Variable | Default | ARMS |
+|----------|---------|------|
+| `KOLM_CODE_ROUTING` | `auto` | `auto` lets the plan size the run (candidates, rungs, whether to split); `fixed` obeys the flags and the defaults exactly |
+| `KOLM_CODE_SUBTASKS` | `1` | splitting a large task into subtasks, each solved and merged in its own branch |
+| `KOLM_CODE_SUBTASK_CONCURRENCY` | `2` | how many subtasks run at once (1 to 16) |
+| `KOLM_CODE_COACH` | `1` | the coach pass that turns a failed repair round into concrete guidance for the next one |
+| `KOLM_CODE_AUDIT` | `1` | the plan audit that inspects an acceptance criterion no candidate can satisfy and may retire or rewrite it (see section 14) |
+| `KOLM_CODE_SELF_REVIEW` | `1` | the coder's own review of its diff before the candidate is scored |
+| `KOLM_CODE_LESSONS` | `1` | cross-run memory: lessons learned in one run are offered to the next run on the same repo (see `kolm code lessons`) |
+
+A subtask is judged only against the acceptance criteria it can satisfy: the
+ones that name its own files, plus the ones that name no subtask file at all.
+Criteria about other subtasks' files are left out; a criterion that names both
+goes to the subtask whose file it names first and carries a note saying which
+part is that subtask's. The reviewer and judge are also told the candidate is
+one part of a split plan. `kolm code show` prints the
+scoped list inside each subtask's plan.
+
 ### Budgets and shape
 
 | Variable | Default | ARMS |
@@ -258,6 +283,18 @@ the environment (section 3); the variable wins when both are set.
 | `KOLM_CODE_KEEP_WORKTREES` | `losers-destroyed` | `all`, `none` or `losers-destroyed` |
 | `KOLM_CODE_BANDS_PATH` | bundled `src/ladder/bands.json` | an operator-owned bands file |
 
+### Context
+
+What the models are allowed to see, and how much of it.
+
+| Variable | Default | ARMS |
+|----------|---------|------|
+| `KOLM_CODE_CONTEXT_TOKENS` | `0` | transcript compaction: the coder's context window is capped at this many tokens, and the transcript is compacted whenever its estimate exceeds 75% of that cap minus the 8000-token reply budget, never below a 1000-token floor. `6000` therefore compacts from about 1000 tokens on. `0` means never compact |
+| `KOLM_CODE_RETRIEVAL_BYTES` | `16384` | the byte budget for retrieved code snippets attached to a task prompt |
+
+Retrieval is local: it greps the checkout for terms taken from the task text,
+skips vendored directories, and never leaves the machine.
+
 ### Storage and worktrees
 
 | Variable | Default | ARMS |
@@ -271,6 +308,26 @@ the environment (section 3); the variable wins when both are set.
 | `KOLM_CODE_SANDBOX_URL` | - | the Cloudflare sandbox worker; required by the `cloudflare` driver |
 | `KOLM_CODE_SANDBOX_TOKEN` (+) | - | bearer token for that worker |
 | `KOLM_CODE_SHELL` | Git-for-Windows `bash.exe` on win32, `/bin/sh` elsewhere | the shell the coder's `run` tool goes through |
+
+### Runtime
+
+Transport-level switches. These change how provider calls are made, not what
+is asked.
+
+| Variable | Default | ARMS |
+|----------|---------|------|
+| `KOLM_CODE_TEXT_TOOLS` | - | comma-separated refs forced onto the text tool protocol, for endpoints that advertise tool calling but ignore it (for example `ollama:qwen3-coder-30b`) |
+| `KOLM_CODE_PROVIDER_CONCURRENCY` | built-in per-provider defaults | `name=n` pairs, comma separated, `1 <= n <= 64` (for example `ollama=1,anthropic=4`); names are case-insensitive |
+| `KOLM_CODE_STREAM` | unset | streaming responses where the adapter supports them |
+
+A malformed entry is a startup error, not a silent default: `ollama` with no
+`=n`, `ollama=0` and `ollama=two` are all rejected by `loadConfig`.
+
+### Benchmark
+
+| Variable | Default | ARMS |
+|----------|---------|------|
+| `KOLM_CODE_BENCH_DIR` | `<code home>/bench` | where `kolm code bench` writes result files; `~` is expanded |
 
 ### GitHub pull requests
 
@@ -353,8 +410,21 @@ not re-verified and not re-paid for. The task, repository path, mode and the
 run's shape (candidates per rung, coder and repair turn caps) come from the
 stored run row, so a resume never widens a run; only the models and the cost
 cap can be changed on the resume command line, which is how you raise the
-budget on a run that stopped on `budget`. Resuming a run that already
-finished re-prints its stored outcome and runs nothing.
+budget on a run that stopped on `budget`. In a split run, a subtask is carried
+over only when it passed and left a branch behind; one that failed or was left
+unresolved is run again (you see `subtask.retry` before its `subtask.start`),
+which is what makes `kolm code resume <runId> --coder <stronger model>` the
+intended recovery from a failed subtask. A run that already finished PASS
+re-prints its stored outcome and runs nothing. A run that finished FAIL or
+JUDGE is reopened instead: the resume says so (`run.resume` carries
+`reopened`, `priorVerdict` and `priorStopReason`), the run goes back to
+`running`, and nothing that was already coded is coded again. The coders on
+the resume command line take over ABOVE the rungs the earlier attempt spent,
+so a run whose one rung of two candidates failed sees the new coder write
+`c2a0` and `c3a0`; naming the same model draws new candidates from it rather
+than re-grading the old ones. When the reopened run ends, the receipt on disk
+is replaced by the new one - it lists both attempts' candidates and the whole
+run's cost - and the run's events keep both outcomes end to end.
 
 ### `status`
 
@@ -373,11 +443,23 @@ kolm code show <runId> --json --events
 ```
 
 Full detail: the candidate x stage grid, per-model and per-stage cost, the
-event count, and the receipt path. `--events` swaps the `events` count for the
+event count, and the receipt path. Two lines describe what the run was given
+and how it was routed: `context` (bytes of project instructions and how many
+files they came from, how many lessons from earlier runs were attached, and the
+size of the task-focused retrieval, with `(cached)` when it came from the
+context cache) and `route` (the plan's complexity and risk, the starting rung,
+the candidate count and repair rounds the router chose, and why). Runs recorded
+before these events existed print neither line. `--events` swaps the `events` count for the
 event list itself (`eventCount` still carries the number), which is how you
 read back what each `coder.turn` actually called: every tool call carries its
 name, the path or command it named (200 chars) and the head of what came back
 (300 chars). File contents are never in there.
+
+When the run was split into subtasks, `show` also prints a SUBTASK table -
+status, verdict, winning model, branch and cost per subtask - and one
+`integration` line with the merge verdict, how many branches merged and how
+many conflicted. Runs that were not split print neither, and a run recorded by
+an older version simply shows nothing there rather than failing.
 
 ### `funnel`
 
@@ -400,6 +482,60 @@ kolm code eval --since 2026-09-01 --json
 Cascade versus direct over the stored runs: verdict agreement, cost per run,
 and where the cheap rungs disagreed with the judge. To generate the comparison
 arm, run some tasks with `--mode direct`.
+
+### `bench`
+
+```
+kolm code bench
+kolm code bench --tasks fix-duration-units,crlf-edit
+kolm code bench --concurrency 2 --json > bench-today.json
+kolm code bench --compare bench-today.json
+```
+
+Runs the ten bundled tasks in `tests/fixtures/ladder-bench/` end to end: each
+one is seeded into a throwaway git repository, solved by a full `run`, and then
+scored by a hidden test the coder never saw. The run's own model flags
+(`--coder`, `--reviewer`, `--judge`, `--orchestrator`, `--mode`, `--driver`,
+`--candidates`, `--max-cost`, `--bands-path`, `--db`) all apply, which is how
+you compare two ladders on the same ten tasks.
+
+| Task | What its hidden test checks |
+|------|-----------------------------|
+| `fix-duration-units` | the seconds divisor is right for every duration, not only the sampled one |
+| `add-cli-json-flag` | `--json` prints parseable JSON and the human output is unchanged without it |
+| `crlf-edit` | the new default is present and every line ending in the touched file is still CRLF |
+| `multi-file-rename` | the new name is exported, used at every call site, and the old name is gone |
+| `refactor-extract-module` | the helpers moved to the new module, re-export intact, behaviour identical |
+| `write-tests-for-untested` | the added tests actually exercise the edge cases, and the test script runs them |
+| `flaky-baseline` | the new function works and the already-failing test is still failing, not deleted |
+| `forbidden-path-trap` | the fix is in the source, not in the generated bundle that a lazy patch would edit |
+| `two-subtask-feature` | both features exist and the integration test that uses them together passes |
+| `python-fix-if-available` | the seconds part of the label is restored; skipped when python or pytest is missing |
+
+A task whose requirement is missing is reported `skip`, not `fail`. Exit 0 when
+every non-skipped task passed its hidden test, 2 when any did not.
+
+`--compare <file>` reads an earlier `--json` document and prints a delta table
+(task, before, after, and the cost difference), so a ladder change is a diff
+rather than a memory. `--keep-work` leaves the seeded repositories on disk
+under `KOLM_CODE_BENCH_DIR` instead of deleting them.
+
+### `lessons`
+
+```
+kolm code lessons .
+kolm code lessons https://github.com/acme/widget --json
+kolm code lessons . --clear
+```
+
+Prints the lessons remembered for a repository: what a previous run learned
+(usually from a repair round or a judge finding) and how often that lesson has
+been reused. The repository argument is normalised the same way a run
+normalises it, so a path and its clone URL address the same lesson set.
+
+`--clear` deletes the lesson file for that repository. It works even with
+`KOLM_CODE_LESSONS=0`, and reports whether a file was actually there. With
+lessons disabled, a read prints an empty set and says so.
 
 ### `bands`
 
@@ -484,6 +620,13 @@ provider does not hide the rest.
 Exit 0 when the orchestrator, at least one coder, the driver and SQLite are all
 armed; exit 3 otherwise.
 
+A second table, RUNTIME, prints the settings from the Coordination, Context,
+Runtime and Benchmark groups of section 4 as they are actually in force:
+routing mode and whether subtasks are on (with their concurrency), coach,
+self-review and lessons on or off, the context and retrieval budgets, which
+refs are forced onto text tools, the per-provider concurrency map, streaming,
+and the bench directory. `--json` carries the same values under `runtime`.
+
 ### `serve`
 
 ```
@@ -519,7 +662,7 @@ verb prints the same text and exits 64.
 |------|---------|
 | 0 | success; a `run` reached PASS |
 | 1 | bad arguments or bad configuration |
-| 2 | the gate said no: a run ended FAIL or JUDGE, or a receipt signature did not verify |
+| 2 | the gate said no: a run ended FAIL or JUDGE, a bench task failed its hidden test, or a receipt signature did not verify |
 | 3 | a prerequisite is missing: something is not armed, or `node:sqlite` is unavailable |
 | 4 | execution error, including an aborted run |
 | 5 | not found: an unknown run id or a missing receipt |
@@ -715,9 +858,88 @@ KOLM_CODE_NO_KEYSTORE)` means the whole file is being ignored on purpose.
 A stored key that reaches the provider but is rejected shows as `bad-key` in
 `kolm code keys test`.
 
+**A reviewer or judge "returned no JSON" on a thinking model.** The model
+spent its whole token budget on reasoning and sent back an empty reply with
+`finish_reason: length`. The adapter retries such a reply once with up to 4x
+the budget (capped at 16000 tokens) and records the retry as
+`meta.emptyRetry` on the stage result; if the retry is empty too, the reasoning
+text is kept as the reply so the rung reports `unsure` with the evidence rather
+than guessing. Raise `KOLM_CODE_MODEL_TIMEOUT_MS` if the larger call times out.
+
 **A run ends FAIL immediately with no candidate diff.** The coder produced no
 change, so L0 called it bad. Check the plan line in the event stream and make
 the task text more specific about which file to touch.
+
+**Every candidate fails the same acceptance criterion round after round.** The
+criterion itself may be the defect - a plan can turn a false premise in the task
+text ("the files use CRLF line endings", when they do not) into a criterion no
+diff can ever satisfy, and the repair loop will then spend its whole budget
+producing correct diffs that are rejected for the same reason. `kolm code` now
+notices this. After a repair round that produced no winner, it compares the
+failure reasons of the round with the failure reasons of the round before: a
+criterion that every failing candidate named in both rounds, with nothing having
+passed in either, is stuck, and a candidate whose reasons are byte-for-byte what
+they were before made no progress. That emits one `repair.stuck` event carrying
+the stuck criteria and the stalled candidates. If any criterion is stuck, the
+orchestrator model is shown the task text, the plan, the best candidate's diff
+and deterministic facts about the files the criterion names - byte count, line
+count, how many CRLF and how many bare LF endings, BOM, trailing newline - and
+asked once whether to keep, retire or rewrite each one. A retire or a rewrite
+writes a `plan.criterion` event (`from`, `to`, `verdict`, `reason`) and produces
+an amended plan for the rest of that subtask; the failing candidates are then
+re-scored against the amended plan without being coded again, so a diff that was
+already correct can win on the spot. Look for both events in
+`kolm code show <runId> --events`. The audit runs at most once per subtask per
+run, never on the first round, never when the budget is spent, and never when
+there is no orchestrator model; if it keeps every criterion, the stalled
+candidates are not repaired again and the run goes to escalation or FAIL as
+before. Set `KOLM_CODE_AUDIT=0` to turn the pass off and keep the plan exactly
+as written.
+
+**The coder answers in prose and never calls a tool.** Some small models with a
+native tool API describe the call instead of making it ("I will use the
+`edit_file` function ... here's the command to do that"), and `coder.turn` shows
+`toolCalls=[]` twice followed by `candidate.diff ... reason=no-tool-calls`.
+`kolm code` handles this in two steps without being asked. On the second turn of
+a session that has not called a tool yet, it moves that session - and only that
+session - to the text tool protocol, where the tools and their JSON schemas are
+written into the system prompt and the model answers with
+`<<<tool name="edit_file">>> {...} <<<end>>>` blocks; the switch shows up as a
+`coder.protocol` event and as `protocol: text` on `candidate.diff`. If the
+attempt still ends with no tool call, the repair round is handed to another
+model - the next rung, or the orchestrator model when it is not the same ref -
+which shows up as a `coder.fallback` event, and `show` and the receipt then name
+the fallback as that candidate's generator. To skip the first step and start a
+model in the text protocol, name it in `KOLM_CODE_TEXT_TOOLS=<ref>` (comma
+separated, wildcards allowed).
+
+**Integration says "merge of <subtask> failed" with no conflict files.** Git
+refused to start the merge at all, so no file conflicted and there is nothing a
+coder could resolve; the usual cause is a merge left in progress
+(`fatal: You have not concluded your merge (MERGE_HEAD exists).`), a branch that
+no longer resolves, or an unrelated history. The reason git gave is in the
+`integration.merge` event and in `kolm code show <runId>`. The run stops there
+with `stopReason: integration-conflict` and a FAIL verdict that repeats the
+reason, rather than reporting a merge that never happened. Every repaired
+conflict is now committed in the integration worktree the moment the markers are
+gone - even when the resolution keeps HEAD's side and leaves the tree unchanged
+- so the next merge of the same level starts from a clean worktree.
+
+**A subtask failed, its dependents show SKIPPED, and integration says FAIL
+without judging anything.** That is the split run refusing to grade half a
+change. A subtask that did not pass leaves no branch to merge, so every subtask
+that depends on it has nothing to build on: those are skipped before their
+ladder starts (a `subtask.skipped` event naming the dependencies they were
+waiting on, and no cost), while independent subtasks still run and still merge.
+The survivors are merged and committed, so the integration branch holds the work
+that did land, but the cascade does not run on it: a partial diff is not the
+change the plan describes, and judging it would report a verdict for something
+nobody proposed. The run reports `stopReason: subtask-failed` and an
+`integration.verdict` FAIL whose reasons name each missing subtask
+("subtask alpha failed", "subtask beta skipped (depends on alpha)"). The
+recovery is `kolm code resume <runId> --coder <stronger model>`: the passed
+subtasks are carried over untouched, the failed one is retried with the better
+model, and the dependents run once it lands.
 
 ---
 

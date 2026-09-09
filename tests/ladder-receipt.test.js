@@ -356,3 +356,69 @@ test('receiptPathFor places receipts under the code directory', () => {
   const target = receiptPathFor({ codeDir: path.join('data', 'code') }, 'run_xyz');
   assert.equal(target, path.join('data', 'code', 'receipts', 'run_xyz.json'));
 });
+
+// ------------------------------------------------------------ subtasks
+
+test('the subtask ledger is normalised, always present and inside the signature', () => {
+  // A single-unit run keeps today's shape plus one always-present array.
+  assert.deepEqual(passingReceipt().subtasks, []);
+  assert.deepEqual(buildReceipt({ run: { id: 'run_bare' } }).subtasks, []);
+
+  const receipt = passingReceipt({
+    winner: 'integration',
+    branch: `kolm/code/${RUN_ROW.id}/integration`,
+    subtasks: [
+      {
+        id: 'alpha',
+        winner: 's0c0a0',
+        branch: `kolm/code/${RUN_ROW.id}/s0c0a0`,
+        sha: '1'.repeat(40),
+        // Fields the receipt deliberately does not republish.
+        verdict: 'PASS',
+        costUsd: 0.0123,
+      },
+      { id: 'beta', winner: 's1c0a0', branch: null, sha: null },
+      // A row with no id is dropped rather than written as a null-keyed entry.
+      { winner: 's2c0a0' },
+    ],
+  });
+
+  assert.deepEqual(receipt.subtasks.map((s) => s.id), ['alpha', 'beta']);
+  assert.deepEqual(Object.keys(receipt.subtasks[0]).sort(), ['branch', 'id', 'sha', 'winner']);
+  assert.equal(receipt.subtasks[0].sha, '1'.repeat(40));
+  assert.equal(receipt.subtasks[1].branch, null);
+  assert.equal(receipt.subtasks[1].sha, null);
+  assert.equal(receipt.subtasks[0].costUsd, undefined, 'money lives in the cost block');
+  assert.equal(receipt.subtasks[0].verdict, undefined, 'the per-subtask verdict lives in the events');
+  assert.equal(receipt.winner.candidate_id, 'integration');
+  assert.ok(!JSON.stringify(receipt).includes('undefined'));
+
+  // The ledger is canonicalised and signed like every other field.
+  const signer = testSigner();
+  const signed = signReceipt(receipt, signer);
+  assert.equal(verifyReceipt(signed).ok, true);
+
+  const mutations = {
+    'subtasks[0].sha': (r) => { r.subtasks[0].sha = '9'.repeat(40); },
+    'subtasks[1].winner': (r) => { r.subtasks[1].winner = 's1c1a0'; },
+    'an extra subtask': (r) => { r.subtasks.push({ id: 'gamma', winner: null, branch: null, sha: null }); },
+    'an emptied ledger': (r) => { r.subtasks = []; },
+  };
+  for (const [label, mutate] of Object.entries(mutations)) {
+    const copy = JSON.parse(JSON.stringify(signed));
+    mutate(copy);
+    assert.equal(verifyReceipt(copy).ok, false, `mutation of ${label} must not verify`);
+  }
+
+  // Row order is the plan's order, and it is the only thing that decides the
+  // canonical form: the same ledger always signs to the same bytes.
+  const twin = signReceipt(passingReceipt({
+    winner: 'integration',
+    branch: `kolm/code/${RUN_ROW.id}/integration`,
+    subtasks: [
+      { id: 'alpha', winner: 's0c0a0', branch: `kolm/code/${RUN_ROW.id}/s0c0a0`, sha: '1'.repeat(40) },
+      { id: 'beta', winner: 's1c0a0', branch: null, sha: null },
+    ],
+  }), signer);
+  assert.equal(twin.signature_ed25519.signature, signed.signature_ed25519.signature);
+});

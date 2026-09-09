@@ -1,0 +1,14 @@
+{
+  "id": "write-tests-for-untested",
+  "title": "Give slugify a test suite and a test script",
+  "text": "This repository has no tests at all. Add test/slug.test.js using the\nnode:test runner, covering slugify() from src/slug.js: ordinary words,\npunctuation, leading and trailing separators, and a non-string input.\n\nAlso add a \"test\" script to package.json that runs \"node --test\".\nDo not change src/slug.js: the current behaviour is the contract.",
+  "language": "javascript",
+  "expect": {
+    "verdict": "PASS",
+    "changedFiles": [
+      "package.json",
+      "test/slug.test.js"
+    ],
+    "hiddenTest": "tests/hidden.test.js"
+  }
+}

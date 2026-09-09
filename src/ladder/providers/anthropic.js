@@ -1,4 +1,4 @@
-// kolm code — Anthropic adapter (owner A, spec §3).
+// kolm code - Anthropic adapter (owner PROV, spec section 3).
 //
 // Rules taken verbatim from the claude-api skill, not from memory:
 //   * `thinking` is NEVER sent. Fable 5.1 / Opus 5 are adaptive by default and
@@ -15,14 +15,33 @@
 //   * `stop_reason === 'refusal'` is returned, never thrown.
 //   * `max_tokens > 16000` must stream (non-streaming requests hit SDK HTTP
 //     timeouts at high max_tokens).
+//
+// Spec section 3.3 additions: every request goes through the shared per-provider
+// limiter, retries honour `Retry-After`, and a 429 halves concurrency for a
+// minute. Spec section 3.2: the text tool protocol can be forced onto any ref through
+// KOLM_CODE_TEXT_TOOLS, and a 400 that says tools are unsupported latches it on.
+// Spec 4.3: a single call can ask for it with `textTools: true`, which speaks the
+// protocol for that call only and leaves the instance latch alone.
 
 import { LadderError } from '../errors.js';
 import { parseRef } from '../config.js';
 import { describeModel, estimateCost } from './registry.js';
+import { limiterFor, retryDelayMs, THROTTLE_PENALTY_MS } from './limiter.js';
+import {
+  looksLikeToolsUnsupported,
+  parseTextToolCalls,
+  refForcedToTextTools,
+  renderJsonOnlyForText,
+  renderToolsForText,
+  toTextProtocolMessages,
+} from './text-tools.js';
 
 const STREAM_THRESHOLD_TOKENS = 16000;
-const MAX_TRIES = 3;
-const BACKOFF_BASE_MS = 500;
+
+// Spec section 3.3: throttling and overload are worth four tries, any other failure two.
+const MAX_TRIES_THROTTLED = 4;
+const MAX_TRIES_OTHER = 2;
+const ABSOLUTE_MAX_TRIES = MAX_TRIES_THROTTLED;
 
 /** Anthropic stop_reason -> unified stopReason. */
 export function mapStopReason(stopReason) {
@@ -86,6 +105,11 @@ function statusOf(err) {
   return null;
 }
 
+function headersOf(err) {
+  if (!err || typeof err !== 'object') return null;
+  return err.headers ?? err.response?.headers ?? null;
+}
+
 function isTimeout(err) {
   if (!err || typeof err !== 'object') return false;
   const name = String(err.name || '');
@@ -114,6 +138,10 @@ function isRetryable(err) {
   return isConnection(err) && !isTimeout(err);
 }
 
+function triesFor(status) {
+  return status === 429 || status === 529 || status === 503 ? MAX_TRIES_THROTTLED : MAX_TRIES_OTHER;
+}
+
 function bodyOf(err) {
   if (!err || typeof err !== 'object') return null;
   return err.error ?? err.body ?? null;
@@ -137,8 +165,10 @@ const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * @param {string} ref e.g. 'anthropic:claude-fable-5-1'
- * @param {object} [config] from loadConfig()
- * @param {{client?: object, sleep?: Function, random?: Function, AnthropicCtor?: Function}} [opts]
+ * @param {object} [config] from loadConfig(); reads `textTools`,
+ *   `providerConcurrency` and `stream` defensively (all optional)
+ * @param {{client?: object, sleep?: Function, random?: Function, now?: Function,
+ *   AnthropicCtor?: Function, limiter?: object}} [opts]
  */
 export function createAnthropicProvider(ref, config = {}, opts = {}) {
   const { provider, model, ref: normalized } = parseRef(ref);
@@ -150,7 +180,14 @@ export function createAnthropicProvider(ref, config = {}, opts = {}) {
   const armed = Boolean(apiKey) || Boolean(injected);
   const sleep = opts.sleep ?? defaultSleep;
   const random = opts.random ?? Math.random;
+  const now = opts.now ?? Date.now;
   const spec = describeModel(normalized);
+  const limiter = opts.limiter ?? limiterFor(provider, config, { sleep, now });
+
+  // Anthropic models all have a tool API, so this is only ever on because the
+  // operator forced it (KOLM_CODE_TEXT_TOOLS) or a gateway in front of the API
+  // rejected `tools`. Supporting it here keeps one code path across adapters.
+  let textTools = spec.tools === false || refForcedToTextTools(normalized, config.textTools);
 
   let client = injected;
   async function getClient() {
@@ -161,19 +198,32 @@ export function createAnthropicProvider(ref, config = {}, opts = {}) {
     return client;
   }
 
-  function buildParams(call) {
+  // `useText` is decided per call by `chat`: the instance latch OR this call's
+  // own `textTools: true`, which is how the coder moves ONE session to the text
+  // protocol without dragging the shared instance with it (spec 4.3).
+  function buildParams(call, useText = false) {
     const maxTokens = call.maxTokens ?? 8192;
+    const tools = Array.isArray(call.tools) ? call.tools : [];
     const params = {
       model,
       max_tokens: maxTokens,
-      messages: call.messages ?? [],
+      messages: useText ? toTextProtocolMessages(call.messages ?? []) : (call.messages ?? []),
     };
 
-    if (call.system) {
+    let system = call.system ?? null;
+    if (useText) {
+      // In text mode the protocol, the tool list and any JSON-only rule all ride
+      // in the system prompt; nothing tool-shaped reaches the wire.
+      const extra = [];
+      if (tools.length > 0) extra.push(renderToolsForText(tools));
+      if (call.jsonSchema) extra.push(renderJsonOnlyForText(call.jsonSchema));
+      if (extra.length > 0) system = [system, ...extra].filter(Boolean).join('\n\n');
+    }
+    if (system) {
       params.system =
         call.cacheSystem === false
-          ? call.system
-          : [{ type: 'text', text: call.system, cache_control: { type: 'ephemeral' } }];
+          ? system
+          : [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
     }
 
     // Sampling params are rejected by the Fable 5.x / Opus 5 / Sonnet 5 family.
@@ -183,14 +233,14 @@ export function createAnthropicProvider(ref, config = {}, opts = {}) {
 
     const outputConfig = {};
     if (call.effort) outputConfig.effort = call.effort;
-    if (call.jsonSchema) {
+    if (call.jsonSchema && !useText) {
       const schema = call.jsonSchema.schema ?? call.jsonSchema;
       outputConfig.format = { type: 'json_schema', schema };
     }
     if (Object.keys(outputConfig).length > 0) params.output_config = outputConfig;
 
-    if (Array.isArray(call.tools) && call.tools.length > 0) {
-      params.tools = call.tools.map((t) => ({
+    if (!useText && tools.length > 0) {
+      params.tools = tools.map((t) => ({
         name: t.name,
         description: t.description,
         input_schema: t.input_schema ?? t.inputSchema,
@@ -228,28 +278,42 @@ export function createAnthropicProvider(ref, config = {}, opts = {}) {
     });
   }
 
-  async function send(params, requestOptions, useStream) {
+  async function send(params, requestOptions, useStream, meta) {
     const c = await getClient();
+    // The gate wraps one attempt, not the retry loop: a request sleeping out a
+    // backoff must not hold a concurrency slot the whole time.
+    const attemptOnce = () =>
+      limiter.run(
+        () => {
+          if (useStream) {
+            const stream = requestOptions
+              ? c.messages.stream(params, requestOptions)
+              : c.messages.stream(params);
+            return stream.finalMessage();
+          }
+          return requestOptions
+            ? c.messages.create(params, requestOptions)
+            : c.messages.create(params);
+        },
+        { signal: requestOptions?.signal },
+      );
+
     let lastErr = null;
-    for (let attempt = 0; attempt < MAX_TRIES; attempt += 1) {
+    for (let attempt = 0; attempt < ABSOLUTE_MAX_TRIES; attempt += 1) {
       try {
-        if (useStream) {
-          const stream = requestOptions
-            ? c.messages.stream(params, requestOptions)
-            : c.messages.stream(params);
-          return await stream.finalMessage();
-        }
-        return requestOptions
-          ? await c.messages.create(params, requestOptions)
-          : await c.messages.create(params);
+        return await attemptOnce();
       } catch (err) {
         // A cancellation the caller asked for is not a provider fault: propagate
         // it unchanged so the orchestrator can tell abort from failure.
         if (requestOptions?.signal?.aborted && isTimeout(err)) throw err;
         lastErr = err;
-        if (attempt === MAX_TRIES - 1 || !isRetryable(err)) break;
-        const delay = BACKOFF_BASE_MS * 2 ** attempt;
-        await sleep(Math.round(delay + random() * delay * 0.25));
+        const status = statusOf(err);
+        if (status === 429) {
+          meta.throttled = true;
+          limiter.penalize({ ms: THROTTLE_PENALTY_MS });
+        }
+        if (!isRetryable(err) || attempt + 1 >= triesFor(status)) break;
+        await sleep(retryDelayMs(attempt, headersOf(err), { random, now }));
       }
     }
     throw mapError(lastErr);
@@ -262,6 +326,10 @@ export function createAnthropicProvider(ref, config = {}, opts = {}) {
     armed,
     kind: 'anthropic',
     spec,
+    /** True once this instance is speaking the text tool protocol. */
+    get textTools() {
+      return textTools;
+    },
     async chat(call = {}) {
       if (!armed) {
         throw new LadderError(
@@ -271,26 +339,57 @@ export function createAnthropicProvider(ref, config = {}, opts = {}) {
         );
       }
       const started = Date.now();
-      const params = buildParams(call);
       const requestOptions = {};
       if (call.signal) requestOptions.signal = call.signal;
       if (call.timeoutMs) requestOptions.timeout = call.timeoutMs;
-      const useStream = (call.maxTokens ?? 8192) > STREAM_THRESHOLD_TOKENS;
+      const options = Object.keys(requestOptions).length > 0 ? requestOptions : null;
+      const useStream = (call.maxTokens ?? 8192) > STREAM_THRESHOLD_TOKENS || config.stream === true;
+      // Per-call request for the text protocol (spec 4.3). It never latches the
+      // instance: the next call without the flag speaks native tools again.
+      let useText = textTools || call.textTools === true;
+      const meta = { textTools: useText, throttled: false, streamed: useStream };
+      const hasTools = Array.isArray(call.tools) && call.tools.length > 0;
 
-      const message = await send(
-        params,
-        Object.keys(requestOptions).length > 0 ? requestOptions : null,
-        useStream,
-      );
+      let message;
+      try {
+        message = await send(buildParams(call, useText), options, useStream, meta);
+      } catch (err) {
+        if (!useText && hasTools && looksLikeToolsUnsupported(err)) {
+          // Latch the text protocol on for the life of this instance and retry this
+          // same call once; providers keep no store the caller can read, so the only
+          // signal out is meta.textTools.
+          textTools = true;
+          useText = true;
+          meta.textTools = true;
+          message = await send(buildParams(call, useText), options, useStream, meta);
+        } else {
+          throw err;
+        }
+      }
 
-      const content = Array.isArray(message?.content) ? message.content : [];
+      const blocks = Array.isArray(message?.content) ? message.content : [];
       let text = '';
       const toolCalls = [];
-      for (const block of content) {
+      let content = blocks;
+      for (const block of blocks) {
         if (block?.type === 'text') text += block.text ?? '';
         else if (block?.type === 'tool_use') {
           toolCalls.push({ id: block.id, name: block.name, input: block.input });
         }
+      }
+
+      if (meta.textTools) {
+        // Text mode: the calls are in the text. Parse them out and rebuild the
+        // tool_use blocks the coder's transcript expects.
+        const parsed = parseTextToolCalls(text);
+        text = parsed.text;
+        content = [];
+        if (text !== '') content.push({ type: 'text', text });
+        for (const tc of parsed.toolCalls) {
+          content.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.input });
+          toolCalls.push({ id: tc.id, name: tc.name, input: tc.input });
+        }
+        if (parsed.errors.length > 0) meta.textToolErrors = parsed.errors;
       }
 
       const rawUsage = message?.usage ?? {};
@@ -301,18 +400,24 @@ export function createAnthropicProvider(ref, config = {}, opts = {}) {
         cacheWrite: rawUsage.cache_creation_input_tokens ?? 0,
       };
 
+      let stopReason = mapStopReason(message?.stop_reason);
+      if (meta.textTools && toolCalls.length > 0 && stopReason === 'end_turn') {
+        stopReason = 'tool_use';
+      }
+
       return {
         text,
         json: call.jsonSchema ? parseJsonLoose(text) : null,
         toolCalls,
         content,
-        stopReason: mapStopReason(message?.stop_reason),
+        stopReason,
         stopDetails: message?.stop_details ?? null,
         usage,
         costUsd: estimateCost(normalized, usage, { offpeak: Boolean(config.deepseekOffpeak) }),
         model: message?.model ?? model,
         provider,
         latencyMs: Date.now() - started,
+        meta,
       };
     },
   };

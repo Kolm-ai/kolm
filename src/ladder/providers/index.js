@@ -98,3 +98,23 @@ export { createAnthropicProvider } from './anthropic.js';
 export { createOpenAICompatibleProvider, OPENAI_COMPATIBLE_PROVIDERS } from './openai-compatible.js';
 export { createFakeProvider, createMockProvider } from './fake.js';
 export { estimateCost, listModels, knownRefs, rolesFor, priceFor, MODEL_CATALOG } from './registry.js';
+// Text-mode tool calling, for endpoints that advertise tools but ignore them.
+export {
+  TEXT_TOOL_PROTOCOL_VERSION,
+  parseTextToolCalls,
+  renderToolsForText,
+  renderToolResultsForText,
+  toTextProtocolMessages,
+  renderJsonOnlyForText,
+  refForcedToTextTools,
+  looksLikeToolsUnsupported,
+} from './text-tools.js';
+// Per-provider concurrency and backoff, shared by every adapter.
+export {
+  PROVIDER_CONCURRENCY_DEFAULTS,
+  THROTTLE_PENALTY_MS,
+  createLimiter,
+  limiterFor,
+  resetLimiters,
+  retryDelayMs,
+} from './limiter.js';

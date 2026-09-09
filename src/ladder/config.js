@@ -31,6 +31,12 @@ const MODES = ['cascade', 'direct'];
 const DRIVERS = ['local', 'cloudflare', 'fake'];
 const KEEP_WORKTREES = ['losers-destroyed', 'all', 'none'];
 
+/** How the orchestrator sizes a run: from the plan, or from the flags alone. */
+export const ROUTING_MODES = Object.freeze(['auto', 'fixed']);
+
+/** Retrieval snippet budget when KOLM_CODE_RETRIEVAL_BYTES is unset. */
+export const DEFAULT_RETRIEVAL_BYTES = 16384;
+
 /** Providers that need an API key, and the env var that supplies it. */
 export const PROVIDER_KEY_ENV = Object.freeze({
   anthropic: 'ANTHROPIC_API_KEY',
@@ -150,6 +156,34 @@ function refList(env, key, fallback) {
   return parts;
 }
 
+/**
+ * Parse a `name=n,name=n` map of per-provider concurrency caps. Kept separate
+ * from `num` because the value is a map, and a malformed entry has to fail loud
+ * rather than silently drop a cap the operator thought was applied.
+ */
+function concurrencyMap(env, key) {
+  const raw = str(env, key, null);
+  if (raw === null) return {};
+  const out = {};
+  for (const part of raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)) {
+    const eq = part.indexOf('=');
+    const name = eq === -1 ? '' : part.slice(0, eq).trim().toLowerCase();
+    const value = eq === -1 ? NaN : Number(part.slice(eq + 1).trim());
+    if (name === '' || !Number.isInteger(value) || value < 1 || value > 64) {
+      throw new LadderError(
+        'bad-config',
+        `${key} entries must look like name=n with 1 <= n <= 64, got "${part}"`,
+        { key, entry: part },
+      );
+    }
+    out[name] = value;
+  }
+  return out;
+}
+
 /** `~` and `~/x` expand against the resolved home directory. */
 export function expandHome(p, home) {
   if (!p) return p;
@@ -248,6 +282,21 @@ export function loadConfig(env = process.env, opts = {}) {
   const mode = enumValue(env, 'KOLM_CODE_MODE', MODES, 'cascade');
   const coderLadder = refList(env, 'KOLM_CODE_CODER_LADDER', DEFAULT_CODER_LADDER);
   const reviewerLadder = refList(env, 'KOLM_CODE_REVIEWER_LADDER', DEFAULT_REVIEWER_LADDER);
+  // 'auto' lets the router size a run from the plan; 'fixed' pins it to flags.
+  const routing = enumValue(env, 'KOLM_CODE_ROUTING', ROUTING_MODES, 'auto');
+  const subtasks = boolValue(env, 'KOLM_CODE_SUBTASKS', true);
+  const subtaskConcurrency = num(env, 'KOLM_CODE_SUBTASK_CONCURRENCY', 2, {
+    min: 1,
+    max: 16,
+    integer: true,
+  });
+  const coach = boolValue(env, 'KOLM_CODE_COACH', true);
+  // When one acceptance criterion blocks every candidate before and after a
+  // repair, the orchestrator audits the criterion instead of paying for a third
+  // identical round. Set 0 to leave the plan untouchable.
+  const audit = boolValue(env, 'KOLM_CODE_AUDIT', true);
+  const selfReview = boolValue(env, 'KOLM_CODE_SELF_REVIEW', true);
+  const lessons = boolValue(env, 'KOLM_CODE_LESSONS', true);
 
   // --- budgets and shape ---------------------------------------------------
   const candidates = num(env, 'KOLM_CODE_CANDIDATES', 3, { min: 1, max: 64, integer: true });
@@ -272,6 +321,17 @@ export function loadConfig(env = process.env, opts = {}) {
   const modelTimeoutMs = num(env, 'KOLM_CODE_MODEL_TIMEOUT_MS', 600000, {
     min: 1000,
     max: 24 * 60 * 60 * 1000,
+    integer: true,
+  });
+  // 0 means "no compaction": the transcript is handed to the model whole.
+  const contextTokens = num(env, 'KOLM_CODE_CONTEXT_TOKENS', 0, {
+    min: 0,
+    max: 10000000,
+    integer: true,
+  });
+  const retrievalBytes = num(env, 'KOLM_CODE_RETRIEVAL_BYTES', DEFAULT_RETRIEVAL_BYTES, {
+    min: 0,
+    max: 1048576,
     integer: true,
   });
   const shellPath = str(env, 'KOLM_CODE_SHELL', null);
@@ -300,6 +360,9 @@ export function loadConfig(env = process.env, opts = {}) {
       ? 'keystore'
       : null;
   const bandsPath = str(env, 'KOLM_CODE_BANDS_PATH', null);
+  const benchDir = path.resolve(
+    expandHome(str(env, 'KOLM_CODE_BENCH_DIR', path.join(codeDir, 'bench')), home),
+  );
 
   // --- providers -----------------------------------------------------------
   // Each key: the environment first, the keystore file second (see the note on
@@ -316,6 +379,11 @@ export function loadConfig(env = process.env, opts = {}) {
   const ollamaUrl = str(env, 'KOLM_CODE_OLLAMA_URL', DEFAULT_OLLAMA_URL);
   const deepseekOffpeak = boolValue(env, 'KOLM_CODE_DEEPSEEK_OFFPEAK', false);
   const mockProvider = boolValue(env, 'KOLM_TEST_MOCK_PROVIDER', false);
+  // Refs listed here talk tools over plain text instead of the JSON tool API,
+  // for endpoints that advertise tools but do not honour them.
+  const textTools = refList(env, 'KOLM_CODE_TEXT_TOOLS', '');
+  const providerConcurrency = concurrencyMap(env, 'KOLM_CODE_PROVIDER_CONCURRENCY');
+  const stream = boolValue(env, 'KOLM_CODE_STREAM', false);
 
   const baseUrls = {
     cerebras: str(env, 'KOLM_CEREBRAS_URL', 'https://api.cerebras.ai/v1'),
@@ -417,6 +485,13 @@ export function loadConfig(env = process.env, opts = {}) {
     mode,
     coderLadder,
     reviewerLadder,
+    routing,
+    subtasks,
+    subtaskConcurrency,
+    coach,
+    audit,
+    selfReview,
+    lessons,
     // budgets
     candidates,
     coderTurns,
@@ -427,6 +502,8 @@ export function loadConfig(env = process.env, opts = {}) {
     calibrationMinDisagreements,
     stageTimeoutMs,
     modelTimeoutMs,
+    contextTokens,
+    retrievalBytes,
     shellPath,
     keepWorktrees,
     // worktrees / data
@@ -440,11 +517,15 @@ export function loadConfig(env = process.env, opts = {}) {
     hasSandboxToken: Boolean(sandboxTokenValue),
     sandboxTokenSource,
     bandsPath,
+    benchDir,
     // providers
     ollamaUrl,
     ollamaReachable: null,
     deepseekOffpeak,
     mockProvider,
+    textTools,
+    providerConcurrency,
+    stream,
     baseUrls,
     hasKey: {
       anthropic: Boolean(anthropicKey),

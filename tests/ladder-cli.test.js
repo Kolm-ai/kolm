@@ -12,7 +12,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { parseArgs, EXIT, USAGE, VERBS, renderTable, envOverlay } from '../cli/kolm-code.mjs';
+import { parseArgs, EXIT, USAGE, VERBS, renderTable, envOverlay, subtaskViewFrom } from '../cli/kolm-code.mjs';
 import { sqliteAvailable } from '../src/ladder/index.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -618,5 +618,193 @@ describe('kolm code run end to end', { skip: HAS_SQLITE ? false : 'node:sqlite u
     assert.equal(res.status, EXIT.OK, res.stderr.slice(-400));
     const evaluation = JSON.parse(res.stdout);
     assert.equal(typeof evaluation, 'object');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bench, lessons and the runtime block in doctor (spec 5.3)
+// ---------------------------------------------------------------------------
+
+describe('kolm code bench and lessons', () => {
+  let home;
+  before(() => {
+    home = makeTempDir('kolm-cli-bench-');
+  });
+
+  it('documents both verbs in the usage text', () => {
+    assert.ok(USAGE.includes('bench options:'), 'usage has a bench section');
+    assert.ok(USAGE.includes('--tasks'), 'usage names --tasks');
+    assert.ok(USAGE.includes('--compare'), 'usage names --compare');
+    assert.ok(USAGE.includes('lessons options:'), 'usage has a lessons section');
+    assert.ok(USAGE.includes('--clear'), 'usage names --clear');
+  });
+
+  it('reports an unknown bench task id as not found', () => {
+    const res = runCli(['bench', '--tasks', 'no-such-bench-task'], { home });
+    assert.equal(res.status, EXIT.NOT_FOUND);
+    assert.ok(res.stderr.includes('not-found'));
+    assert.ok(res.stderr.includes('no-such-bench-task'));
+  });
+
+  it('refuses a concurrency outside the allowed range', () => {
+    const res = runCli(['bench', '--concurrency', '0'], { home });
+    assert.equal(res.status, EXIT.BAD_ARGS);
+    assert.ok(res.stderr.includes('--concurrency'));
+  });
+
+  it('refuses a --compare file that is not there', () => {
+    const res = runCli(['bench', '--compare', path.join(home, 'absent.json')], { home });
+    assert.equal(res.status, EXIT.NOT_FOUND);
+    assert.ok(res.stderr.includes('--compare'));
+  });
+
+  it('needs a repository for the lessons verb', () => {
+    const res = runCli(['lessons'], { home });
+    assert.equal(res.status, EXIT.BAD_ARGS);
+    assert.ok(res.stderr.includes('lessons needs a repository'));
+  });
+
+  it('reports an empty lesson set as json and clears it', () => {
+    const repo = makeTempDir('kolm-cli-lessons-repo-');
+    const res = runCli(['lessons', repo, '--json'], { home });
+    assert.equal(res.status, EXIT.OK, res.stderr.slice(-300));
+    const report = JSON.parse(res.stdout);
+    assert.equal(report.count, 0);
+    assert.deepEqual(report.lessons, []);
+    assert.ok(report.path.endsWith('.json'));
+
+    const cleared = runCli(['lessons', repo, '--clear'], { home });
+    assert.equal(cleared.status, EXIT.OK);
+    assert.ok(cleared.stdout.startsWith('cleared'));
+    assert.ok(/^[\x20-\x7e\n\r]*$/.test(cleared.stdout), 'lessons output is printable ascii');
+  });
+});
+
+describe('kolm code doctor runtime block', () => {
+  let home;
+  before(() => {
+    home = makeTempDir('kolm-cli-runtime-');
+  });
+
+  it('names the routing mode and every runtime toggle in --json', () => {
+    const res = runCli(['doctor', '--json'], {
+      home,
+      extra: {
+        KOLM_CODE_ROUTING: 'fixed',
+        KOLM_CODE_SUBTASKS: '0',
+        KOLM_CODE_TEXT_TOOLS: 'ollama:qwen3.8:latest',
+        KOLM_CODE_PROVIDER_CONCURRENCY: 'ollama=1,anthropic=4',
+        KOLM_CODE_STREAM: '1',
+      },
+    });
+    const report = JSON.parse(res.stdout);
+    assert.equal(report.runtime.routing, 'fixed');
+    assert.equal(report.runtime.subtasks, false);
+    assert.equal(report.runtime.stream, true);
+    assert.deepEqual(report.runtime.textTools, ['ollama:qwen3.8:latest']);
+    assert.deepEqual(report.runtime.providerConcurrency, { ollama: 1, anthropic: 4 });
+    assert.equal(report.runtime.coach, true);
+    assert.equal(report.runtime.selfReview, true);
+    assert.equal(report.runtime.lessons, true);
+  });
+
+  it('prints the same toggles in the ascii table', () => {
+    const res = runCli(['doctor'], { home });
+    assert.ok(res.stdout.includes('SETTING'));
+    assert.ok(/routing\s+auto/.test(res.stdout));
+    assert.ok(/self-review\s+on/.test(res.stdout));
+    assert.ok(/provider concurrency\s+defaults/.test(res.stdout));
+    assert.ok(/^[\x20-\x7e\n\r]*$/.test(res.stdout), 'doctor output is printable ascii');
+  });
+
+  it('rejects a malformed provider concurrency map instead of ignoring it', () => {
+    const res = runCli(['doctor'], { home, extra: { KOLM_CODE_PROVIDER_CONCURRENCY: 'ollama' } });
+    assert.equal(res.status, EXIT.BAD_ARGS);
+    assert.ok(res.stderr.includes('KOLM_CODE_PROVIDER_CONCURRENCY'));
+  });
+});
+
+describe('kolm code show renders subtasks', () => {
+  it('folds subtask events and the receipt into rows', () => {
+    const view = subtaskViewFrom(
+      [
+        { type: 'subtasks.plan', payload: { subtasks: [{ id: 's1', title: 'csv' }, { id: 's2', title: 'table' }] } },
+        { type: 'subtask.start', payload: { id: 's1' } },
+        { type: 'subtask.end', payload: { id: 's1', verdict: 'PASS', winner: 'c0a0', costUsd: 0.25 } },
+        { type: 'subtask.start', payload: { id: 's2' } },
+        { type: 'subtask.end', payload: { id: 's2', verdict: 'FAIL', winner: null, costUsd: 0.1 } },
+        { type: 'integration.merge', payload: { merged: 2, conflicts: [] } },
+        { type: 'integration.verdict', payload: { verdict: 'PASS' } },
+      ],
+      { subtasks: [{ id: 's1', winner: 'c0a0', branch: 'kolm/code/r1/c0a0', sha: 'abc1234' }] },
+    );
+    assert.deepEqual(view.subtasks.map((s) => s.id), ['s1', 's2']);
+    assert.equal(view.subtasks[0].verdict, 'PASS');
+    assert.equal(view.subtasks[0].branch, 'kolm/code/r1/c0a0');
+    assert.equal(view.subtasks[0].sha, 'abc1234');
+    assert.equal(view.subtasks[1].verdict, 'FAIL');
+    assert.equal(view.integration.verdict, 'PASS');
+    assert.equal(view.integration.merged, 2);
+    assert.equal(view.integration.conflicts, 0);
+  });
+
+  it('shows a retried subtask and a skipped dependent', () => {
+    const view = subtaskViewFrom(
+      [
+        { type: 'subtasks.plan', payload: { subtasks: [{ id: 'alpha' }, { id: 'beta' }, { id: 'gamma' }] } },
+        { type: 'subtask.retry', payload: { id: 'alpha', index: 0, priorVerdict: 'FAIL' } },
+        { type: 'subtask.start', payload: { id: 'alpha' } },
+        { type: 'subtask.end', payload: { id: 'alpha', verdict: 'FAIL', winner: null, costUsd: 0.05 } },
+        { type: 'subtask.skipped', payload: { id: 'beta', index: 1, because: ['alpha'] } },
+        { type: 'subtask.start', payload: { id: 'gamma' } },
+        { type: 'subtask.end', payload: { id: 'gamma', verdict: 'PASS', winner: 's2c0a0', costUsd: 0.02 } },
+        { type: 'integration.merge', payload: { id: 'gamma', ok: true, conflicts: [] } },
+        {
+          type: 'integration.verdict',
+          payload: { verdict: 'FAIL', winner: null, reasons: ['subtask alpha failed'], subtasks: ['alpha', 'gamma', 'beta'] },
+        },
+      ],
+      null,
+    );
+    const rows = new Map(view.subtasks.map((s) => [s.id, s]));
+    assert.deepEqual([...rows.keys()], ['alpha', 'beta', 'gamma']);
+    // The retry is superseded by the start and the end that follow it.
+    assert.equal(rows.get('alpha').status, 'done');
+    assert.equal(rows.get('alpha').verdict, 'FAIL');
+    // A skipped subtask has a row with no cost and never claims to have run.
+    assert.equal(rows.get('beta').status, 'skipped');
+    assert.equal(rows.get('beta').verdict, 'SKIPPED');
+    assert.equal(rows.get('beta').costUsd, 0);
+    assert.equal(rows.get('gamma').verdict, 'PASS');
+    assert.equal(view.integration.verdict, 'FAIL');
+    assert.equal(view.integration.merged, 1);
+  });
+
+  it('leaves a retry without a start showing as retrying', () => {
+    const view = subtaskViewFrom([{ type: 'subtask.retry', payload: { id: 'alpha', priorVerdict: 'JUDGE' } }], null);
+    assert.deepEqual(view.subtasks.map((s) => s.status), ['retrying']);
+    assert.equal(view.subtasks[0].verdict, null);
+  });
+
+  it('returns nothing at all for a run that never split', () => {
+    const view = subtaskViewFrom([{ type: 'run.start', payload: {} }], null);
+    assert.deepEqual(view.subtasks, []);
+    assert.equal(view.integration.verdict, null);
+    assert.equal(view.integration.merged, null);
+  });
+
+  it('survives payloads the orchestrator has not shipped yet', () => {
+    const view = subtaskViewFrom(
+      [
+        { type: 'subtasks.plan', payload: {} },
+        { type: 'subtask.start', payload: {} },
+        { type: 'subtask.end', payload: { id: 's9' } },
+        { type: 'integration.merge', payload: {} },
+      ],
+      { subtasks: 'not an array' },
+    );
+    assert.deepEqual(view.subtasks.map((s) => s.id), ['s9']);
+    assert.equal(view.subtasks[0].verdict, null);
+    assert.equal(view.integration.merged, 1);
   });
 });

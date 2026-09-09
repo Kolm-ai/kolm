@@ -1,0 +1,15 @@
+{
+  "id": "two-subtask-feature",
+  "title": "Add a CSV formatter and a table formatter, plus an integration test",
+  "text": "Add two independent formatters for the records in src/records.js, then\none test that uses both.\n\n1. src/csv.js exports toCsv(records). The first line is the header\n   \"id,name,score\". Then one line per record with the three values in\n   that order joined by commas. Lines are joined with a single newline\n   and there is no trailing newline.\n\n2. src/table.js exports toTable(records). The first line is\n   \"id | name | score\", the second line is \"---\", then one line per\n   record with the three values joined by \" | \". Lines are joined with a\n   single newline and there is no trailing newline.\n\n3. test/integration.test.js requires both formatters and sampleRecords()\n   from src/records.js and asserts that the table has exactly one more\n   line than the CSV (the separator row).\n\nThe two formatters do not import each other.",
+  "language": "javascript",
+  "expect": {
+    "verdict": "PASS",
+    "changedFiles": [
+      "src/csv.js",
+      "src/table.js",
+      "test/integration.test.js"
+    ],
+    "hiddenTest": "tests/hidden.test.js"
+  }
+}

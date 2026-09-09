@@ -11,7 +11,12 @@ import { LadderError } from './errors.js';
 import { modelTimeoutMs } from './config.js';
 import { briefToPrompt } from './context/repo-brief.js';
 
-const BRIEF_CAP = 10 * 1024;
+// Plan v2 (spec 4.1): the brief is now the orchestrator's main lever for
+// splitting work, so it gets a much larger slice of the prompt than v1's 10 KB.
+const BRIEF_CAP = 32 * 1024;
+
+/** Hard ceiling on subtasks. Beyond this the coordination costs more than it saves. */
+export const MAX_SUBTASKS = 4;
 
 const SYSTEM = [
   'You plan one focused code change inside an existing repository.',
@@ -20,6 +25,13 @@ const SYSTEM = [
   'Name only files the task actually needs. Forbidden paths are globs the change must not touch',
   '(lockfiles, generated output, unrelated packages, CI credentials).',
   'If the task is ambiguous, still produce a plan for the most reasonable reading and list the ambiguities in "clarifications".',
+  'Estimate "complexity": trivial (a line or two, one file), small (one file, a contained change),',
+  'medium (a few files that must agree), large (a cross-cutting change).',
+  'Split the task into "subtasks" ONLY when the parts touch disjoint sets of files and can be written',
+  `independently; never more than ${MAX_SUBTASKS}, and leave the array empty when a single change is simpler.`,
+  'Each subtask lists the files it owns and may name earlier subtask ids in "depends_on".',
+  'Give each subtask its own "acceptance" list: only criteria its files alone can satisfy, never a criterion about another subtask.',
+  'When you split, set "integration_test" to the command that proves the merged whole works.',
 ].join(' ');
 
 /** JSON schema the planner must fill. */
@@ -38,6 +50,24 @@ export const PLAN_SCHEMA = Object.freeze({
       risk: { type: 'string', enum: ['low', 'medium', 'high'] },
       budget_hint_usd: { type: 'number' },
       clarifications: { type: 'array', items: { type: 'string' } },
+      complexity: { type: 'string', enum: ['trivial', 'small', 'medium', 'large'] },
+      subtasks: {
+        type: 'array',
+        items: {
+          type: 'object',
+          required: ['id', 'title', 'files'],
+          properties: {
+            id: { type: 'string' },
+            title: { type: 'string' },
+            summary: { type: 'string' },
+            files: { type: 'array', items: { type: 'string' } },
+            acceptance: { type: 'array', items: { type: 'string' } },
+            depends_on: { type: 'array', items: { type: 'string' } },
+          },
+          additionalProperties: false,
+        },
+      },
+      integration_test: { type: 'string' },
     },
     additionalProperties: false,
   },
@@ -59,6 +89,38 @@ function strings(value, cap = 40) {
 function num(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * Normalise the raw `subtasks` array into the shape the orchestrator consumes.
+ *
+ * Shape only: ids are de-duplicated and unknown `depends_on` references are kept
+ * verbatim so that subtasks.js can REJECT the split (and fall back to a single
+ * unit) rather than silently running a plan the model did not write. A model
+ * that returns one subtask has not split anything, so that collapses to [].
+ *
+ * @param {unknown} value raw `json.subtasks`
+ * @returns {Array<{id:string,title:string,summary:string,files:string[],acceptance:string[],depends_on:string[]}>}
+ */
+export function normalizeSubtasks(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const raw of value.slice(0, 16)) {
+    if (!raw || typeof raw !== 'object') continue;
+    const id = String(raw.id ?? '').trim().slice(0, 40);
+    if (id === '' || seen.has(id)) continue;
+    seen.add(id);
+    out.push({
+      id,
+      title: String(raw.title ?? id).slice(0, 200),
+      summary: String(raw.summary ?? '').slice(0, 2000),
+      files: strings(raw.files, 60),
+      acceptance: strings(raw.acceptance, 20),
+      depends_on: strings(raw.depends_on, 8),
+    });
+  }
+  return out.length > 1 ? out : [];
 }
 
 function buildPrompt({ task, brief, commands }) {
@@ -97,7 +159,8 @@ function buildPrompt({ task, brief, commands }) {
  * @param {AbortSignal} [args.signal]
  * @returns {Promise<{title:string, summary:string, acceptance:string[], files_expected:string[],
  *   forbidden_paths:string[], test_command:string|null, risk:'low'|'medium'|'high',
- *   budget_hint_usd:number, clarifications:string[], model:string|null, costUsd:number}>}
+ *   budget_hint_usd:number, clarifications:string[], complexity:'trivial'|'small'|'medium'|'large',
+ *   subtasks:Array<object>, integration_test:string|null, model:string|null, costUsd:number}>}
  */
 export async function plan({
   task,
@@ -186,6 +249,13 @@ export async function plan({
     risk: ['low', 'medium', 'high'].includes(json.risk) ? json.risk : 'medium',
     budget_hint_usd: num(json.budget_hint_usd, 0),
     clarifications: strings(json.clarifications, 20),
+    // Plan v2. `complexity` defaults to 'medium' so a v1 plan (and every plan
+    // from a model that ignores the new field) routes to today's ladder exactly.
+    complexity: ['trivial', 'small', 'medium', 'large'].includes(json.complexity) ? json.complexity : 'medium',
+    subtasks: normalizeSubtasks(json.subtasks),
+    integration_test: typeof json.integration_test === 'string' && json.integration_test.trim() !== ''
+      ? json.integration_test.trim()
+      : null,
     model: orchestrator.id ?? res.model ?? null,
     costUsd,
   };
@@ -194,4 +264,4 @@ export async function plan({
   return built;
 }
 
-export default { plan, PLAN_SCHEMA };
+export default { plan, PLAN_SCHEMA, normalizeSubtasks, MAX_SUBTASKS };

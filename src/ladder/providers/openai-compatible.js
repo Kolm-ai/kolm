@@ -1,4 +1,4 @@
-// kolm code — OpenAI-compatible adapter (owner A, spec §3).
+// kolm code - OpenAI-compatible adapter (owner PROV, spec section 3).
 //
 // Serves cerebras / deepseek / openrouter / ollama through
 // `POST {base}/chat/completions`. Translates the unified Anthropic-shaped block
@@ -7,14 +7,53 @@
 //   user tool_result    <-> separate `{role:'tool', tool_call_id, content}` messages
 //   tools               <-> `[{type:'function', function:{name, description, parameters}}]`
 //
+// Three behaviours the ladder depends on live here:
+//   * text tool protocol (spec section 3.1/section 3.2) for endpoints with no tool API, chosen
+//     at construction from the registry or forced by config, flipped to at
+//     runtime when a 400 says tools are unsupported, and requestable for a single
+//     call with `textTools: true` (spec 4.3) without latching the instance;
+//   * one limiter per provider (spec section 3.3), with Retry-After-aware backoff and a
+//     429 that halves concurrency for a minute;
+//   * streaming (spec section 3.4) for long outputs, where a non-streaming request is
+//     what hits gateway timeouts.
+//
 // `fetch` is injectable so every test runs offline.
 
 import { LadderError, isLadderError } from '../errors.js';
 import { parseRef } from '../config.js';
 import { describeModel, estimateCost } from './registry.js';
+import { limiterFor, retryDelayMs, THROTTLE_PENALTY_MS } from './limiter.js';
+import {
+  looksLikeToolsUnsupported,
+  parseTextToolCalls,
+  refForcedToTextTools,
+  renderJsonOnlyForText,
+  renderToolsForText,
+  toTextProtocolMessages,
+} from './text-tools.js';
 
-const MAX_TRIES = 3;
-const BACKOFF_BASE_MS = 500;
+// Spec section 3.3: a 429/529/503 is worth four tries, any other 5xx two. Nothing gets
+// more than four, so a wedged endpoint cannot hold a candidate hostage.
+const MAX_TRIES_THROTTLED = 4;
+const MAX_TRIES_OTHER = 2;
+const ABSOLUTE_MAX_TRIES = MAX_TRIES_THROTTLED;
+
+/** Above this many max_tokens a non-streaming request risks a gateway timeout. */
+const STREAM_THRESHOLD_TOKENS = 8000;
+
+// Deliberately equal to the threshold and to the coder's own default: a caller
+// that names no cap is not asking for a long output, so it must not stream.
+const DEFAULT_MAX_TOKENS = 8000;
+
+/** Characters per token used only when an endpoint omits usage on a stream. */
+const CHARS_PER_TOKEN = 3.6;
+
+/**
+ * Ceiling for the one retry made when a thinking model spends its whole
+ * budget on reasoning and returns an empty message with finish_reason
+ * "length". Four times the original budget, never above this.
+ */
+const EMPTY_RETRY_MAX_TOKENS = 16000;
 
 const DEFAULT_BASE_URLS = {
   cerebras: 'https://api.cerebras.ai/v1',
@@ -109,6 +148,53 @@ function blockText(content) {
     .join('');
 }
 
+/**
+ * Reasoning text of a chat message. DeepSeek and vLLM use "reasoning_content";
+ * Ollama's OpenAI layer (and OpenRouter) use "reasoning". Empty string when
+ * the message carries neither.
+ */
+export function reasoningTextOf(message) {
+  if (!message || typeof message !== 'object') return '';
+  if (typeof message.reasoning_content === 'string') return message.reasoning_content;
+  if (typeof message.reasoning === 'string') return message.reasoning;
+  return '';
+}
+
+/**
+ * True when the reply hit its token cap with nothing usable in it: no visible
+ * content and no tool calls. Thinking models do this when the whole budget
+ * went to reasoning; the caller gets one retry with a larger budget.
+ */
+export function isEmptyOnLength(data) {
+  const choice = data?.choices?.[0];
+  if (!choice || choice.finish_reason !== 'length') return false;
+  const message = choice.message ?? {};
+  if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) return false;
+  const raw = typeof message.content === 'string' ? message.content : blockText(message.content);
+  return stripThinking(raw).trim() === '';
+}
+
+/** Budget for the empty-on-length retry: 4x the original, capped. */
+export function emptyRetryBudget(from) {
+  const base = Number.isFinite(from) && from > 0 ? from : DEFAULT_MAX_TOKENS;
+  return Math.min(Math.max(base * 4, DEFAULT_MAX_TOKENS), EMPTY_RETRY_MAX_TOKENS);
+}
+
+/**
+ * Usage of two calls that served one chat() (the empty-on-length retry). The
+ * cache-hit fields are kept from the later call; the counts are summed so the
+ * cost ledger sees every token the provider billed.
+ */
+export function sumUsage(prior, current) {
+  if (!prior || typeof prior !== 'object') return current ?? {};
+  const cur = current ?? {};
+  return {
+    ...cur,
+    prompt_tokens: (prior.prompt_tokens ?? 0) + (cur.prompt_tokens ?? 0),
+    completion_tokens: (prior.completion_tokens ?? 0) + (cur.completion_tokens ?? 0),
+  };
+}
+
 function toolResultToString(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
@@ -193,6 +279,10 @@ function isRetryableStatus(status) {
   return status === 429 || status === 529 || (typeof status === 'number' && status >= 500);
 }
 
+function triesFor(status) {
+  return status === 429 || status === 529 || status === 503 ? MAX_TRIES_THROTTLED : MAX_TRIES_OTHER;
+}
+
 function secretOf(config, name) {
   if (config && typeof config.getSecret === 'function') {
     try {
@@ -209,10 +299,143 @@ function secretOf(config, name) {
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// ---------------------------------------------------------------------------
+// streaming
+// ---------------------------------------------------------------------------
+
+/** Read a fetch Response body to a string, whatever stream flavour it exposes. */
+async function readBodyText(res) {
+  const body = res?.body;
+  const decoder = new TextDecoder();
+  const decode = (chunk) =>
+    typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
+
+  if (body && typeof body.getReader === 'function') {
+    const reader = body.getReader();
+    let text = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value !== undefined && value !== null) text += decode(value);
+    }
+    return text + decoder.decode();
+  }
+  if (body && typeof body[Symbol.asyncIterator] === 'function') {
+    let text = '';
+    for await (const chunk of body) text += decode(chunk);
+    return text + decoder.decode();
+  }
+  if (typeof res?.text === 'function') return await res.text();
+  return '';
+}
+
+/** SSE text -> the JSON payloads it carried, `[DONE]` and partial frames skipped. */
+function parseSseEvents(raw) {
+  const events = [];
+  for (const line of String(raw ?? '').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('data:')) continue;
+    const payload = trimmed.slice(5).trim();
+    if (payload === '' || payload === '[DONE]') continue;
+    try {
+      events.push(JSON.parse(payload));
+    } catch {
+      // deliberate: a truncated frame is not a failed request
+    }
+  }
+  return events;
+}
+
+/**
+ * Fold streamed deltas back into the non-streaming completion shape, so the
+ * reply-building code below has exactly one input format.
+ */
+function assembleStreamedCompletion(events, body) {
+  let id = null;
+  let model = null;
+  let finishReason = null;
+  let content = '';
+  let reasoning = '';
+  let usage = null;
+  const byIndex = new Map();
+
+  for (const event of events) {
+    if (event?.id) id = event.id;
+    if (event?.model) model = event.model;
+    if (event?.usage) usage = event.usage;
+    const choice = event?.choices?.[0];
+    if (!choice) continue;
+    if (choice.finish_reason) finishReason = choice.finish_reason;
+    const delta = choice.delta ?? choice.message ?? {};
+    if (typeof delta.content === 'string') content += delta.content;
+    if (typeof delta.reasoning_content === 'string') reasoning += delta.reasoning_content;
+    else if (typeof delta.reasoning === 'string') reasoning += delta.reasoning;
+    for (const tc of delta.tool_calls ?? []) {
+      const index = Number.isInteger(tc?.index) ? tc.index : byIndex.size;
+      const current = byIndex.get(index) ?? { id: null, name: null, args: '' };
+      if (tc?.id) current.id = tc.id;
+      const namePart = tc?.function?.name;
+      if (namePart) {
+        // Most endpoints send the whole name in the first delta; a few split it.
+        if (!current.name) current.name = namePart;
+        else if (!current.name.endsWith(namePart)) current.name += namePart;
+      }
+      if (typeof tc?.function?.arguments === 'string') current.args += tc.function.arguments;
+      byIndex.set(index, current);
+    }
+  }
+
+  const toolCalls = [...byIndex.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, tc], i) => ({
+      id: tc.id ?? `call_${i + 1}`,
+      type: 'function',
+      function: { name: tc.name ?? '', arguments: tc.args },
+    }));
+
+  const message = { role: 'assistant', content: content === '' ? null : content };
+  if (reasoning !== '') message.reasoning_content = reasoning;
+  if (toolCalls.length > 0) message.tool_calls = toolCalls;
+
+  const payload = {
+    id,
+    model,
+    choices: [
+      {
+        index: 0,
+        finish_reason: finishReason ?? (toolCalls.length > 0 ? 'tool_calls' : 'stop'),
+        message,
+      },
+    ],
+    usage,
+  };
+
+  if (!usage) {
+    // `stream_options.include_usage` is not universal; a rough count beats a
+    // zero that would silently under-report the run's cost.
+    const promptChars = JSON.stringify(body?.messages ?? []).length;
+    const outChars =
+      content.length +
+      toolCalls.reduce((n, tc) => n + tc.function.arguments.length + tc.function.name.length, 0);
+    payload.usage = {
+      prompt_tokens: Math.ceil(promptChars / CHARS_PER_TOKEN),
+      completion_tokens: Math.ceil(outChars / CHARS_PER_TOKEN),
+    };
+    payload.__estimatedUsage = true;
+  }
+  return payload;
+}
+
+// ---------------------------------------------------------------------------
+// adapter
+// ---------------------------------------------------------------------------
+
 /**
  * @param {string} ref e.g. 'deepseek:deepseek-v4-flash'
- * @param {object} [config] from loadConfig()
- * @param {{fetchImpl?: Function, sleep?: Function, random?: Function, baseUrl?: string}} [opts]
+ * @param {object} [config] from loadConfig(); reads `textTools`, `providerConcurrency`
+ *   and `stream` defensively (all optional)
+ * @param {{fetchImpl?: Function, sleep?: Function, random?: Function, now?: Function,
+ *   baseUrl?: string, limiter?: object}} [opts]
  */
 export function createOpenAICompatibleProvider(ref, config = {}, opts = {}) {
   const { provider, model, ref: normalized } = parseRef(ref);
@@ -229,7 +452,14 @@ export function createOpenAICompatibleProvider(ref, config = {}, opts = {}) {
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   const sleep = opts.sleep ?? defaultSleep;
   const random = opts.random ?? Math.random;
+  const now = opts.now ?? Date.now;
   const spec = describeModel(normalized);
+  const limiter = opts.limiter ?? limiterFor(provider, config, { sleep, now });
+
+  // Text tool protocol: chosen at construction from the catalog or from
+  // KOLM_CODE_TEXT_TOOLS, and latched on for the rest of the process if the
+  // endpoint answers 400 to `tools`.
+  let textTools = spec.tools === false || refForcedToTextTools(normalized, config.textTools);
 
   function headers() {
     const h = { 'content-type': 'application/json' };
@@ -241,20 +471,43 @@ export function createOpenAICompatibleProvider(ref, config = {}, opts = {}) {
     return h;
   }
 
-  function buildBody(call, { strict }) {
+  function wantsStream(call) {
+    return (call.maxTokens ?? DEFAULT_MAX_TOKENS) > STREAM_THRESHOLD_TOKENS || config.stream === true;
+  }
+
+  // `useText` is decided per call by `chat`: the instance latch OR this call's
+  // own `textTools: true`, which is how the coder moves ONE session to the text
+  // protocol without dragging the shared instance with it (spec 4.3).
+  function buildBody(call, { strict, useText = false }) {
+    const tools = Array.isArray(call.tools) ? call.tools : [];
+    const stream = wantsStream(call);
+    let system = call.system ?? null;
+    let messages = call.messages ?? [];
+
+    if (useText) {
+      // The protocol and the tool list ride in the system prompt, and the
+      // history is flattened so no tool_use / tool_result block reaches the wire.
+      messages = toTextProtocolMessages(messages);
+      const extra = [];
+      if (tools.length > 0) extra.push(renderToolsForText(tools));
+      if (call.jsonSchema) extra.push(renderJsonOnlyForText(call.jsonSchema));
+      if (extra.length > 0) system = [system, ...extra].filter(Boolean).join('\n\n');
+    }
+
     const body = {
       model,
-      messages: toOpenAIMessages(call.system ?? null, call.messages ?? []),
-      max_tokens: call.maxTokens ?? 8192,
-      stream: false,
+      messages: toOpenAIMessages(system, messages),
+      max_tokens: call.maxTokens ?? DEFAULT_MAX_TOKENS,
+      stream,
     };
+    if (stream) body.stream_options = { include_usage: true };
     if (call.temperature !== undefined && call.temperature !== null) {
       body.temperature = call.temperature;
     }
-    if (Array.isArray(call.tools) && call.tools.length > 0) {
-      body.tools = toOpenAITools(call.tools);
+    if (!useText && tools.length > 0) {
+      body.tools = toOpenAITools(tools);
     }
-    if (call.jsonSchema) {
+    if (call.jsonSchema && !useText) {
       const schema = call.jsonSchema.schema ?? call.jsonSchema;
       const name = call.jsonSchema.name ?? 'response';
       body.response_format = strict
@@ -289,7 +542,7 @@ export function createOpenAICompatibleProvider(ref, config = {}, opts = {}) {
     });
   }
 
-  async function once(body, call) {
+  async function request(body, call) {
     if (typeof fetchImpl !== 'function') {
       throw new LadderError('provider-unavailable', `${normalized}: fetch is unavailable`, {
         ref: normalized,
@@ -332,7 +585,11 @@ export function createOpenAICompatibleProvider(ref, config = {}, opts = {}) {
         const err = new Error(`HTTP ${res.status}${text ? `: ${text.slice(0, 500)}` : ''}`);
         err.status = res.status;
         err.body = text;
+        err.headers = res.headers ?? null; // Retry-After lives here
         throw err;
+      }
+      if (body.stream === true) {
+        return assembleStreamedCompletion(parseSseEvents(await readBodyText(res)), body);
       }
       return await res.json();
     } catch (err) {
@@ -351,9 +608,15 @@ export function createOpenAICompatibleProvider(ref, config = {}, opts = {}) {
     }
   }
 
-  async function sendWithRetries(body, call) {
+  // The gate is around one HTTP attempt, not around the retry loop: a request
+  // waiting out a backoff must not hold a concurrency slot.
+  function once(body, call) {
+    return limiter.run(() => request(body, call), { signal: call.signal });
+  }
+
+  async function sendWithRetries(body, call, meta) {
     let lastErr = null;
-    for (let attempt = 0; attempt < MAX_TRIES; attempt += 1) {
+    for (let attempt = 0; attempt < ABSOLUTE_MAX_TRIES; attempt += 1) {
       try {
         return await once(body, call);
       } catch (err) {
@@ -361,12 +624,16 @@ export function createOpenAICompatibleProvider(ref, config = {}, opts = {}) {
         // it unchanged so the orchestrator can tell abort from failure.
         if (isAbortError(err) && call.signal?.aborted) throw err;
         lastErr = err;
-        const noStatus = err?.status === undefined || err?.status === null;
+        const status = err?.status ?? null;
+        const noStatus = status === undefined || status === null;
         const retryable =
-          !isLadderError(err) && (isRetryableStatus(err?.status) || (noStatus && !isAbortError(err)));
-        if (attempt === MAX_TRIES - 1 || !retryable) break;
-        const delay = BACKOFF_BASE_MS * 2 ** attempt;
-        await sleep(Math.round(delay + random() * delay * 0.25));
+          !isLadderError(err) && (isRetryableStatus(status) || (noStatus && !isAbortError(err)));
+        if (status === 429) {
+          meta.throttled = true;
+          limiter.penalize({ ms: THROTTLE_PENALTY_MS });
+        }
+        if (!retryable || attempt + 1 >= triesFor(status)) break;
+        await sleep(retryDelayMs(attempt, err?.headers ?? null, { random, now }));
       }
     }
     throw mapError(lastErr);
@@ -380,6 +647,10 @@ export function createOpenAICompatibleProvider(ref, config = {}, opts = {}) {
     kind: 'openai-compatible',
     baseUrl,
     spec,
+    /** True once this instance is speaking the text tool protocol. */
+    get textTools() {
+      return textTools;
+    },
     async chat(call = {}) {
       if (!armed) {
         throw new LadderError('not-armed', `rung ${normalized} is not armed: set ${envVar}`, {
@@ -388,15 +659,51 @@ export function createOpenAICompatibleProvider(ref, config = {}, opts = {}) {
         });
       }
       const started = Date.now();
+      // Per-call request for the text protocol (spec 4.3). It never latches the
+      // instance: the next call without the flag speaks native tools again.
+      let useText = textTools || call.textTools === true;
+      const meta = { textTools: useText, throttled: false, streamed: wantsStream(call) };
+      const hasTools = Array.isArray(call.tools) && call.tools.length > 0;
+      let strictUsed = true;
+      const send = (strict) => {
+        strictUsed = strict;
+        return sendWithRetries(buildBody(call, { strict, useText }), call, meta);
+      };
+
       let data;
       try {
-        data = await sendWithRetries(buildBody(call, { strict: true }), call);
+        data = await send(true);
       } catch (err) {
-        // Some gateways reject `strict:true` schemas; retry once without it.
-        if (call.jsonSchema && isLadderError(err, 'provider-bad-request')) {
-          data = await sendWithRetries(buildBody(call, { strict: false }), call);
+        if (!useText && hasTools && looksLikeToolsUnsupported(err)) {
+          // The endpoint has no tool API. Latch the text protocol on for the life
+          // of this instance and retry this same call once; providers keep no store
+          // the caller can read, so the only signal out is meta.textTools.
+          textTools = true;
+          useText = true;
+          meta.textTools = true;
+          data = await send(true);
+        } else if (call.jsonSchema && isLadderError(err, 'provider-bad-request')) {
+          // Some gateways reject `strict:true` schemas; retry once without it.
+          data = await send(false);
         } else {
           throw err;
+        }
+      }
+
+      // A thinking model can spend the whole budget on reasoning and hand back
+      // an empty message with finish_reason "length". One retry with a larger
+      // budget turns that into an answer; the first call's tokens still count.
+      let priorUsage = null;
+      if (isEmptyOnLength(data)) {
+        const from = call.maxTokens ?? DEFAULT_MAX_TOKENS;
+        const to = emptyRetryBudget(from);
+        if (to > from) {
+          meta.emptyRetry = { from, to };
+          meta.reasoningChars = reasoningTextOf(data.choices[0].message).length;
+          priorUsage = data?.usage ?? null;
+          const bigger = { ...call, maxTokens: to };
+          meta.streamed = wantsStream(bigger);
+          data = await sendWithRetries(buildBody(bigger, { strict: strictUsed, useText }), bigger, meta);
         }
       }
 
@@ -404,29 +711,44 @@ export function createOpenAICompatibleProvider(ref, config = {}, opts = {}) {
       const message = choice?.message ?? {};
       const rawContent = typeof message.content === 'string' ? message.content : blockText(message.content);
       let text = stripThinking(rawContent);
-      if (text === '' && typeof message.reasoning_content === 'string') {
-        text = stripThinking(message.reasoning_content);
+      if (text === '') {
+        const reasoning = reasoningTextOf(message);
+        if (reasoning !== '') text = stripThinking(reasoning);
       }
 
       const toolCalls = [];
       const content = [];
-      if (text !== '') content.push({ type: 'text', text });
-      for (const tc of message.tool_calls ?? []) {
-        const rawArgs = tc?.function?.arguments;
-        let input;
-        try {
-          input = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : (rawArgs ?? {});
-          if (input === null || typeof input !== 'object') input = { _raw: String(rawArgs) };
-        } catch {
-          input = { _raw: String(rawArgs) };
+
+      if (meta.textTools) {
+        // Text mode: the calls are in the text. Parse them out, then rebuild the
+        // exact tool_use blocks the coder's transcript expects.
+        const parsed = parseTextToolCalls(text);
+        text = parsed.text;
+        if (text !== '') content.push({ type: 'text', text });
+        for (const tc of parsed.toolCalls) {
+          content.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.input });
+          toolCalls.push({ id: tc.id, name: tc.name, input: tc.input });
         }
-        const id = tc?.id ?? `toolu_${toolCalls.length + 1}`;
-        const name = tc?.function?.name;
-        content.push({ type: 'tool_use', id, name, input });
-        toolCalls.push({ id, name, input });
+        if (parsed.errors.length > 0) meta.textToolErrors = parsed.errors;
+      } else {
+        if (text !== '') content.push({ type: 'text', text });
+        for (const tc of message.tool_calls ?? []) {
+          const rawArgs = tc?.function?.arguments;
+          let input;
+          try {
+            input = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : (rawArgs ?? {});
+            if (input === null || typeof input !== 'object') input = { _raw: String(rawArgs) };
+          } catch {
+            input = { _raw: String(rawArgs) };
+          }
+          const id = tc?.id ?? `toolu_${toolCalls.length + 1}`;
+          const name = tc?.function?.name;
+          content.push({ type: 'tool_use', id, name, input });
+          toolCalls.push({ id, name, input });
+        }
       }
 
-      const rawUsage = data?.usage ?? {};
+      const rawUsage = sumUsage(priorUsage, data?.usage ?? {});
       const promptTokens = rawUsage.prompt_tokens ?? 0;
       const cacheRead =
         rawUsage.prompt_cache_hit_tokens ?? rawUsage.prompt_tokens_details?.cached_tokens ?? 0;
@@ -438,6 +760,7 @@ export function createOpenAICompatibleProvider(ref, config = {}, opts = {}) {
         cacheRead,
         cacheWrite: 0,
       };
+      if (data?.__estimatedUsage) usage.estimated = true;
 
       let stopReason = mapFinishReason(choice?.finish_reason);
       if (toolCalls.length > 0 && stopReason === 'end_turn') stopReason = 'tool_use';
@@ -453,6 +776,7 @@ export function createOpenAICompatibleProvider(ref, config = {}, opts = {}) {
         model: data?.model ?? model,
         provider,
         latencyMs: Date.now() - started,
+        meta,
       };
     },
   };

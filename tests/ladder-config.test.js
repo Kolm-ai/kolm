@@ -908,3 +908,111 @@ test('probeGhCli reports availability without ever returning the token', async (
     reason: 'gh not usable: ENOENT',
   });
 });
+
+// --- section 7: coordination, context, runtime and bench settings ----------
+
+test('section 7 settings have the documented defaults', () => {
+  const c = loadConfig(env());
+  // coordination
+  assert.equal(c.routing, 'auto');
+  assert.equal(c.subtasks, true);
+  assert.equal(c.subtaskConcurrency, 2);
+  assert.equal(c.coach, true);
+  assert.equal(c.selfReview, true);
+  assert.equal(c.lessons, true);
+  // context budgets (0 tokens means "never compact")
+  assert.equal(c.contextTokens, 0);
+  assert.equal(c.retrievalBytes, 16384);
+  // runtime
+  assert.deepEqual(c.textTools, []);
+  assert.deepEqual(c.providerConcurrency, {});
+  assert.equal(c.stream, false);
+  // benchmark
+  assert.equal(c.benchDir, path.join(c.codeDir, 'bench'));
+});
+
+test('section 7 settings read their environment variables', () => {
+  const c = loadConfig(
+    env({
+      KOLM_CODE_ROUTING: 'fixed',
+      KOLM_CODE_SUBTASKS: '0',
+      KOLM_CODE_SUBTASK_CONCURRENCY: '5',
+      KOLM_CODE_COACH: 'false',
+      KOLM_CODE_SELF_REVIEW: 'no',
+      KOLM_CODE_LESSONS: 'off',
+      KOLM_CODE_CONTEXT_TOKENS: '120000',
+      KOLM_CODE_RETRIEVAL_BYTES: '4096',
+      KOLM_CODE_TEXT_TOOLS: 'ollama:qwen3-coder-30b, deepseek:deepseek-v4-flash',
+      KOLM_CODE_PROVIDER_CONCURRENCY: 'ollama=1,Anthropic=4',
+      KOLM_CODE_STREAM: '1',
+    }),
+  );
+  assert.equal(c.routing, 'fixed');
+  assert.equal(c.subtasks, false);
+  assert.equal(c.subtaskConcurrency, 5);
+  assert.equal(c.coach, false);
+  assert.equal(c.selfReview, false);
+  assert.equal(c.lessons, false);
+  assert.equal(c.contextTokens, 120000);
+  assert.equal(c.retrievalBytes, 4096);
+  assert.deepEqual(c.textTools, ['ollama:qwen3-coder-30b', 'deepseek:deepseek-v4-flash']);
+  // provider names are lowercased so callers can index by provider name.
+  assert.deepEqual(c.providerConcurrency, { ollama: 1, anthropic: 4 });
+  assert.equal(c.stream, true);
+});
+
+test('KOLM_CODE_BENCH_DIR is honoured and tilde-expanded', () => {
+  const explicit = loadConfig(env({ KOLM_CODE_BENCH_DIR: path.join(tmpRoot, 'bench-here') }));
+  assert.equal(explicit.benchDir, path.resolve(path.join(tmpRoot, 'bench-here')));
+
+  const tilded = loadConfig(env({ HOME: emptyHome, KOLM_CODE_BENCH_DIR: '~/bench-home' }));
+  assert.equal(tilded.benchDir, path.resolve(path.join(emptyHome, 'bench-home')));
+});
+
+test('bad section 7 values raise LadderError bad-config', () => {
+  const cases = [
+    { KOLM_CODE_ROUTING: 'sideways' },
+    { KOLM_CODE_SUBTASKS: 'maybe' },
+    { KOLM_CODE_SUBTASK_CONCURRENCY: '0' },
+    { KOLM_CODE_SUBTASK_CONCURRENCY: '99' },
+    { KOLM_CODE_SUBTASK_CONCURRENCY: '1.5' },
+    { KOLM_CODE_COACH: 'sometimes' },
+    { KOLM_CODE_SELF_REVIEW: 'later' },
+    { KOLM_CODE_LESSONS: 'perhaps' },
+    { KOLM_CODE_CONTEXT_TOKENS: '-1' },
+    { KOLM_CODE_CONTEXT_TOKENS: 'lots' },
+    { KOLM_CODE_RETRIEVAL_BYTES: '-1' },
+    { KOLM_CODE_RETRIEVAL_BYTES: '99999999' },
+    { KOLM_CODE_STREAM: 'yesplease' },
+    // a concurrency map entry needs both halves, an integer, and a sane range
+    { KOLM_CODE_PROVIDER_CONCURRENCY: 'ollama' },
+    { KOLM_CODE_PROVIDER_CONCURRENCY: 'ollama=0' },
+    { KOLM_CODE_PROVIDER_CONCURRENCY: 'ollama=999' },
+    { KOLM_CODE_PROVIDER_CONCURRENCY: 'ollama=two' },
+    { KOLM_CODE_PROVIDER_CONCURRENCY: '=3' },
+  ];
+  for (const extra of cases) {
+    assert.throws(
+      () => loadConfig(env(extra)),
+      (e) => isLadderError(e, 'bad-config'),
+      `expected bad-config for ${JSON.stringify(extra)}`,
+    );
+  }
+});
+
+test('KOLM_CODE_TEXT_TOOLS validates every ref it lists', () => {
+  assert.throws(
+    () => loadConfig(env({ KOLM_CODE_TEXT_TOOLS: 'ollama:qwen3-coder-30b,notaref' })),
+    (e) => isLadderError(e, 'bad-ref'),
+  );
+});
+
+test('the section 7 settings survive JSON.stringify and stay frozen', () => {
+  const c = loadConfig(env({ KOLM_CODE_PROVIDER_CONCURRENCY: 'ollama=1' }));
+  const round = JSON.parse(JSON.stringify(c));
+  assert.equal(round.routing, 'auto');
+  assert.equal(round.subtaskConcurrency, 2);
+  assert.deepEqual(round.providerConcurrency, { ollama: 1 });
+  assert.equal(Object.isFrozen(c.providerConcurrency), true);
+  assert.equal(Object.isFrozen(c.textTools), true);
+});

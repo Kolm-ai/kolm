@@ -237,6 +237,15 @@ test('context cache stores and replaces payloads per repo sha and kind', options
     store.cachePut('/repo', 'sha', 'brief', { v: 9 });
     assert.deepEqual(store.cacheGet('/repo', 'sha', 'brief'), { v: 9 });
     assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM context_cache').get().n, 3);
+
+    // The retrieval hook folds the task hash into `kind`, so two different
+    // tasks over one commit never share an entry (spec 4.6).
+    store.cachePut('/repo', 'sha', 'retrieval:1111111111111111', { files: ['a.js'] });
+    store.cachePut('/repo', 'sha', 'retrieval:2222222222222222', { files: ['b.js'] });
+    assert.deepEqual(store.cacheGet('/repo', 'sha', 'retrieval:1111111111111111'), { files: ['a.js'] });
+    assert.deepEqual(store.cacheGet('/repo', 'sha', 'retrieval:2222222222222222'), { files: ['b.js'] });
+    assert.equal(store.cacheGet('/repo', 'other-sha', 'retrieval:1111111111111111'), null);
+    assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM context_cache').get().n, 5);
   } finally {
     store.close();
     cleanup(dir);

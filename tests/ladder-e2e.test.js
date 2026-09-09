@@ -389,3 +389,167 @@ test('runTask commits a real branch through the local git driver', gitOptions, a
   // Clean up the worktree the winner kept, so the temp repo can be removed.
   await driver.destroyRun(result.runId).catch(() => {});
 });
+
+// --------------------------------------------- 4. a split run, end to end
+
+const SPLIT_BASE_KEYS = new Set(Object.keys(BASE_FILES));
+
+const STRINGS_MODULE = [
+  '/** Greet someone. */',
+  'export function greet(name) {',
+  '  return `hello ${name}`;',
+  '}',
+  '',
+].join('\n');
+
+/**
+ * Scripted test output for the split run: every added file passes unless it
+ * still carries conflict markers, which is what a bad merge looks like.
+ */
+function splitTests(cmd, wt) {
+  const added = [...wt.files.keys()].filter((p) => !SPLIT_BASE_KEYS.has(p)).sort();
+  const broken = added.filter((p) => String(wt.files.get(p)).includes('<<<<<<<'));
+  const lines = ['ok 1 - index exports a name'];
+  added.forEach((p, i) => lines.push(`${broken.includes(p) ? 'not ok' : 'ok'} ${i + 2} - ${p} works`));
+  const total = 1 + added.length;
+  lines.push(`# tests ${total}`, `# pass ${total - broken.length}`, `# fail ${broken.length}`);
+  return { stdout: `${lines.join('\n')}\n`, exitCode: broken.length > 0 ? 1 : 0 };
+}
+
+// The whole-task summary deliberately names no file: every subtask prompt
+// quotes it, so a file named there would be written by both coders.
+const SPLIT_PLAN = {
+  title: 'add two independent modules',
+  summary: 'Add two small modules, one per part of the split.',
+  acceptance: ['each module exports what its part promises'],
+  files_expected: ['src/math.js', 'src/strings.js'],
+  forbidden_paths: ['package.json'],
+  test_command: TEST_CMD,
+  risk: 'low',
+  complexity: 'medium',
+  budget_hint_usd: 0.5,
+  clarifications: [],
+  subtasks: [
+    {
+      id: 'math',
+      title: 'add src/math.js',
+      summary: 'Create src/math.js exporting add(a, b).',
+      files: ['src/math.js'],
+      acceptance: ['src/math.js exports add(a, b)'],
+      depends_on: [],
+    },
+    {
+      id: 'strings',
+      title: 'add src/strings.js',
+      summary: 'Create src/strings.js exporting greet(name).',
+      files: ['src/strings.js'],
+      acceptance: ['src/strings.js exports greet(name)'],
+      depends_on: [],
+    },
+  ],
+  integration_test: TEST_CMD,
+};
+
+/**
+ * One coder provider for both subtasks: it reads the prompt it was handed (the
+ * plan block lives in the system message, the task in the first user message)
+ * and writes whichever file that part of the split owns.
+ */
+function splitCoder(ref = 'anthropic:claude-haiku', { costUsd = 0.001 } = {}) {
+  return createFakeProvider({
+    ref,
+    script: (call) => {
+      const messages = call.messages || [];
+      if (messages.length !== 1) {
+        return { toolCalls: [{ name: 'finish', input: { summary: 'done' } }], costUsd };
+      }
+      const opening = `${String(call.system ?? '')}\n${String(messages[0]?.content ?? '')}`;
+      const writes = [];
+      if (opening.includes('src/math.js')) {
+        writes.push({ name: 'write_file', input: { path: 'src/math.js', content: GOOD_MATH } });
+      }
+      if (opening.includes('src/strings.js')) {
+        writes.push({ name: 'write_file', input: { path: 'src/strings.js', content: STRINGS_MODULE } });
+      }
+      return {
+        toolCalls: [...writes, { name: 'finish', input: { summary: 'wrote my part' } }],
+        costUsd,
+      };
+    },
+  });
+}
+
+test('a split task runs both halves and merges them into one signed receipt', options, async () => {
+  const { store, dir } = tempStore('split');
+  const driver = createFakeDriver({ files: BASE_FILES, exec: { [TEST_CMD]: splitTests } });
+  const judge = createFakeProvider({ ref: 'anthropic:claude-opus', script: () => ({ json: {} }) });
+  const events = [];
+
+  const result = await runTask({
+    task: { text: 'add a math module and a strings module', title: 'two modules' },
+    repoPath: '/repo/demo',
+    config: { ...baseConfig(path.join(dir, 'code')), candidates: 1, repairRounds: 0 },
+    store,
+    driver,
+    providers: {
+      orchestrator: createFakeProvider({
+        ref: 'anthropic:claude-sonnet',
+        script: () => ({ json: SPLIT_PLAN, costUsd: 0.003 }),
+      }),
+      judge,
+      coders: [splitCoder()],
+      reviewer: reviewerProvider(),
+    },
+    bands: BANDS,
+    rubric: RUBRIC,
+    onEvent: (evt) => events.push(evt),
+  });
+
+  assert.equal(result.verdict, 'PASS');
+  assert.equal(result.winner, 'integration');
+  assert.equal(result.branch, `kolm/code/${result.runId}/integration`);
+  assert.ok(result.sha && result.sha.length >= 7, 'the integration commit has a sha');
+
+  // Both halves ran, in one level, and both merged cleanly.
+  const types = events.map((e) => e.type);
+  assert.ok(types.includes('subtasks.plan'));
+  assert.deepEqual(
+    events.filter((e) => e.type === 'subtask.end').map((e) => e.payload.id),
+    ['math', 'strings'],
+  );
+  assert.deepEqual(
+    events.filter((e) => e.type === 'integration.merge').map((e) => e.payload.id),
+    ['math', 'strings'],
+  );
+  assert.ok(events.filter((e) => e.type === 'integration.merge').every((e) => e.payload.ok));
+  assert.equal(types[types.length - 1], 'run.end');
+  assert.equal(events.length, store.eventsSince(result.runId, 0, 2000).length);
+
+  // The merged tree really does hold both halves, and nothing else.
+  const integration = driver.worktrees.get(`${result.runId}/integration`);
+  assert.equal(integration.readFileSync('src/math.js'), GOOD_MATH);
+  assert.equal(integration.readFileSync('src/strings.js'), STRINGS_MODULE);
+  assert.equal(integration.readFileSync('package.json'), BASE_FILES['package.json'], 'the lockfile is untouched');
+
+  // The receipt carries the per-subtask ledger and still verifies, from memory
+  // and from disk. `subtasks` is inside the signed canonical form.
+  assert.deepEqual(result.receipt.subtasks.map((s) => s.id), ['math', 'strings']);
+  assert.deepEqual(result.receipt.subtasks.map((s) => s.winner), ['s0c0a0', 's1c0a0']);
+  assert.ok(result.receipt.subtasks.every((s) => typeof s.sha === 'string' && s.sha.length > 0));
+  assert.ok(result.receipt.subtasks.every((s) => typeof s.branch === 'string'));
+  assert.equal(result.receipt.winner.candidate_id, 'integration');
+  const verified = verifyReceipt(result.receipt);
+  assert.equal(verified.ok, true, verified.reason ?? 'no reason given');
+  assert.equal(verifyReceipt(result.receiptPath).ok, true);
+
+  // The integration worktree is the one that survives for the PR step.
+  const destroyed = driver.destroyed.map((d) => d.candidateId);
+  assert.ok(!destroyed.includes('integration'), 'the merged worktree is kept');
+  assert.ok(destroyed.includes('base'));
+
+  // The run row and the eval view read a split run back like any other.
+  const run = store.getRun(result.runId);
+  assert.equal(run.status, 'done');
+  assert.equal(run.winner_candidate, 'integration');
+  assert.equal(evalRuns({ store, runIds: [result.runId] }).runs.length, 1);
+});

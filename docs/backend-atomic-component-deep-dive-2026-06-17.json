@@ -39,44 +39,44 @@
     "frontier_improvement_or_invention"
   ],
   "summary": {
-    "component_count": 1024,
-    "test_referenced_components": 1024,
+    "component_count": 1035,
+    "test_referenced_components": 1035,
     "components_without_direct_test_reference": 0,
-    "high_priority_components": 70,
+    "high_priority_components": 71,
     "domains": {
       "api_surface": 32,
       "billing_marketplace": 23,
-      "capture_data_eval": 86,
+      "capture_data_eval": 87,
       "compile_artifact_runtime": 152,
       "developer_distribution": 71,
       "identity_access": 35,
       "infra_cloud_device": 72,
-      "platform_support": 252,
-      "runtime_serving_routing": 28,
+      "platform_support": 260,
+      "runtime_serving_routing": 29,
       "storage_state": 29,
       "training_model_optimization": 174,
-      "trust_security_compliance": 70
+      "trust_security_compliance": 71
     },
     "surfaces": {
       "api-http": 31,
       "cli": 4,
-      "core-backend": 682,
+      "core-backend": 693,
       "package-distribution": 93,
       "service": 3,
       "worker": 211
     },
     "risk_signals": {
       "auth_or_tenant_boundary": 25,
-      "cryptographic_or_proof_boundary": 495,
+      "cryptographic_or_proof_boundary": 497,
       "distribution_or_worker_surface": 308,
-      "environment_configuration_boundary": 386,
-      "execution_or_subprocess_boundary": 335,
+      "environment_configuration_boundary": 387,
+      "execution_or_subprocess_boundary": 341,
       "http_route_surface": 41,
-      "large_component_contract_risk": 49,
+      "large_component_contract_risk": 51,
       "money_or_entitlement_path": 17,
-      "network_or_provider_boundary": 191,
+      "network_or_provider_boundary": 193,
       "open_marker_requires_owner_review": 4,
-      "stateful_storage_boundary": 135
+      "stateful_storage_boundary": 137
     },
     "top_review_targets": [
       {
@@ -164,20 +164,6 @@
         "improvement_track": "maintain_generated_daemon_connector_matrix_and_privacy_proxy_contract"
       },
       {
-        "path": "workers/quantize/scripts/quantize.py",
-        "domain": "training_model_optimization",
-        "priority_score": 10,
-        "risk_signals": [
-          "cryptographic_or_proof_boundary",
-          "distribution_or_worker_surface",
-          "environment_configuration_boundary",
-          "execution_or_subprocess_boundary",
-          "large_component_contract_risk",
-          "stateful_storage_boundary"
-        ],
-        "improvement_track": "maintain_generated_quantize_worker_matrix_and_frontier_method_contract"
-      },
-      {
         "path": "cli/kolm-code.mjs",
         "domain": "developer_distribution",
         "priority_score": 10,
@@ -190,6 +176,20 @@
           "stateful_storage_boundary"
         ],
         "improvement_track": "split_or_add_generated_contract_map_before_growth"
+      },
+      {
+        "path": "workers/quantize/scripts/quantize.py",
+        "domain": "training_model_optimization",
+        "priority_score": 10,
+        "risk_signals": [
+          "cryptographic_or_proof_boundary",
+          "distribution_or_worker_surface",
+          "environment_configuration_boundary",
+          "execution_or_subprocess_boundary",
+          "large_component_contract_risk",
+          "stateful_storage_boundary"
+        ],
+        "improvement_track": "maintain_generated_quantize_worker_matrix_and_frontier_method_contract"
       },
       {
         "path": "workers/distill/distill.mjs",
@@ -1195,6 +1195,7 @@
       "test_refs": [
         "tests/wave957-apps-atomic-scope.test.js",
         "tests/finalized-c1-signed-artifact-packaging.test.js",
+        "tests/ladder-orchestrator.test.js",
         "tests/wave144-tokenizer-artifact.test.js",
         "tests/wave831-airgap.test.js"
       ],
@@ -2483,13 +2484,13 @@
       },
       "test_refs": [
         "tests/wave957-apps-atomic-scope.test.js",
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
-        "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js"
+        "tests/ladder-e2e.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface"
@@ -2548,13 +2549,13 @@
       },
       "test_refs": [
         "tests/wave957-apps-atomic-scope.test.js",
+        "tests/ladder-bench.test.js",
         "tests/product-kernel-envelope.test.js",
         "tests/wave1004-compile-api-readiness.test.js",
         "tests/wave1021-frontier-delta-freshness.test.js",
         "tests/wave1025-executorch-validation-harness.test.js",
         "tests/wave144-verifier-states.test.js",
-        "tests/wave195-quantize-worker.test.js",
-        "tests/wave464-multimodal-audio-redact.test.js"
+        "tests/wave195-quantize-worker.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface"
@@ -2745,13 +2746,13 @@
       },
       "test_refs": [
         "tests/wave957-apps-atomic-scope.test.js",
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
-        "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js"
+        "tests/ladder-e2e.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface"
@@ -2814,12 +2815,12 @@
       "test_refs": [
         "tests/wave890-13-deployment.test.js",
         "tests/wave957-apps-atomic-scope.test.js",
+        "tests/ladder-bench.test.js",
         "tests/product-kernel-envelope.test.js",
         "tests/wave1004-compile-api-readiness.test.js",
         "tests/wave1021-frontier-delta-freshness.test.js",
         "tests/wave1025-executorch-validation-harness.test.js",
-        "tests/wave144-verifier-states.test.js",
-        "tests/wave195-quantize-worker.test.js"
+        "tests/wave144-verifier-states.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface"
@@ -5314,13 +5315,13 @@
       },
       "test_refs": [
         "tests/wave957-apps-atomic-scope.test.js",
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
-        "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js"
+        "tests/ladder-e2e.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -7838,10 +7839,10 @@
         "tests/agent-audit-ingest.test.js",
         "tests/finalized-c1-distillation-pipeline.test.js",
         "tests/finalized-c3-real-dsir-hashed-ngram-importance-resampling.test.js",
+        "tests/ladder-bench.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-config.test.js",
-        "tests/ladder-e2e.test.js",
-        "tests/ladder-keystore.test.js",
-        "tests/ladder-orchestrator.test.js"
+        "tests/ladder-e2e.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -8617,13 +8618,13 @@
       },
       "test_refs": [
         "tests/wave957-apps-atomic-scope.test.js",
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
-        "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js"
+        "tests/ladder-e2e.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -9556,15 +9557,15 @@
       "surface": "cli",
       "domain": "developer_distribution",
       "language": "javascript",
-      "sha256": "2bd144c42186118180997655acecb9d174eceaf3c005ac8840fec4041850b972",
+      "sha256": "1afc448697db7f84f365dbe6b94a92f90b1fef8e398394e0ff0b0da6200f2867",
       "metrics": {
-        "bytes": 67566,
-        "lines": 1884,
+        "bytes": 82748,
+        "lines": 2261,
         "imports": 14,
-        "exports": 9,
+        "exports": 11,
         "routes": 0,
         "env_refs": 4,
-        "fs_writes": 1,
+        "fs_writes": 2,
         "subprocess_refs": 7,
         "network_refs": 0,
         "crypto_refs": 2,
@@ -9843,14 +9844,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/ladder-hardening.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface"
@@ -9968,14 +9969,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/ladder-hardening.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -10720,14 +10721,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/ladder-hardening.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -10919,14 +10920,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/ladder-hardening.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -11174,14 +11175,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/ladder-hardening.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -11429,14 +11430,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/ladder-hardening.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -11754,14 +11755,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/ladder-hardening.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -12080,14 +12081,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/ladder-hardening.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -12398,14 +12399,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/ladder-hardening.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -13375,13 +13376,13 @@
       },
       "test_refs": [
         "tests/wave678-sdk-kotlin-contract.test.js",
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
-        "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js"
+        "tests/ladder-e2e.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -13764,14 +13765,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/ladder-hardening.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -14188,13 +14189,13 @@
       },
       "test_refs": [
         "tests/wave679-sdk-rn-contract.test.js",
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
-        "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js"
+        "tests/ladder-e2e.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface"
@@ -14439,13 +14440,13 @@
       },
       "test_refs": [
         "tests/wave680-sdk-swift-contract.test.js",
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
-        "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js"
+        "tests/ladder-e2e.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -14685,14 +14686,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/ladder-hardening.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -14936,13 +14937,13 @@
       },
       "test_refs": [
         "tests/wave929-distribution-manifests-contract.test.js",
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
-        "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js"
+        "tests/ladder-e2e.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface"
@@ -15061,14 +15062,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/ladder-context.test.js",
         "tests/research-docs.test.js",
         "tests/wave-dapo-frontier.test.js",
         "tests/wave1006-runtime-probe-kv-baseline.test.js",
         "tests/wave144-extract.test.js",
         "tests/wave144-native-compile.test.js",
         "tests/wave144-phi-redactor.test.js",
-        "tests/wave287-runtime-dispatch.test.js",
-        "tests/wave346-local-rewrites.test.js"
+        "tests/wave287-runtime-dispatch.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface"
@@ -15312,12 +15313,12 @@
       "test_refs": [
         "tests/finalized-c1-distillation-pipeline.test.js",
         "tests/finalized-c1-sensitive-domain-local-generator-guardrail.test.js",
+        "tests/ladder-cli.test.js",
+        "tests/ladder-config.test.js",
+        "tests/ladder-orchestrator.test.js",
         "tests/model-provenance-analyzer.test.js",
         "tests/path-to-100-w5-capture-exact-count.test.js",
-        "tests/red-team.test.js",
-        "tests/research-docs.test.js",
-        "tests/saml-scim.test.js",
-        "tests/site.test.js"
+        "tests/red-team.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface"
@@ -15674,14 +15675,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/ladder-hardening.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -21087,7 +21088,7 @@
         "tests/crypto-services.test.js",
         "tests/e2e.test.js",
         "tests/framework-export.test.js",
-        "tests/ladder-context.test.js"
+        "tests/ladder-bench.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -25565,6 +25566,9 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/fixtures/ladder-bench/crlf-edit/hidden/tests/hidden.test.js",
+        "tests/fixtures/ladder-bench/crlf-edit/repo/test/config.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-stages.test.js",
         "tests/wave888j-config.test.js"
       ],
@@ -35682,8 +35686,8 @@
         "tests/finalized-c4-rejection-sampling-wiring.test.js",
         "tests/finalized-c4-rlvr-grpo-frontier-knobs-dapo-gspo-vllm.test.js",
         "tests/finalized-c6-significance-bounded-regression-gate.test.js",
-        "tests/sota-compileartifact.test.js",
-        "tests/wave-dapo-frontier.test.js"
+        "tests/ladder-subtasks.test.js",
+        "tests/sota-compileartifact.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary"
@@ -35745,6 +35749,7 @@
       },
       "test_refs": [
         "tests/connector-openai-agents.test.js",
+        "tests/ladder-subtasks.test.js",
         "tests/red-team.test.js",
         "tests/wave817-format-v1.test.js",
         "tests/wave820-gha.test.js",
@@ -35936,9 +35941,9 @@
         "tests/connector-mcp.test.js",
         "tests/egress-analyzer.test.js",
         "tests/finalized-c9-capability-scopes.test.js",
+        "tests/ladder-orchestrator.test.js",
         "tests/model-provenance-analyzer.test.js",
-        "tests/product-compiler-contract.test.js",
-        "tests/sandbox-hardening.test.js"
+        "tests/product-compiler-contract.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -36272,7 +36277,7 @@
         "tests/ladder-config.test.js",
         "tests/ladder-keystore.test.js",
         "tests/ladder-providers.test.js",
-        "tests/model-provenance-analyzer.test.js"
+        "tests/ladder-text-tools.test.js"
       ],
       "risk_signals": [],
       "priority_score": 0,
@@ -38708,6 +38713,71 @@
       ]
     },
     {
+      "path": "src/ladder/audit.js",
+      "id": "src-ladder-audit-js",
+      "surface": "core-backend",
+      "domain": "trust_security_compliance",
+      "language": "javascript",
+      "sha256": "9a057ae31f3b521db2de8d9d8eabedd32e1fc211a048ecac08e9d381c3011d31",
+      "metrics": {
+        "bytes": 25768,
+        "lines": 651,
+        "imports": 1,
+        "exports": 17,
+        "routes": 0,
+        "env_refs": 0,
+        "fs_writes": 0,
+        "subprocess_refs": 0,
+        "network_refs": 0,
+        "crypto_refs": 1,
+        "markers": 0
+      },
+      "test_refs": [
+        "tests/ladder-audit.test.js",
+        "tests/active-redteam.test.js",
+        "tests/agent-attestation-report.test.js",
+        "tests/agent-audit-delta-badge-routes.test.js",
+        "tests/agent-audit-event.test.js",
+        "tests/agent-audit-ingest.test.js",
+        "tests/agent-audit-orchestrator.test.js",
+        "tests/agent-audit-pipeline.test.js"
+      ],
+      "risk_signals": [
+        "cryptographic_or_proof_boundary"
+      ],
+      "priority_score": 3,
+      "deep_dive": {
+        "status": "atomic_deep_dive_complete",
+        "reviewed_at": "2026-06-17",
+        "lenses": [
+          "source_to_route_import_wiring",
+          "security_privacy_failure_abuse",
+          "state_storage_idempotency",
+          "claim_scope_evidence_and_tests",
+          "frontier_improvement_or_invention"
+        ],
+        "evidence_basis": [
+          "live_file_tree",
+          "static_import_export_route_scan",
+          "test_reference_scan",
+          "risk_signal_scan",
+          "existing_backend_frontier_and_readiness_docs"
+        ],
+        "exit_criteria": [
+          "component_is_named_in_atomic_ledger",
+          "risk_signals_are_explicit",
+          "improvement_track_is_assigned",
+          "claim_scope_stays_local_until_external_evidence_exists"
+        ]
+      },
+      "improvement_track": "unified_proof_chain_revocation_transparency_and_audit_exports",
+      "innovation_opportunity": "Anchor every report, receipt, MCP tool call, and compliance export into one transparency-log proof fabric.",
+      "suggested_verification": [
+        "npm run verify:claims-scope",
+        "npm run verify:compliance-packet"
+      ]
+    },
+    {
       "path": "src/ladder/bands.js",
       "id": "src-ladder-bands-js",
       "surface": "core-backend",
@@ -38728,14 +38798,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/ladder-acceptance.test.js",
         "tests/ladder-bands.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-e2e.test.js",
         "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-receipt.test.js",
-        "tests/ladder-stages.test.js",
-        "tests/ladder-cli.test.js",
-        "tests/ladder-config.test.js"
+        "tests/ladder-stages.test.js"
       ],
       "risk_signals": [
         "environment_configuration_boundary"
@@ -38796,14 +38866,140 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/ladder-acceptance.test.js",
         "tests/ladder-bands.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-e2e.test.js",
         "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-receipt.test.js",
-        "tests/ladder-stages.test.js",
+        "tests/ladder-stages.test.js"
+      ],
+      "risk_signals": [],
+      "priority_score": 0,
+      "deep_dive": {
+        "status": "atomic_deep_dive_complete",
+        "reviewed_at": "2026-06-17",
+        "lenses": [
+          "source_to_route_import_wiring",
+          "security_privacy_failure_abuse",
+          "state_storage_idempotency",
+          "claim_scope_evidence_and_tests",
+          "frontier_improvement_or_invention"
+        ],
+        "evidence_basis": [
+          "live_file_tree",
+          "static_import_export_route_scan",
+          "test_reference_scan",
+          "risk_signal_scan",
+          "existing_backend_frontier_and_readiness_docs"
+        ],
+        "exit_criteria": [
+          "component_is_named_in_atomic_ledger",
+          "risk_signals_are_explicit",
+          "improvement_track_is_assigned",
+          "claim_scope_stays_local_until_external_evidence_exists"
+        ]
+      },
+      "improvement_track": "maintain_contract_tests_and_claim_scope_mapping",
+      "innovation_opportunity": "Keep support modules behind generated lifecycle, verifier, provider, privacy, storage, and claim-scope contracts before adding more daemon, binder, or orchestration behavior.",
+      "suggested_verification": [
+        "npm run verify:daemon-connector-matrix",
+        "npm run verify:binder-contract-matrix",
+        "npm run verify:intent-contract-matrix",
+        "npm run verify:otel-matrix",
+        "npm run verify:codegraph"
+      ]
+    },
+    {
+      "path": "src/ladder/bench/index.js",
+      "id": "src-ladder-bench-index-js",
+      "surface": "core-backend",
+      "domain": "capture_data_eval",
+      "language": "javascript",
+      "sha256": "ea359109ac74e3652987fcf8790d321b105c417b671f090072f3747dc2c43ac7",
+      "metrics": {
+        "bytes": 33020,
+        "lines": 916,
+        "imports": 7,
+        "exports": 13,
+        "routes": 0,
+        "env_refs": 1,
+        "fs_writes": 9,
+        "subprocess_refs": 6,
+        "network_refs": 0,
+        "crypto_refs": 0,
+        "markers": 0
+      },
+      "test_refs": [
+        "tests/ladder-bench.test.js"
+      ],
+      "risk_signals": [
+        "environment_configuration_boundary",
+        "execution_or_subprocess_boundary",
+        "large_component_contract_risk",
+        "stateful_storage_boundary"
+      ],
+      "priority_score": 6,
+      "deep_dive": {
+        "status": "atomic_deep_dive_complete",
+        "reviewed_at": "2026-06-17",
+        "lenses": [
+          "source_to_route_import_wiring",
+          "security_privacy_failure_abuse",
+          "state_storage_idempotency",
+          "claim_scope_evidence_and_tests",
+          "frontier_improvement_or_invention"
+        ],
+        "evidence_basis": [
+          "live_file_tree",
+          "static_import_export_route_scan",
+          "test_reference_scan",
+          "risk_signal_scan",
+          "existing_backend_frontier_and_readiness_docs"
+        ],
+        "exit_criteria": [
+          "component_is_named_in_atomic_ledger",
+          "risk_signals_are_explicit",
+          "improvement_track_is_assigned",
+          "claim_scope_stays_local_until_external_evidence_exists"
+        ]
+      },
+      "improvement_track": "measurement_harness_data_value_and_holdout_leakage_guards",
+      "innovation_opportunity": "Add a shared boot-and-measure probe harness plus data-value scoring so eval, routing, and curation all use measured evidence.",
+      "suggested_verification": [
+        "npm run verify:redaction-benchmark",
+        "npm run verify:quality-calibration",
+        "npm run verify:data-curate-matrix",
+        "npm run verify:bench-harness-matrix"
+      ]
+    },
+    {
+      "path": "src/ladder/coach.js",
+      "id": "src-ladder-coach-js",
+      "surface": "core-backend",
+      "domain": "platform_support",
+      "language": "javascript",
+      "sha256": "9a773ce20d75f1d1fdfb75445ab8662926fa6521af424310e199c6edea827113",
+      "metrics": {
+        "bytes": 9054,
+        "lines": 243,
+        "imports": 1,
+        "exports": 8,
+        "routes": 0,
+        "env_refs": 0,
+        "fs_writes": 0,
+        "subprocess_refs": 0,
+        "network_refs": 0,
+        "crypto_refs": 0,
+        "markers": 0
+      },
+      "test_refs": [
+        "tests/ladder-audit.test.js",
         "tests/ladder-cli.test.js",
-        "tests/ladder-config.test.js"
+        "tests/ladder-config.test.js",
+        "tests/ladder-orchestrator.test.js",
+        "tests/wave304-kolm-status.test.js"
       ],
       "risk_signals": [],
       "priority_score": 0,
@@ -38847,12 +39043,12 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "756635de919679825dc373a8b70d0f802eb71e02f9e2900c4f0da51b3d662948",
+      "sha256": "bf03949b5af7698367d743e8982abadce3d59590876d30cb170b69845b4674b1",
       "metrics": {
-        "bytes": 25950,
-        "lines": 689,
-        "imports": 6,
-        "exports": 9,
+        "bytes": 46531,
+        "lines": 1119,
+        "imports": 8,
+        "exports": 15,
         "routes": 0,
         "env_refs": 0,
         "fs_writes": 2,
@@ -38862,21 +39058,22 @@
         "markers": 1
       },
       "test_refs": [
+        "tests/ladder-coder.test.js",
         "tests/ladder-hardening.test.js",
         "tests/cid.test.js",
         "tests/finalized-c1-provenance-receipt-transparency-chain.test.js",
-        "tests/ladder-cli.test.js",
-        "tests/ladder-config.test.js",
-        "tests/ladder-e2e.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-providers.test.js"
+        "tests/fixtures/ladder-bench/write-tests-for-untested/hidden/tests/hidden.test.js",
+        "tests/ladder-acceptance.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js"
       ],
       "risk_signals": [
         "execution_or_subprocess_boundary",
+        "large_component_contract_risk",
         "open_marker_requires_owner_review",
         "stateful_storage_boundary"
       ],
-      "priority_score": 3,
+      "priority_score": 6,
       "deep_dive": {
         "status": "atomic_deep_dive_complete",
         "reviewed_at": "2026-06-17",
@@ -38917,12 +39114,12 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "bb86f9e1544a525a350527fbb592ebec8a1901f2004d7ef9d6570f2b36cc11fc",
+      "sha256": "d19b0ee085e833cd4581480463fa35beb6af0e3c438ae56d5aec24dead3459ea",
       "metrics": {
-        "bytes": 29456,
-        "lines": 795,
+        "bytes": 32475,
+        "lines": 876,
         "imports": 5,
-        "exports": 18,
+        "exports": 20,
         "routes": 0,
         "env_refs": 1,
         "fs_writes": 0,
@@ -39002,7 +39199,7 @@
         "tests/finalized-c6-significance-bounded-regression-gate.test.js",
         "tests/finalized-c6-transitive-holdout-disjointness-ledger.test.js",
         "tests/fix-retest.test.js",
-        "tests/kolm-audit-ci.test.js"
+        "tests/fixtures/ladder-bench/flaky-baseline/hidden/tests/hidden.test.js"
       ],
       "risk_signals": [
         "execution_or_subprocess_boundary"
@@ -39048,16 +39245,16 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "48fd5262de162fd5c648944f44d148bc8299fcd5bd0f146a0899b8e957c9ded1",
+      "sha256": "b3df2b605349b3d8f82829a9842104e54ad130848620d0ebfea0373d054935de",
       "metrics": {
-        "bytes": 17113,
-        "lines": 514,
+        "bytes": 25419,
+        "lines": 710,
         "imports": 1,
-        "exports": 8,
+        "exports": 10,
         "routes": 0,
         "env_refs": 0,
         "fs_writes": 0,
-        "subprocess_refs": 22,
+        "subprocess_refs": 31,
         "network_refs": 0,
         "crypto_refs": 5,
         "markers": 1
@@ -39113,17 +39310,83 @@
       ]
     },
     {
+      "path": "src/ladder/context/instructions.js",
+      "id": "src-ladder-context-instructions-js",
+      "surface": "core-backend",
+      "domain": "platform_support",
+      "language": "javascript",
+      "sha256": "d437e8b037768bb4c30481c715933af617231888a18941430d8486025e4bc460",
+      "metrics": {
+        "bytes": 4104,
+        "lines": 103,
+        "imports": 1,
+        "exports": 5,
+        "routes": 0,
+        "env_refs": 0,
+        "fs_writes": 0,
+        "subprocess_refs": 0,
+        "network_refs": 0,
+        "crypto_refs": 0,
+        "markers": 0
+      },
+      "test_refs": [
+        "tests/ladder-context.test.js",
+        "tests/active-redteam.test.js",
+        "tests/finalized-c1-live-magpie-autoevol-self-synthesis.test.js",
+        "tests/finalized-c3-semdedup-embedding-semantic-deduplication.test.js",
+        "tests/ladder-orchestrator.test.js",
+        "tests/ladder-truffle.test.js",
+        "tests/wave-mcp-anchor-guardrail.test.js",
+        "tests/wave1031-agent-security-judge-calibration.test.js"
+      ],
+      "risk_signals": [],
+      "priority_score": 0,
+      "deep_dive": {
+        "status": "atomic_deep_dive_complete",
+        "reviewed_at": "2026-06-17",
+        "lenses": [
+          "source_to_route_import_wiring",
+          "security_privacy_failure_abuse",
+          "state_storage_idempotency",
+          "claim_scope_evidence_and_tests",
+          "frontier_improvement_or_invention"
+        ],
+        "evidence_basis": [
+          "live_file_tree",
+          "static_import_export_route_scan",
+          "test_reference_scan",
+          "risk_signal_scan",
+          "existing_backend_frontier_and_readiness_docs"
+        ],
+        "exit_criteria": [
+          "component_is_named_in_atomic_ledger",
+          "risk_signals_are_explicit",
+          "improvement_track_is_assigned",
+          "claim_scope_stays_local_until_external_evidence_exists"
+        ]
+      },
+      "improvement_track": "maintain_contract_tests_and_claim_scope_mapping",
+      "innovation_opportunity": "Keep support modules behind generated lifecycle, verifier, provider, privacy, storage, and claim-scope contracts before adding more daemon, binder, or orchestration behavior.",
+      "suggested_verification": [
+        "npm run verify:daemon-connector-matrix",
+        "npm run verify:binder-contract-matrix",
+        "npm run verify:intent-contract-matrix",
+        "npm run verify:otel-matrix",
+        "npm run verify:codegraph"
+      ]
+    },
+    {
       "path": "src/ladder/context/repo-brief.js",
       "id": "src-ladder-context-repo-brief-js",
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "0c7c875172ac9730bb53dc924c321f2058d83dbc1d169a890068cf33fe8b4fab",
+      "sha256": "ea55c9b98c091db64d82e988e2749904bfcaa4ced7d7250d47d9cceff341df5b",
       "metrics": {
-        "bytes": 8828,
-        "lines": 256,
-        "imports": 1,
-        "exports": 4,
+        "bytes": 15039,
+        "lines": 397,
+        "imports": 4,
+        "exports": 7,
         "routes": 0,
         "env_refs": 0,
         "fs_writes": 0,
@@ -39140,6 +39403,69 @@
         "network_or_provider_boundary"
       ],
       "priority_score": 2,
+      "deep_dive": {
+        "status": "atomic_deep_dive_complete",
+        "reviewed_at": "2026-06-17",
+        "lenses": [
+          "source_to_route_import_wiring",
+          "security_privacy_failure_abuse",
+          "state_storage_idempotency",
+          "claim_scope_evidence_and_tests",
+          "frontier_improvement_or_invention"
+        ],
+        "evidence_basis": [
+          "live_file_tree",
+          "static_import_export_route_scan",
+          "test_reference_scan",
+          "risk_signal_scan",
+          "existing_backend_frontier_and_readiness_docs"
+        ],
+        "exit_criteria": [
+          "component_is_named_in_atomic_ledger",
+          "risk_signals_are_explicit",
+          "improvement_track_is_assigned",
+          "claim_scope_stays_local_until_external_evidence_exists"
+        ]
+      },
+      "improvement_track": "maintain_contract_tests_and_claim_scope_mapping",
+      "innovation_opportunity": "Keep support modules behind generated lifecycle, verifier, provider, privacy, storage, and claim-scope contracts before adding more daemon, binder, or orchestration behavior.",
+      "suggested_verification": [
+        "npm run verify:daemon-connector-matrix",
+        "npm run verify:binder-contract-matrix",
+        "npm run verify:intent-contract-matrix",
+        "npm run verify:otel-matrix",
+        "npm run verify:codegraph"
+      ]
+    },
+    {
+      "path": "src/ladder/context/retrieve.js",
+      "id": "src-ladder-context-retrieve-js",
+      "surface": "core-backend",
+      "domain": "platform_support",
+      "language": "javascript",
+      "sha256": "ac53108c117f7b29041ee48981c4544ff689e501f5dd6a637e04d88ceec01ba5",
+      "metrics": {
+        "bytes": 20925,
+        "lines": 509,
+        "imports": 0,
+        "exports": 12,
+        "routes": 0,
+        "env_refs": 0,
+        "fs_writes": 0,
+        "subprocess_refs": 0,
+        "network_refs": 0,
+        "crypto_refs": 0,
+        "markers": 0
+      },
+      "test_refs": [
+        "tests/ladder-context.test.js",
+        "tests/wave1028-provider-pricing-receipts.test.js",
+        "tests/wave708-copyright-and-geo.test.js",
+        "tests/wave722-itkv.test.js",
+        "tests/wave933-capture-data-contracts.test.js"
+      ],
+      "risk_signals": [],
+      "priority_score": 0,
       "deep_dive": {
         "status": "atomic_deep_dive_complete",
         "reviewed_at": "2026-06-17",
@@ -39263,8 +39589,8 @@
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-providers.test.js",
         "tests/ladder-stages.test.js",
-        "tests/agent-audit-ingest.test.js",
-        "tests/agent-audit-pipeline.test.js"
+        "tests/ladder-subtasks.test.js",
+        "tests/agent-audit-ingest.test.js"
       ],
       "risk_signals": [],
       "priority_score": 0,
@@ -39491,10 +39817,10 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "31f6ad4734f00911f6d33331b2b3b8c3d892c363f745d61cc02bc81980f6e389",
+      "sha256": "aa9c6a655f5a13d523f670e715201945c99dbe120a03ae935cdd207af04a87d3",
       "metrics": {
-        "bytes": 3707,
-        "lines": 116,
+        "bytes": 5970,
+        "lines": 214,
         "imports": 0,
         "exports": 1,
         "routes": 0,
@@ -39609,40 +39935,38 @@
       ]
     },
     {
-      "path": "src/ladder/orchestrator.js",
-      "id": "src-ladder-orchestrator-js",
+      "path": "src/ladder/lessons.js",
+      "id": "src-ladder-lessons-js",
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "0ba096933ec9d3e5349010acb546251d11233303e02c77bb76bd489bde9e879b",
+      "sha256": "d253b3e3ed4ae5c76b3d1fd2c62cb36cd1716b91a85b9b1dd0a897be8cebde37",
       "metrics": {
-        "bytes": 36025,
-        "lines": 961,
-        "imports": 14,
-        "exports": 8,
+        "bytes": 13525,
+        "lines": 372,
+        "imports": 4,
+        "exports": 13,
         "routes": 0,
         "env_refs": 0,
-        "fs_writes": 0,
-        "subprocess_refs": 0,
+        "fs_writes": 2,
+        "subprocess_refs": 1,
         "network_refs": 0,
-        "crypto_refs": 5,
+        "crypto_refs": 9,
         "markers": 0
       },
       "test_refs": [
-        "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/active-redteam.test.js",
-        "tests/agent-attestation-report.test.js",
-        "tests/agent-audit-orchestrator.test.js",
-        "tests/agent-evidence-tier.test.js",
-        "tests/agent-verify-hardening.test.js"
+        "tests/ladder-lessons.test.js",
+        "tests/ladder-cli.test.js",
+        "tests/ladder-config.test.js",
+        "tests/ladder-context.test.js",
+        "tests/ladder-orchestrator.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
-        "large_component_contract_risk"
+        "execution_or_subprocess_boundary",
+        "stateful_storage_boundary"
       ],
-      "priority_score": 6,
+      "priority_score": 5,
       "deep_dive": {
         "status": "atomic_deep_dive_complete",
         "reviewed_at": "2026-06-17",
@@ -39678,17 +40002,87 @@
       ]
     },
     {
+      "path": "src/ladder/orchestrator.js",
+      "id": "src-ladder-orchestrator-js",
+      "surface": "core-backend",
+      "domain": "platform_support",
+      "language": "javascript",
+      "sha256": "2f46bdd16f151059d06fa1e4a3f62b357b9cad2c0cd4684f24e160482261c731",
+      "metrics": {
+        "bytes": 79113,
+        "lines": 1944,
+        "imports": 21,
+        "exports": 8,
+        "routes": 0,
+        "env_refs": 0,
+        "fs_writes": 0,
+        "subprocess_refs": 1,
+        "network_refs": 0,
+        "crypto_refs": 8,
+        "markers": 0
+      },
+      "test_refs": [
+        "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
+        "tests/ladder-orchestrator.test.js",
+        "tests/ladder-subtasks.test.js",
+        "tests/active-redteam.test.js",
+        "tests/agent-attestation-report.test.js",
+        "tests/agent-audit-orchestrator.test.js",
+        "tests/agent-evidence-tier.test.js"
+      ],
+      "risk_signals": [
+        "cryptographic_or_proof_boundary",
+        "execution_or_subprocess_boundary",
+        "large_component_contract_risk"
+      ],
+      "priority_score": 7,
+      "deep_dive": {
+        "status": "atomic_deep_dive_complete",
+        "reviewed_at": "2026-06-17",
+        "lenses": [
+          "source_to_route_import_wiring",
+          "security_privacy_failure_abuse",
+          "state_storage_idempotency",
+          "claim_scope_evidence_and_tests",
+          "frontier_improvement_or_invention"
+        ],
+        "evidence_basis": [
+          "live_file_tree",
+          "static_import_export_route_scan",
+          "test_reference_scan",
+          "risk_signal_scan",
+          "existing_backend_frontier_and_readiness_docs"
+        ],
+        "exit_criteria": [
+          "component_is_named_in_atomic_ledger",
+          "risk_signals_are_explicit",
+          "improvement_track_is_assigned",
+          "claim_scope_stays_local_until_external_evidence_exists"
+        ]
+      },
+      "improvement_track": "split_or_add_generated_contract_map_before_growth",
+      "innovation_opportunity": "Keep support modules behind generated lifecycle, verifier, provider, privacy, storage, and claim-scope contracts before adding more daemon, binder, or orchestration behavior.",
+      "suggested_verification": [
+        "npm run verify:daemon-connector-matrix",
+        "npm run verify:binder-contract-matrix",
+        "npm run verify:intent-contract-matrix",
+        "npm run verify:otel-matrix",
+        "npm run verify:codegraph"
+      ]
+    },
+    {
       "path": "src/ladder/planner.js",
       "id": "src-ladder-planner-js",
       "surface": "core-backend",
       "domain": "billing_marketplace",
       "language": "javascript",
-      "sha256": "eb7df08284e62e55f591c5bcfcc5338d1aed0d13b04e1561a8957c6b9f56d36e",
+      "sha256": "2ab0490b7076c0bb58b0140cc904f24730d39b89a1efe2d64b3fd3e330c6838e",
       "metrics": {
-        "bytes": 7393,
-        "lines": 198,
+        "bytes": 10899,
+        "lines": 268,
         "imports": 3,
-        "exports": 3,
+        "exports": 5,
         "routes": 0,
         "env_refs": 0,
         "fs_writes": 0,
@@ -39703,9 +40097,9 @@
         "tests/ladder-e2e.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-providers.test.js",
+        "tests/ladder-subtasks.test.js",
         "tests/sota-capturedata.test.js",
-        "tests/sota-compileartifact.test.js",
-        "tests/wave2-integration.test.js"
+        "tests/sota-compileartifact.test.js"
       ],
       "risk_signals": [],
       "priority_score": 0,
@@ -39745,11 +40139,11 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "7e7ffc441b99b2d0e7300ddc9dd9747e3ab6999609ba38021dc5d76eb2e170e6",
+      "sha256": "a729e4e952cb698184ec22371f95f2af30d3f0aced949cfec1ff184613eed2b6",
       "metrics": {
-        "bytes": 10587,
-        "lines": 320,
-        "imports": 4,
+        "bytes": 15456,
+        "lines": 425,
+        "imports": 6,
         "exports": 3,
         "routes": 0,
         "env_refs": 0,
@@ -39828,6 +40222,10 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/ladder-acceptance.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-e2e.test.js",
         "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
@@ -39877,10 +40275,10 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "25c2f410740e1b2bd431c9853033e4196abd7b91c43dba8a3e6fa59a8099e119",
+      "sha256": "411ead690105a4bab2ec375721afe97e0d4ac243a43069f439fe2a5841862d3c",
       "metrics": {
-        "bytes": 3856,
-        "lines": 101,
+        "bytes": 4394,
+        "lines": 121,
         "imports": 6,
         "exports": 4,
         "routes": 0,
@@ -39934,22 +40332,90 @@
       ]
     },
     {
-      "path": "src/ladder/providers/openai-compatible.js",
-      "id": "src-ladder-providers-openai-compatible-js",
+      "path": "src/ladder/providers/limiter.js",
+      "id": "src-ladder-providers-limiter-js",
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "b2cdce0f70077079139c141776f19ae5d489133a6d616eb3106dfcc887605661",
+      "sha256": "0e1fd52e5b05e6311451551a821b5b8299adb24047e5fa75016e68b7d4ef2b43",
       "metrics": {
-        "bytes": 15151,
-        "lines": 460,
-        "imports": 3,
+        "bytes": 8372,
+        "lines": 243,
+        "imports": 0,
         "exports": 7,
         "routes": 0,
         "env_refs": 0,
         "fs_writes": 0,
         "subprocess_refs": 0,
-        "network_refs": 3,
+        "network_refs": 0,
+        "crypto_refs": 0,
+        "markers": 0
+      },
+      "test_refs": [
+        "tests/ladder-providers.test.js",
+        "tests/agent-verify-ratelimit.test.js",
+        "tests/wave411-hosted-auth-gate.test.js",
+        "tests/wave705-r2-client-contract.test.js",
+        "tests/wave888i-rate-limit.test.js",
+        "tests/wave890-6-security.test.js",
+        "tests/wave925-langchain-package-manifest-contract.test.js",
+        "tests/wave926-llamaindex-package-manifest-contract.test.js"
+      ],
+      "risk_signals": [
+        "network_or_provider_boundary"
+      ],
+      "priority_score": 1,
+      "deep_dive": {
+        "status": "atomic_deep_dive_complete",
+        "reviewed_at": "2026-06-17",
+        "lenses": [
+          "source_to_route_import_wiring",
+          "security_privacy_failure_abuse",
+          "state_storage_idempotency",
+          "claim_scope_evidence_and_tests",
+          "frontier_improvement_or_invention"
+        ],
+        "evidence_basis": [
+          "live_file_tree",
+          "static_import_export_route_scan",
+          "test_reference_scan",
+          "risk_signal_scan",
+          "existing_backend_frontier_and_readiness_docs"
+        ],
+        "exit_criteria": [
+          "component_is_named_in_atomic_ledger",
+          "risk_signals_are_explicit",
+          "improvement_track_is_assigned",
+          "claim_scope_stays_local_until_external_evidence_exists"
+        ]
+      },
+      "improvement_track": "maintain_contract_tests_and_claim_scope_mapping",
+      "innovation_opportunity": "Keep support modules behind generated lifecycle, verifier, provider, privacy, storage, and claim-scope contracts before adding more daemon, binder, or orchestration behavior.",
+      "suggested_verification": [
+        "npm run verify:daemon-connector-matrix",
+        "npm run verify:binder-contract-matrix",
+        "npm run verify:intent-contract-matrix",
+        "npm run verify:otel-matrix",
+        "npm run verify:codegraph"
+      ]
+    },
+    {
+      "path": "src/ladder/providers/openai-compatible.js",
+      "id": "src-ladder-providers-openai-compatible-js",
+      "surface": "core-backend",
+      "domain": "platform_support",
+      "language": "javascript",
+      "sha256": "a8437e184d7666f6364fc2ec8ef5a9df75d9ab83d677dd473723222f189603b8",
+      "metrics": {
+        "bytes": 28430,
+        "lines": 784,
+        "imports": 5,
+        "exports": 11,
+        "routes": 0,
+        "env_refs": 0,
+        "fs_writes": 0,
+        "subprocess_refs": 0,
+        "network_refs": 6,
         "crypto_refs": 0,
         "markers": 0
       },
@@ -40004,12 +40470,12 @@
       "surface": "core-backend",
       "domain": "compile_artifact_runtime",
       "language": "javascript",
-      "sha256": "3cd2ca1cc5995b9ab3c879467cc0054356a70b709052b3b50d498c274b9a9fb3",
+      "sha256": "1fbaf0520fe94a4bd6ab574b29e7148ae7e1f309f68738decb5816508edcdb93",
       "metrics": {
-        "bytes": 8161,
-        "lines": 293,
+        "bytes": 10688,
+        "lines": 356,
         "imports": 2,
-        "exports": 8,
+        "exports": 9,
         "routes": 0,
         "env_refs": 0,
         "fs_writes": 0,
@@ -40026,7 +40492,7 @@
         "tests/finalized-c1-live-magpie-autoevol-self-synthesis.test.js",
         "tests/finalized-c1-provenance-receipt-transparency-chain.test.js",
         "tests/finalized-c1-signed-artifact-packaging.test.js",
-        "tests/model-signing-build-sidecars.test.js"
+        "tests/ladder-text-tools.test.js"
       ],
       "risk_signals": [
         "network_or_provider_boundary"
@@ -40067,15 +40533,77 @@
       ]
     },
     {
+      "path": "src/ladder/providers/text-tools.js",
+      "id": "src-ladder-providers-text-tools-js",
+      "surface": "core-backend",
+      "domain": "platform_support",
+      "language": "javascript",
+      "sha256": "000eaadcc2de0f003d817bf6891a5a9282cb27be2fb1a860d988993f614c95d8",
+      "metrics": {
+        "bytes": 21324,
+        "lines": 570,
+        "imports": 0,
+        "exports": 10,
+        "routes": 0,
+        "env_refs": 0,
+        "fs_writes": 0,
+        "subprocess_refs": 9,
+        "network_refs": 1,
+        "crypto_refs": 0,
+        "markers": 0
+      },
+      "test_refs": [
+        "tests/ladder-text-tools.test.js"
+      ],
+      "risk_signals": [
+        "execution_or_subprocess_boundary",
+        "network_or_provider_boundary"
+      ],
+      "priority_score": 2,
+      "deep_dive": {
+        "status": "atomic_deep_dive_complete",
+        "reviewed_at": "2026-06-17",
+        "lenses": [
+          "source_to_route_import_wiring",
+          "security_privacy_failure_abuse",
+          "state_storage_idempotency",
+          "claim_scope_evidence_and_tests",
+          "frontier_improvement_or_invention"
+        ],
+        "evidence_basis": [
+          "live_file_tree",
+          "static_import_export_route_scan",
+          "test_reference_scan",
+          "risk_signal_scan",
+          "existing_backend_frontier_and_readiness_docs"
+        ],
+        "exit_criteria": [
+          "component_is_named_in_atomic_ledger",
+          "risk_signals_are_explicit",
+          "improvement_track_is_assigned",
+          "claim_scope_stays_local_until_external_evidence_exists"
+        ]
+      },
+      "improvement_track": "maintain_contract_tests_and_claim_scope_mapping",
+      "innovation_opportunity": "Keep support modules behind generated lifecycle, verifier, provider, privacy, storage, and claim-scope contracts before adding more daemon, binder, or orchestration behavior.",
+      "suggested_verification": [
+        "npm run verify:daemon-connector-matrix",
+        "npm run verify:binder-contract-matrix",
+        "npm run verify:intent-contract-matrix",
+        "npm run verify:otel-matrix",
+        "npm run verify:codegraph"
+      ]
+    },
+    {
       "path": "src/ladder/receipt.js",
       "id": "src-ladder-receipt-js",
       "surface": "core-backend",
       "domain": "trust_security_compliance",
       "language": "javascript",
-      "sha256": "778e5b0c741113a24f62b7bfdca301329d10e973cf804d5a74fab8a7217f6651",
+      "sha256": "62ef5eb6a1722539133c87259b6c5af9d54335aafe15ba3762d1fe73a1c724c3",
       "metrics": {
-        "bytes": 15214,
-        "lines": 403,
+        "bytes": 15976,
+        "lines": 417,
         "imports": 6,
         "exports": 14,
         "routes": 0,
@@ -40132,6 +40660,69 @@
       ]
     },
     {
+      "path": "src/ladder/routing.js",
+      "id": "src-ladder-routing-js",
+      "surface": "core-backend",
+      "domain": "runtime_serving_routing",
+      "language": "javascript",
+      "sha256": "7996f62fc281c9f50dffadceb1e651be489a186fac6ae860e2f8c09c90790a3d",
+      "metrics": {
+        "bytes": 4539,
+        "lines": 106,
+        "imports": 0,
+        "exports": 5,
+        "routes": 0,
+        "env_refs": 0,
+        "fs_writes": 0,
+        "subprocess_refs": 0,
+        "network_refs": 0,
+        "crypto_refs": 0,
+        "markers": 0
+      },
+      "test_refs": [
+        "tests/ladder-orchestrator.test.js",
+        "tests/finalized-c1-distillation-pipeline.test.js",
+        "tests/finalized-c1-sensitive-domain-local-generator-guardrail.test.js",
+        "tests/ladder-cli.test.js",
+        "tests/ladder-config.test.js",
+        "tests/model-provenance-analyzer.test.js",
+        "tests/path-to-100-w5-capture-exact-count.test.js",
+        "tests/red-team.test.js"
+      ],
+      "risk_signals": [],
+      "priority_score": 0,
+      "deep_dive": {
+        "status": "atomic_deep_dive_complete",
+        "reviewed_at": "2026-06-17",
+        "lenses": [
+          "source_to_route_import_wiring",
+          "security_privacy_failure_abuse",
+          "state_storage_idempotency",
+          "claim_scope_evidence_and_tests",
+          "frontier_improvement_or_invention"
+        ],
+        "evidence_basis": [
+          "live_file_tree",
+          "static_import_export_route_scan",
+          "test_reference_scan",
+          "risk_signal_scan",
+          "existing_backend_frontier_and_readiness_docs"
+        ],
+        "exit_criteria": [
+          "component_is_named_in_atomic_ledger",
+          "risk_signals_are_explicit",
+          "improvement_track_is_assigned",
+          "claim_scope_stays_local_until_external_evidence_exists"
+        ]
+      },
+      "improvement_track": "closed_loop_routing_outcome_learning_and_verified_cache",
+      "innovation_opportunity": "Close the semantic routing flywheel by recording outcomes, training route stats, and emitting runtime passports.",
+      "suggested_verification": [
+        "npm run verify:codegraph",
+        "npm run verify:surfaces"
+      ]
+    },
+    {
       "path": "src/ladder/rubric.js",
       "id": "src-ladder-rubric-js",
       "surface": "core-backend",
@@ -40152,14 +40743,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/ladder-acceptance.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-e2e.test.js",
         "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-receipt.test.js",
         "tests/ladder-stages.test.js",
-        "tests/ladder-bands.test.js",
-        "tests/wave890-3-error-handling.test.js",
-        "tests/wave921-ropd-cli.test.js"
+        "tests/ladder-subtasks.test.js"
       ],
       "risk_signals": [
         "environment_configuration_boundary"
@@ -40220,14 +40811,14 @@
         "markers": 3
       },
       "test_refs": [
+        "tests/ladder-acceptance.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-e2e.test.js",
         "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-receipt.test.js",
         "tests/ladder-stages.test.js",
-        "tests/ladder-bands.test.js",
-        "tests/wave890-3-error-handling.test.js",
-        "tests/wave921-ropd-cli.test.js"
+        "tests/ladder-subtasks.test.js"
       ],
       "risk_signals": [
         "open_marker_requires_owner_review"
@@ -40273,12 +40864,12 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "93530beb470b487b02f4ecadbb704053083e6b608727acc3d249588cb2f66403",
+      "sha256": "76494f7b69a2f9d703473bcabf53b555df32c3a160e1e07a78bcd26ab66ae8d9",
       "metrics": {
-        "bytes": 10266,
-        "lines": 263,
+        "bytes": 11224,
+        "lines": 289,
         "imports": 6,
-        "exports": 3,
+        "exports": 4,
         "routes": 0,
         "env_refs": 0,
         "fs_writes": 0,
@@ -40486,10 +41077,10 @@
         "tests/ladder-stages.test.js",
         "tests/ladder-bands.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-receipt.test.js",
-        "tests/ladder-store.test.js",
-        "tests/ladder-verdict.test.js"
+        "tests/ladder-store.test.js"
       ],
       "risk_signals": [
         "execution_or_subprocess_boundary"
@@ -40535,12 +41126,12 @@
       "surface": "core-backend",
       "domain": "runtime_serving_routing",
       "language": "javascript",
-      "sha256": "0cb2d5c6b2270cde5b6fa75ff4cf823550fd3b6086ba805490c53e0185c23d96",
+      "sha256": "b0f1c6e0059a3811f0ed9f60002aee4091bde1ade3c806b0d30b6ca7210e672c",
       "metrics": {
-        "bytes": 9700,
-        "lines": 276,
+        "bytes": 17753,
+        "lines": 460,
         "imports": 5,
-        "exports": 10,
+        "exports": 17,
         "routes": 0,
         "env_refs": 0,
         "fs_writes": 0,
@@ -40550,13 +41141,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/ladder-acceptance.test.js",
         "tests/ladder-hardening.test.js",
         "tests/ladder-stages.test.js",
+        "tests/ladder-audit.test.js",
         "tests/ladder-bands.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-store.test.js",
-        "tests/ladder-verdict.test.js",
-        "tests/ladder-viewer.test.js"
+        "tests/ladder-verdict.test.js"
       ],
       "risk_signals": [],
       "priority_score": 0,
@@ -40597,12 +41189,12 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "9c6e23c8e72bde11987899041bc91bd7d71e6c37b092f1c2935e3ae5ae6aa759",
+      "sha256": "a8794a5bb593029fb3c6856e9a1ab957dc49efd29061c65fece82742513192dc",
       "metrics": {
-        "bytes": 20874,
-        "lines": 536,
+        "bytes": 23686,
+        "lines": 593,
         "imports": 7,
-        "exports": 13,
+        "exports": 15,
         "routes": 0,
         "env_refs": 0,
         "fs_writes": 0,
@@ -40612,7 +41204,9 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/ladder-acceptance.test.js",
         "tests/ladder-hardening.test.js",
+        "tests/ladder-audit.test.js",
         "tests/ladder-store.test.js",
         "tests/ladder-viewer.test.js"
       ],
@@ -40673,14 +41267,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
         "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-stages.test.js",
-        "tests/ladder-store.test.js",
-        "tests/active-redteam.test.js",
-        "tests/agent-audit-delta-badge-routes.test.js"
+        "tests/ladder-store.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -40716,6 +41310,142 @@
       "innovation_opportunity": "Promote local JSON/disk state into a tenant-scoped CAS object store with lifecycle simulation before storage cutover.",
       "suggested_verification": [
         "node --test --test-concurrency=1 tests/*store*.test.js tests/*storage*.test.js"
+      ]
+    },
+    {
+      "path": "src/ladder/subtasks.js",
+      "id": "src-ladder-subtasks-js",
+      "surface": "core-backend",
+      "domain": "platform_support",
+      "language": "javascript",
+      "sha256": "4fdaa662b426782d4ab1999a08571452777b4b206a97364e9152e237a3575824",
+      "metrics": {
+        "bytes": 17260,
+        "lines": 435,
+        "imports": 3,
+        "exports": 10,
+        "routes": 0,
+        "env_refs": 0,
+        "fs_writes": 0,
+        "subprocess_refs": 2,
+        "network_refs": 0,
+        "crypto_refs": 0,
+        "markers": 0
+      },
+      "test_refs": [
+        "tests/ladder-subtasks.test.js",
+        "tests/ladder-bench.test.js",
+        "tests/ladder-cli.test.js",
+        "tests/ladder-config.test.js",
+        "tests/ladder-e2e.test.js",
+        "tests/ladder-orchestrator.test.js",
+        "tests/ladder-receipt.test.js",
+        "tests/ladder-worktree.test.js"
+      ],
+      "risk_signals": [
+        "execution_or_subprocess_boundary"
+      ],
+      "priority_score": 1,
+      "deep_dive": {
+        "status": "atomic_deep_dive_complete",
+        "reviewed_at": "2026-06-17",
+        "lenses": [
+          "source_to_route_import_wiring",
+          "security_privacy_failure_abuse",
+          "state_storage_idempotency",
+          "claim_scope_evidence_and_tests",
+          "frontier_improvement_or_invention"
+        ],
+        "evidence_basis": [
+          "live_file_tree",
+          "static_import_export_route_scan",
+          "test_reference_scan",
+          "risk_signal_scan",
+          "existing_backend_frontier_and_readiness_docs"
+        ],
+        "exit_criteria": [
+          "component_is_named_in_atomic_ledger",
+          "risk_signals_are_explicit",
+          "improvement_track_is_assigned",
+          "claim_scope_stays_local_until_external_evidence_exists"
+        ]
+      },
+      "improvement_track": "maintain_contract_tests_and_claim_scope_mapping",
+      "innovation_opportunity": "Keep support modules behind generated lifecycle, verifier, provider, privacy, storage, and claim-scope contracts before adding more daemon, binder, or orchestration behavior.",
+      "suggested_verification": [
+        "npm run verify:daemon-connector-matrix",
+        "npm run verify:binder-contract-matrix",
+        "npm run verify:intent-contract-matrix",
+        "npm run verify:otel-matrix",
+        "npm run verify:codegraph"
+      ]
+    },
+    {
+      "path": "src/ladder/transcript.js",
+      "id": "src-ladder-transcript-js",
+      "surface": "core-backend",
+      "domain": "platform_support",
+      "language": "javascript",
+      "sha256": "ae883a2e1bf20e094a8704551c8f070a0692767fdb09521caad35478efc238ec",
+      "metrics": {
+        "bytes": 13007,
+        "lines": 320,
+        "imports": 0,
+        "exports": 3,
+        "routes": 0,
+        "env_refs": 0,
+        "fs_writes": 0,
+        "subprocess_refs": 1,
+        "network_refs": 0,
+        "crypto_refs": 0,
+        "markers": 0
+      },
+      "test_refs": [
+        "tests/ladder-transcript.test.js",
+        "tests/active-redteam.test.js",
+        "tests/ladder-coder.test.js",
+        "tests/red-team.test.js",
+        "tests/wave377-multimodal.test.js",
+        "tests/wave409k-openai-compat-surface.test.js",
+        "tests/wave464-multimodal-audio-redact.test.js",
+        "tests/wave466-multimodal-bakeoff.test.js"
+      ],
+      "risk_signals": [
+        "execution_or_subprocess_boundary"
+      ],
+      "priority_score": 1,
+      "deep_dive": {
+        "status": "atomic_deep_dive_complete",
+        "reviewed_at": "2026-06-17",
+        "lenses": [
+          "source_to_route_import_wiring",
+          "security_privacy_failure_abuse",
+          "state_storage_idempotency",
+          "claim_scope_evidence_and_tests",
+          "frontier_improvement_or_invention"
+        ],
+        "evidence_basis": [
+          "live_file_tree",
+          "static_import_export_route_scan",
+          "test_reference_scan",
+          "risk_signal_scan",
+          "existing_backend_frontier_and_readiness_docs"
+        ],
+        "exit_criteria": [
+          "component_is_named_in_atomic_ledger",
+          "risk_signals_are_explicit",
+          "improvement_track_is_assigned",
+          "claim_scope_stays_local_until_external_evidence_exists"
+        ]
+      },
+      "improvement_track": "maintain_contract_tests_and_claim_scope_mapping",
+      "innovation_opportunity": "Keep support modules behind generated lifecycle, verifier, provider, privacy, storage, and claim-scope contracts before adding more daemon, binder, or orchestration behavior.",
+      "suggested_verification": [
+        "npm run verify:daemon-connector-matrix",
+        "npm run verify:binder-contract-matrix",
+        "npm run verify:intent-contract-matrix",
+        "npm run verify:otel-matrix",
+        "npm run verify:codegraph"
       ]
     },
     {
@@ -40980,10 +41710,10 @@
       "surface": "core-backend",
       "domain": "trust_security_compliance",
       "language": "javascript",
-      "sha256": "b2e96501d16e713a8c5e29c6e37a4db762b05e82e79a30cd6c645eabd5c30d8a",
+      "sha256": "708c2e44099ab7d46a742b2960496c9b21b6caba2e69034586e1c6370938d32c",
       "metrics": {
-        "bytes": 8071,
-        "lines": 243,
+        "bytes": 8813,
+        "lines": 262,
         "imports": 1,
         "exports": 2,
         "routes": 0,
@@ -40995,7 +41725,8 @@
         "markers": 0
       },
       "test_refs": [
-        "tests/ladder-worktree-cloudflare.test.js"
+        "tests/ladder-worktree-cloudflare.test.js",
+        "tests/ladder-worktree.test.js"
       ],
       "risk_signals": [
         "execution_or_subprocess_boundary",
@@ -41040,12 +41771,12 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "f51dc87a4e14ab3f2c32aac1dacea6f533b5481ea4b9fd40bc323107f199a469",
+      "sha256": "ef0eb4b09126b26f4b7f84617c29edc52c104767b9bbeee9ef87f000add536cf",
       "metrics": {
-        "bytes": 18550,
-        "lines": 526,
+        "bytes": 23768,
+        "lines": 646,
         "imports": 2,
-        "exports": 5,
+        "exports": 6,
         "routes": 0,
         "env_refs": 0,
         "fs_writes": 1,
@@ -41055,9 +41786,13 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-e2e.test.js",
         "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
+        "tests/ladder-subtasks.test.js",
         "tests/ladder-worktree.test.js"
       ],
       "risk_signals": [
@@ -41169,10 +41904,10 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "89c024f37108e8c5c3666372c16be49af4b671093cf8dbfbb2553895114bd011",
+      "sha256": "670ea39ddd08fcca35eeaa874336105c8dc894838d4854a135a8d1dd905faa21",
       "metrics": {
-        "bytes": 29156,
-        "lines": 795,
+        "bytes": 32424,
+        "lines": 861,
         "imports": 6,
         "exports": 9,
         "routes": 0,
@@ -42156,6 +42891,8 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/fixtures/ladder-bench/multi-file-rename/hidden/tests/hidden.test.js",
+        "tests/fixtures/ladder-bench/multi-file-rename/repo/test/log.test.js",
         "tests/wave-wc06-log.test.js",
         "tests/wave890-4-logging.test.js",
         "tests/wave935-platform-monitoring-contracts.test.js"
@@ -60531,12 +61268,12 @@
       "test_refs": [
         "tests/connectors.test.js",
         "tests/crypto-services.test.js",
+        "tests/fixtures/ladder-bench/flaky-baseline/repo/test/known-broken.test.js",
         "tests/ladder-config.test.js",
         "tests/ladder-truffle.test.js",
         "tests/r3-kolm-serve.test.js",
         "tests/r4-deploy-generators.test.js",
-        "tests/report-revocation-parity.test.js",
-        "tests/wave144-doc-check.test.js"
+        "tests/report-revocation-parity.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -60667,14 +61404,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/ladder-hardening.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -61447,8 +62184,8 @@
         "tests/finalized-c13-product-cohesion.test.js",
         "tests/finalized-c4-rlvr-grpo-frontier-knobs-dapo-gspo-vllm.test.js",
         "tests/framework-export.test.js",
-        "tests/ladder-providers.test.js",
-        "tests/product-compiler-contract.test.js"
+        "tests/ladder-coder.test.js",
+        "tests/ladder-providers.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -61644,13 +62381,13 @@
       },
       "test_refs": [
         "tests/wave921-trainer-unification.test.js",
+        "tests/ladder-bench.test.js",
         "tests/product-kernel-envelope.test.js",
         "tests/wave1004-compile-api-readiness.test.js",
         "tests/wave1021-frontier-delta-freshness.test.js",
         "tests/wave1025-executorch-validation-harness.test.js",
         "tests/wave144-verifier-states.test.js",
-        "tests/wave195-quantize-worker.test.js",
-        "tests/wave464-multimodal-audio-redact.test.js"
+        "tests/wave195-quantize-worker.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -62215,7 +62952,7 @@
         "tests/finalized-c2-dp-training-dp-sgd-pate.test.js",
         "tests/finalized-c6-transitive-holdout-disjointness-ledger.test.js",
         "tests/framework-export.test.js",
-        "tests/oscal-export.test.js"
+        "tests/ladder-receipt.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -63038,13 +63775,13 @@
       },
       "test_refs": [
         "tests/wave607-kv-cache-cli-dispatch.test.js",
+        "tests/ladder-bench.test.js",
         "tests/product-kernel-envelope.test.js",
         "tests/wave1004-compile-api-readiness.test.js",
         "tests/wave1021-frontier-delta-freshness.test.js",
         "tests/wave1025-executorch-validation-harness.test.js",
         "tests/wave144-verifier-states.test.js",
-        "tests/wave195-quantize-worker.test.js",
-        "tests/wave464-multimodal-audio-redact.test.js"
+        "tests/wave195-quantize-worker.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -63786,13 +64523,13 @@
       },
       "test_refs": [
         "tests/wave195-quantize-worker.test.js",
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
-        "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js"
+        "tests/ladder-e2e.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -63916,12 +64653,12 @@
       "test_refs": [
         "tests/wave195-quantize-worker.test.js",
         "tests/wave931-worker-safety-contracts.test.js",
+        "tests/ladder-bench.test.js",
         "tests/product-kernel-envelope.test.js",
         "tests/wave1004-compile-api-readiness.test.js",
         "tests/wave1021-frontier-delta-freshness.test.js",
         "tests/wave1025-executorch-validation-harness.test.js",
-        "tests/wave144-verifier-states.test.js",
-        "tests/wave464-multimodal-audio-redact.test.js"
+        "tests/wave144-verifier-states.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -64366,14 +65103,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/fixtures/ladder-bench/add-cli-json-flag/hidden/tests/hidden.test.js",
+        "tests/ladder-audit.test.js",
+        "tests/ladder-bench.test.js",
         "tests/ladder-cli.test.js",
+        "tests/ladder-coder.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
-        "tests/ladder-hardening.test.js",
-        "tests/ladder-orchestrator.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/ladder-hardening.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",

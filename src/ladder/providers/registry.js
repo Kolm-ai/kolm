@@ -34,6 +34,10 @@ function entry(o) {
     offpeak: null,
     acceptsSampling: true,
     pricingVerified: true,
+    // Native tool calling. `false` sends the rung through the text tool protocol
+    // (providers/text-tools.js) from construction instead of waiting for a 400.
+    tools: true,
+    textToolsHint: null,
     ...o,
     roles: Object.freeze(o.roles),
   });
@@ -160,6 +164,32 @@ export const MODEL_CATALOG = Object.freeze({
     pricingVerified: false,
     roles: ['coder', 'reviewer'],
   }),
+  // Ollama's OpenAI layer answers 400 "does not support tools" for this model,
+  // so it starts in the text protocol instead of burning a turn discovering it.
+  'ollama:deepseek-coder-v2': entry({
+    ctx: 131072,
+    maxOut: 32768,
+    priceIn: 0,
+    priceOut: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    tools: false,
+    textToolsHint: 'ollama deepseek-coder-v2 has no tool API; kolm code uses the text tool protocol',
+    roles: ['coder', 'reviewer'],
+  }),
+  // Wildcard for the long tail of OpenRouter routes. Pricing varies per route
+  // and per day, so it is reported unknown rather than guessed.
+  'openrouter:*': entry({
+    ctx: 131072,
+    maxOut: 8192,
+    priceIn: 0,
+    priceOut: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    pricingVerified: false,
+    textToolsHint: 'many free OpenRouter routes reject tools; the adapter flips to the text protocol',
+    roles: ['coder', 'reviewer'],
+  }),
 });
 
 /** Local models: every `ollama:*` ref is free and usable as coder or reviewer. */
@@ -193,6 +223,18 @@ const FAKE_ENTRY = entry({
   roles: ['planner', 'judge', 'coder', 'reviewer'],
 });
 
+/**
+ * Local model families with no tool API in Ollama's OpenAI layer, matched on the
+ * model-name prefix so tags (`:16b`, `:latest`) resolve too. Kept short on
+ * purpose: everything else discovers the limit from the 400 and flips at runtime.
+ */
+const NO_NATIVE_TOOLS_PREFIXES = Object.freeze({
+  ollama: Object.freeze(['deepseek-coder-v2', 'codellama']),
+});
+
+/** Wildcard catalog entries consulted when an exact ref is unknown. */
+const PROVIDER_WILDCARDS = Object.freeze({ openrouter: 'openrouter:*' });
+
 /** Every ref the catalog knows by name (excludes the `ollama:*` wildcard). */
 export function knownRefs() {
   return Object.keys(MODEL_CATALOG);
@@ -208,14 +250,19 @@ export function listModels() {
  * @returns {{ref:string, provider:string, model:string, ctx:number, maxOut:number,
  *   priceIn:number, priceOut:number, cacheRead:number, cacheWrite:number,
  *   roles:string[], acceptsSampling:boolean, unknownPricing:boolean,
- *   pricingVerified:boolean, offpeak:object|null}}
+ *   pricingVerified:boolean, offpeak:object|null, tools:boolean,
+ *   textToolsHint:string|null}}
  */
 export function describeModel(ref) {
   const { provider, model, ref: normalized } = parseRef(ref);
   let base = MODEL_CATALOG[normalized];
   let unknownPricing = false;
   if (!base) {
-    if (provider === 'ollama') base = OLLAMA_ENTRY;
+    const wildcard = PROVIDER_WILDCARDS[provider];
+    if (wildcard && MODEL_CATALOG[wildcard]) {
+      base = MODEL_CATALOG[wildcard];
+      unknownPricing = true; // the route exists; its price does not follow from the catalog
+    } else if (provider === 'ollama') base = OLLAMA_ENTRY;
     else if (provider === 'fake') base = FAKE_ENTRY;
     else {
       base = UNKNOWN_ENTRY;
@@ -223,6 +270,8 @@ export function describeModel(ref) {
     }
   }
   const cacheWrite = base.cacheWrite === null ? base.priceIn * CACHE_WRITE_MULTIPLE : base.cacheWrite;
+  const prefixes = NO_NATIVE_TOOLS_PREFIXES[provider] ?? [];
+  const noTools = prefixes.some((p) => model.toLowerCase().startsWith(p));
   return {
     ref: normalized,
     provider,
@@ -238,7 +287,21 @@ export function describeModel(ref) {
     acceptsSampling: base.acceptsSampling,
     pricingVerified: base.pricingVerified,
     unknownPricing,
+    tools: noTools ? false : base.tools !== false,
+    textToolsHint: noTools
+      ? (base.textToolsHint ?? `${normalized} has no tool API; kolm code uses the text tool protocol`)
+      : base.textToolsHint,
   };
+}
+
+/**
+ * Does this ref accept native tool definitions? `false` sends the adapter
+ * through the text tool protocol from construction.
+ * @param {string} ref
+ * @returns {boolean}
+ */
+export function supportsNativeTools(ref) {
+  return describeModel(ref).tools !== false;
 }
 
 /**

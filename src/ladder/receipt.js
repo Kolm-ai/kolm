@@ -142,6 +142,10 @@ function verdictOf(entry) {
  * @param {object} [args.calibration] {sampled, agreementRate|agreement_rate}
  * @param {string|null} [args.stopReason]
  * @param {string} [args.verdict]    PASS | FAIL | JUDGE | ERROR
+ * @param {Array} [args.subtasks]    subtask winners (spec 4.4); [] for a single-unit run.
+ *   A subtask that failed or was SKIPPED (its dependency failed) is listed too,
+ *   with null winner/branch/sha: the ledger says what the run attempted, and the
+ *   per-subtask verdict lives in the events.
  * @returns {object} receipt (unsigned)
  */
 export function buildReceipt({
@@ -163,6 +167,7 @@ export function buildReceipt({
   verdict = null,
   createdAt = null,
   signerKid = null,
+  subtasks = [],
 } = {}) {
   const task = run.task && typeof run.task === 'object' ? run.task : {};
   const candidateRows = (candidates || []).map((c) => ({
@@ -251,6 +256,15 @@ export function buildReceipt({
       }
       : null,
     candidates: candidateRows,
+    // Empty for a single-unit run, so today's receipts keep the same shape with
+    // one extra (always present, always an array) field. Canonicalisation covers
+    // it, so it is signed like everything else.
+    subtasks: (subtasks || []).map((s) => ({
+      id: pick(s, 'id') ?? null,
+      winner: pick(s, 'winner') ?? null,
+      branch: pick(s, 'branch') ?? null,
+      sha: pick(s, 'sha') ?? null,
+    })).filter((s) => s.id !== null),
     stages,
     judge,
     calibration: {

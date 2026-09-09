@@ -63,7 +63,7 @@ const ESLINT_CONFIGS = [
 /**
  * Which test runner a command string invokes — used as a parser hint.
  * @param {string} cmd
- * @returns {'node'|'jest'|'vitest'|'pytest'|'go'|'cargo'|'unknown'}
+ * @returns {'node'|'jest'|'vitest'|'pytest'|'unittest'|'go'|'cargo'|'deno'|'unknown'}
  */
 export function detectRunner(cmd) {
   const c = String(cmd || '').toLowerCase();
@@ -71,21 +71,83 @@ export function detectRunner(cmd) {
   if (/\bvitest\b/.test(c)) return 'vitest';
   if (/\bjest\b/.test(c)) return 'jest';
   if (/\bpytest\b/.test(c) || /python\s+-m\s+pytest/.test(c)) return 'pytest';
+  // unittest before the generic python check: `python -m unittest` is its own
+  // output dialect ("test_x (mod.Class) ... ok"), not pytest's.
+  if (/-m\s+unittest\b/.test(c) || /\bunittest\s+discover\b/.test(c)) return 'unittest';
   if (/\bgo\s+test\b/.test(c)) return 'go';
   if (/\bcargo\s+(test|nextest)\b/.test(c)) return 'cargo';
+  if (/\bdeno\s+(test|task\s+test)\b/.test(c)) return 'deno';
   if (/node\s+--test/.test(c) || /\bnode:test\b/.test(c)) return 'node';
   if (/\bnpm\s+(run\s+)?test\b/.test(c) || /\b(pnpm|yarn|bun)\s+(run\s+)?test\b/.test(c)) return 'node';
   return 'unknown';
 }
 
+// A Makefile is the last resort: if a repo ships one with a `test:` target and
+// nothing else identified a runner, `make test` is the best guess available.
+const MAKE_TARGET_RE = /^([A-Za-z0-9_.-]+)\s*:(?!=)/;
+
+/**
+ * Phony-ish target names a Makefile declares, in file order.
+ * @param {string} text Makefile contents
+ * @returns {Set<string>}
+ */
+export function makefileTargets(text) {
+  const targets = new Set();
+  for (const raw of String(text ?? '').split(/\r?\n/)) {
+    // Recipe lines start with a tab; only column-0 lines declare targets.
+    if (!raw || /^[\t ]/.test(raw)) continue;
+    const m = MAKE_TARGET_RE.exec(raw);
+    if (!m) continue;
+    if (m[1] === '.PHONY') {
+      for (const name of raw.slice(raw.indexOf(':') + 1).split(/\s+/)) {
+        if (name) targets.add(name);
+      }
+      continue;
+    }
+    targets.add(m[1]);
+  }
+  return targets;
+}
+
+/**
+ * Workspace globs declared by a pnpm-workspace.yaml file.
+ * A hand-rolled reader, because the ladder ships no YAML dependency and the
+ * file only ever holds `packages:` followed by a list of quoted globs.
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function parsePnpmWorkspaces(text) {
+  const out = [];
+  let inPackages = false;
+  for (const raw of String(text ?? '').split(/\r?\n/)) {
+    const line = raw.replace(/#.*$/, '').trimEnd();
+    if (!line.trim()) continue;
+    if (/^packages\s*:/.test(line)) {
+      inPackages = true;
+      continue;
+    }
+    if (!inPackages) continue;
+    const item = /^\s*-\s*(.+)$/.exec(line);
+    if (!item) break; // a new top-level key ends the list
+    out.push(item[1].trim().replace(/^["']|["']$/g, ''));
+  }
+  return out;
+}
+
 /**
  * Detect the commands this repo uses.
+ * `monorepo`/`workspaces` are always present: a coder that edits one package of
+ * a workspace has to know the test command runs from the root.
  * @param {object} wt worktree (needs readFile; listFiles is optional)
  * @returns {Promise<{test:string|null, typecheck:string|null, lint:string|null,
- *                    coverage:string|null, language:string|null, packageManager:string|null}>}
+ *                    coverage:string|null, language:string|null, packageManager:string|null,
+ *                    monorepo:boolean, workspaces:string[]}>}
  */
 export async function detectCommands(wt) {
-  const out = { test: null, typecheck: null, lint: null, coverage: null, language: null, packageManager: null };
+  const out = {
+    test: null, typecheck: null, lint: null, coverage: null,
+    language: null, packageManager: null, monorepo: false, workspaces: [],
+  };
 
   const pkg = await readJsonMaybe(wt, 'package.json');
   const pyproject = await readMaybe(wt, 'pyproject.toml');
@@ -93,6 +155,25 @@ export async function detectCommands(wt) {
   const setupCfg = await readMaybe(wt, 'setup.cfg');
   const goMod = await readMaybe(wt, 'go.mod');
   const cargoToml = await readMaybe(wt, 'Cargo.toml');
+  const denoJson = (await readMaybe(wt, 'deno.json')) ?? (await readMaybe(wt, 'deno.jsonc'));
+
+  // Workspaces are orthogonal to the language branch below, so they are read
+  // first and survive whichever branch claims the repo.
+  const pnpmWorkspace = await readMaybe(wt, 'pnpm-workspace.yaml');
+  const workspaces = [];
+  if (pnpmWorkspace) workspaces.push(...parsePnpmWorkspaces(pnpmWorkspace));
+  if (pkg) {
+    const declared = Array.isArray(pkg.workspaces)
+      ? pkg.workspaces
+      : (pkg.workspaces && Array.isArray(pkg.workspaces.packages) ? pkg.workspaces.packages : []);
+    for (const entry of declared) {
+      if (typeof entry === 'string' && entry.trim()) workspaces.push(entry.trim());
+    }
+  }
+  if (workspaces.length > 0) {
+    out.monorepo = true;
+    out.workspaces = [...new Set(workspaces)].slice(0, 32);
+  }
 
   if (pkg) {
     out.language = (await exists(wt, 'tsconfig.json')) ? 'typescript' : 'javascript';
@@ -134,10 +215,25 @@ export async function detectCommands(wt) {
     } else if (detectRunner(out.test) === 'node') {
       out.coverage = 'node --test --experimental-test-coverage';
     }
-    return out;
-  }
-
-  if (pyproject || pytestIni || setupCfg) {
+  } else if (denoJson) {
+    // Deno ships its own runner, linter and typechecker, so a deno.json repo
+    // needs no dependency inspection at all - only its declared tasks.
+    out.language = 'typescript';
+    out.packageManager = 'deno';
+    let tasks = {};
+    try {
+      // deno.jsonc may carry comments; a parse failure just means "no tasks".
+      const doc = JSON.parse(denoJson);
+      if (doc && typeof doc.tasks === 'object' && doc.tasks) tasks = doc.tasks;
+    } catch {
+      tasks = {};
+    }
+    out.test = typeof tasks.test === 'string' ? 'deno task test' : 'deno test';
+    if (typeof tasks.typecheck === 'string') out.typecheck = 'deno task typecheck';
+    else if (typeof tasks.check === 'string') out.typecheck = 'deno task check';
+    out.lint = typeof tasks.lint === 'string' ? 'deno task lint' : 'deno lint';
+    if (typeof tasks.coverage === 'string') out.coverage = 'deno task coverage';
+  } else if (pyproject || pytestIni || setupCfg) {
     out.language = 'python';
     out.packageManager = pyproject && /\[tool\.poetry\]/.test(pyproject) ? 'poetry'
       : pyproject && /\[tool\.uv\]/.test(pyproject) ? 'uv' : 'pip';
@@ -149,24 +245,30 @@ export async function detectCommands(wt) {
     const wantsRuff = (pyproject && /\[tool\.ruff\]/.test(pyproject)) || (await exists(wt, 'ruff.toml')) || (await exists(wt, '.ruff.toml'));
     if (wantsRuff) out.lint = 'ruff check --output-format json';
     if (pyproject && /pytest-cov|coverage/.test(pyproject)) out.coverage = 'pytest -q --cov --cov-report=json';
-    return out;
-  }
-
-  if (goMod) {
+  } else if (goMod) {
     out.language = 'go';
     out.packageManager = 'go';
     out.test = 'go test ./...';
     out.typecheck = 'go vet ./...';
     out.coverage = 'go test ./... -cover';
-    return out;
-  }
-
-  if (cargoToml) {
+  } else if (cargoToml) {
     out.language = 'rust';
     out.packageManager = 'cargo';
     out.test = 'cargo test';
     out.typecheck = 'cargo check';
-    return out;
+  }
+
+  // Makefile last: only fills slots no manifest could. `make test` on a repo
+  // that already resolved `npm test` would run the wrong thing.
+  if (out.test === null || out.typecheck === null || out.lint === null) {
+    const makefile = (await readMaybe(wt, 'Makefile')) ?? (await readMaybe(wt, 'makefile')) ?? (await readMaybe(wt, 'GNUmakefile'));
+    if (makefile) {
+      const targets = makefileTargets(makefile);
+      if (out.test === null && targets.has('test')) out.test = 'make test';
+      if (out.typecheck === null && targets.has('check')) out.typecheck = 'make check';
+      if (out.lint === null && targets.has('lint')) out.lint = 'make lint';
+      if (out.language === null && (out.test || out.typecheck || out.lint)) out.packageManager = out.packageManager || 'make';
+    }
   }
 
   return out;
@@ -182,8 +284,38 @@ const NODE_SUMMARY = /^[#ℹ]\s*(tests|pass|fail|skipped|todo|cancelled)\s+(\d+)
 const GO_FAIL = /^---\s*FAIL:\s*(\S+)/;
 const GO_PASS = /^---\s*PASS:\s*(\S+)/;
 const GO_PKG_OK = /^ok\s+\S+\s+[\d.]+s/;
-const PYTEST_FAILED = /^(?:FAILED|ERROR)\s+(\S+)/;
+// The negative lookahead keeps unittest's own summary line, `FAILED (failures=1)`,
+// out of the pytest branch - without it the failing test would be named "(failures=1)".
+const PYTEST_FAILED = /^(?:FAILED|ERROR)\s+(?!\()(\S+)/;
 const CARGO_LINE = /^test\s+(\S+)\s+\.\.\.\s+(ok|FAILED|ignored)\b/;
+
+// python -m unittest -v: "test_add (tests.test_math.MathTest) ... ok", then a
+// "FAIL: <test> (<owner>)" header per failure, then "Ran N tests in 0.0s" and
+// either "OK" / "OK (skipped=1)" or "FAILED (failures=1, errors=2)".
+const UNITTEST_CASE = /^(\S+)\s+\(([^)]+)\)\s*\.\.\.\s*(ok|FAIL|ERROR|skipped|expected failure|unexpected success)\b/;
+const UNITTEST_HEADER = /^(?:FAIL|ERROR):\s+(\S+)\s+\(([^)]+)\)/;
+const UNITTEST_RAN = /^Ran\s+(\d+)\s+tests?\s+in\s+[\d.]+s/;
+const UNITTEST_OK = /^OK\s*(?:\(([^)]*)\))?\s*$/;
+const UNITTEST_FAILED = /^FAILED\s*\(([^)]*)\)\s*$/;
+
+// deno test: "add ... ok (2ms)" per case and
+// "ok | 2 passed | 1 failed (5ms)" as the summary.
+const DENO_CASE = /^(.+?)\s+\.\.\.\s+(ok|FAILED|ignored)\b/;
+const DENO_SUMMARY = /^(?:ok|FAILED)\s*\|\s*(\d+)\s+passed[^|]*\|\s*(\d+)\s+failed\b/;
+
+/** unittest prints the owner with or without the method appended; do not repeat it. */
+function unittestName(method, owner) {
+  return owner.endsWith(`.${method}`) ? owner : `${owner}.${method}`;
+}
+
+/** Read `key=N` counters out of a unittest "OK (...)" / "FAILED (...)" tail. */
+function unittestCounts(tail) {
+  const counts = {};
+  for (const m of String(tail || '').matchAll(/([A-Za-z ]+)=(\d+)/g)) {
+    counts[m[1].trim().replace(/\s+/g, ' ')] = Number(m[2]);
+  }
+  return counts;
+}
 
 function stripTiming(name) {
   return String(name)
@@ -217,7 +349,8 @@ export function isRunnerNoise(name) {
 
 /**
  * Parse a test runner's combined stdout+stderr.
- * Handles: node --test (spec + TAP), jest, vitest, pytest, go test, cargo test.
+ * Handles: node --test (spec + TAP), jest, vitest, pytest, python -m unittest,
+ * go test, cargo test, deno test.
  * @param {string} text
  * @param {string} [runnerHint] from detectRunner()
  * @returns {{passed:number, failed:number, failing:string[], parsed:boolean}}
@@ -231,7 +364,8 @@ export function parseTestOutput(text, runnerHint) {
   let parsed = false;
   let sumPass = null;
   let sumFail = null;
-  let sumSource = null; // 'node' | 'jsts' | 'pytest' | 'cargo'
+  let sumSource = null; // 'node' | 'unittest' | 'jsts' | 'cargo' | 'deno' | 'pytest'
+  let ranTotal = null;  // unittest's "Ran N tests"
 
   const addFailing = (name) => {
     if (isRunnerNoise(name)) return;
@@ -240,7 +374,7 @@ export function parseTestOutput(text, runnerHint) {
   };
   const setSummary = (source, pass, fail) => {
     // node's own counters win over a framework banner; first writer of a source wins.
-    const rank = { node: 3, cargo: 2, jsts: 2, pytest: 1 };
+    const rank = { node: 3, unittest: 3, cargo: 2, jsts: 2, deno: 2, pytest: 1 };
     if (sumSource && rank[sumSource] > rank[source]) return;
     sumSource = source;
     if (pass !== null && pass !== undefined) sumPass = pass;
@@ -259,7 +393,57 @@ export function parseTestOutput(text, runnerHint) {
       continue;
     }
 
-    let m = TICK_FAIL.exec(line);
+    let m = DENO_SUMMARY.exec(line);
+    if (m) {
+      parsed = true;
+      setSummary('deno', Number(m[1]), Number(m[2]));
+      continue;
+    }
+    m = UNITTEST_RAN.exec(line);
+    if (m) {
+      parsed = true;
+      ranTotal = Number(m[1]);
+      continue;
+    }
+    m = UNITTEST_OK.exec(line);
+    if (m) {
+      parsed = true;
+      const counts = unittestCounts(m[1]);
+      const skipped = (counts.skipped || 0) + (counts['expected failures'] || 0);
+      setSummary('unittest', ranTotal === null ? countPass : Math.max(0, ranTotal - skipped), 0);
+      continue;
+    }
+    m = UNITTEST_FAILED.exec(line);
+    if (m) {
+      parsed = true;
+      const counts = unittestCounts(m[1]);
+      // An unexpected success is a failure: the test was marked expectedFailure.
+      const fail = (counts.failures || 0) + (counts.errors || 0) + (counts['unexpected successes'] || 0);
+      const skipped = (counts.skipped || 0) + (counts['expected failures'] || 0);
+      setSummary('unittest', ranTotal === null ? countPass : Math.max(0, ranTotal - fail - skipped), fail);
+      continue;
+    }
+    m = UNITTEST_CASE.exec(line);
+    if (m) {
+      parsed = true;
+      const name = unittestName(m[1], m[2]);
+      if (m[3] === 'ok') countPass += 1;
+      else if (m[3] === 'FAIL' || m[3] === 'ERROR' || m[3] === 'unexpected success') {
+        countFail += 1;
+        addFailing(name);
+      }
+      continue;
+    }
+    m = UNITTEST_HEADER.exec(line);
+    if (m) {
+      // Name only: the "... FAIL" case line above already counted this one, and
+      // in non-verbose runs the FAILED(...) summary carries the count.
+      parsed = true;
+      addFailing(unittestName(m[1], m[2]));
+      continue;
+    }
+
+    m = TICK_FAIL.exec(line);
     if (m) {
       parsed = true;
       if (!isRunnerNoise(m[1])) {
@@ -313,6 +497,16 @@ export function parseTestOutput(text, runnerHint) {
       continue;
     }
     m = CARGO_LINE.exec(line);
+    if (m) {
+      parsed = true;
+      if (m[2] === 'ok') countPass += 1;
+      else if (m[2] === 'FAILED') {
+        countFail += 1;
+        addFailing(m[1]);
+      }
+      continue;
+    }
+    m = DENO_CASE.exec(line);
     if (m) {
       parsed = true;
       if (m[2] === 'ok') countPass += 1;
@@ -506,6 +700,8 @@ export function parseLintErrors(text, tool, opts = {}) {
 export default {
   detectCommands,
   detectRunner,
+  makefileTargets,
+  parsePnpmWorkspaces,
   parseTestOutput,
   parseTypecheckErrors,
   parseLintErrors,

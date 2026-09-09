@@ -450,6 +450,15 @@ export function createLocalGitDriver(config = {}, opts = {}) {
         }
       },
 
+      async readFileAt(ref, rel) {
+        if (typeof ref !== 'string' || ref.trim() === '') return null;
+        // resolveInside is the path-escape guard, not a filesystem read: the
+        // content comes out of the object database, not the working tree.
+        resolveInside(root, rel);
+        const res = await wtGit(['show', `${ref}:${toPosix(rel)}`]);
+        return res.exitCode === 0 ? res.stdout : null;
+      },
+
       async writeFile(rel, content) {
         const abs = resolveInside(root, rel);
         await fs.mkdir(path.dirname(abs), { recursive: true });
@@ -605,16 +614,63 @@ export function createLocalGitDriver(config = {}, opts = {}) {
         }
       },
 
+      async merge(ref, { message = null } = {}) {
+        // Used by subtask integration (spec 4.4): merge one finished subtask's
+        // winner branch into the integration worktree. A conflict is NOT an
+        // exception - it is a result the orchestrator repairs, so the conflict
+        // markers are deliberately left in the working tree for the coder.
+        if (typeof ref !== 'string' || ref.trim() === '') {
+          throw new LadderError('bad-arg', 'merge requires a ref', { ref });
+        }
+        const res = await wtGit([
+          ...GIT_IDENTITY,
+          'merge', '--no-ff', '--no-edit',
+          ...(message ? ['-m', String(message)] : []),
+          ref,
+        ]);
+        if (res.exitCode === 0) return { ok: true, conflicts: [], detail: res.stdout.trim() };
+        const unmerged = await wtGit(['diff', '--name-only', '--diff-filter=U']);
+        const conflicts = unmerged.exitCode === 0
+          ? unmerged.stdout.split('\n').map((s) => s.trim()).filter(Boolean).map(toPosix)
+          : [];
+        return {
+          ok: false,
+          conflicts,
+          detail: (res.stderr || res.stdout).trim() || `git merge exited ${res.exitCode}`,
+        };
+      },
+
+      /**
+       * True when `ref` is already reachable from this worktree's HEAD, i.e.
+       * the merge of `ref` really landed. Used after a repaired conflict, where
+       * a resolution that keeps HEAD's side leaves a tree that looks finished
+       * whether or not the merge was ever concluded.
+       */
+      async isAncestor(ref) {
+        if (typeof ref !== 'string' || ref.trim() === '') {
+          throw new LadderError('bad-arg', 'isAncestor requires a ref', { ref });
+        }
+        const res = await wtGit(['merge-base', '--is-ancestor', ref, 'HEAD']);
+        return res.exitCode === 0;
+      },
+
       async commit(message) {
         // `git add -A` is confined to this worktree, which is a throwaway
         // candidate checkout created and owned by kolm code. This is the ONLY
         // place in the ladder that stages everything; nothing here can reach
         // the operator's own repository working tree.
         await gitOrThrow(['add', '-A'], { cwd: root }, 'git-failed', 'git add failed');
+        // A merge git started is only over once it is committed. A repair that
+        // resolves a conflict by keeping HEAD's side leaves an empty status
+        // with MERGE_HEAD still set: skipping the commit there would strand the
+        // worktree mid-merge and git would refuse every later merge in the
+        // level (found live, run r_20260909_6a5142fd). So a merge in progress
+        // is always concluded, empty status or not.
+        const merging = (await wtGit(['rev-parse', '-q', '--verify', 'MERGE_HEAD'])).exitCode === 0;
         // A resumed run may find the candidate already committed. A clean tree
         // is then not a failure: the existing HEAD is the commit.
         const status = await gitOrThrow(['status', '--porcelain'], { cwd: root }, 'git-failed', 'git status failed');
-        const commitRes = status.stdout.trim() === ''
+        const commitRes = status.stdout.trim() === '' && !merging
           ? { exitCode: 0, stdout: '', stderr: '' }
           : await wtGit([
             ...GIT_IDENTITY,
@@ -778,6 +834,16 @@ export function createLocalGitDriver(config = {}, opts = {}) {
     create,
     open,
     destroyRun,
+    /**
+     * Merge `ref` into `wt` (spec 4.4). Delegates to the worktree so callers can
+     * use either shape; a conflict resolves to `{ok:false, conflicts}` rather
+     * than throwing.
+     * @param {object} wt worktree from create()/open()
+     * @param {string} ref branch or sha to merge in
+     * @param {object} [opts]
+     * @returns {Promise<{ok:boolean, conflicts:string[], detail:string}>}
+     */
+    merge: (wt, ref, opts) => wt.merge(ref, opts),
   };
 }
 

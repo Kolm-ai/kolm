@@ -16,7 +16,15 @@ import {
   priceFor,
   rolesFor,
   estimateCost,
+  supportsNativeTools,
 } from '../src/ladder/providers/registry.js';
+import {
+  PROVIDER_CONCURRENCY_DEFAULTS,
+  createLimiter,
+  limiterFor,
+  resetLimiters,
+  retryDelayMs,
+} from '../src/ladder/providers/limiter.js';
 import {
   createFakeProvider,
   createMockProvider,
@@ -522,10 +530,10 @@ test('overload (529) is retried and then succeeds', async () => {
   const r = await p.chat({});
   assert.equal(r.text, 'recovered');
   assert.equal(attempts, 2);
-  assert.deepEqual(slept, [563]); // 500 + 0.5 * 500 * 0.25
+  assert.deepEqual(slept, [1000]); // spec 3.3: 1s base, +-20% jitter, random()=0.5 -> no offset
 });
 
-test('a persistent 500 gives up after three tries as provider-unavailable', async () => {
+test('a persistent 500 gives up after two tries as provider-unavailable', async () => {
   let attempts = 0;
   const client = fakeAnthropicClient(() => {
     attempts += 1;
@@ -540,7 +548,7 @@ test('a persistent 500 gives up after three tries as provider-unavailable', asyn
     () => p.chat({}),
     (e) => isLadderError(e, 'provider-unavailable') && e.detail.status === 500,
   );
-  assert.equal(attempts, 3);
+  assert.equal(attempts, 2); // spec 3.3: a plain 5xx is worth two tries, not three
 });
 
 test('a 400 is a provider-bad-request and is never retried', async () => {
@@ -914,7 +922,7 @@ test('a 429 is retried and then succeeds', async () => {
   });
   assert.equal((await p.chat({})).text, 'ok now');
   assert.equal(fetchImpl.requests.length, 2);
-  assert.deepEqual(slept, [563]);
+  assert.deepEqual(slept, [1000]);
 });
 
 test('4xx and 5xx map to the right ladder error codes', async () => {
@@ -1065,4 +1073,682 @@ test('an unarmed rung from createProvider still constructs', async () => {
     () => p.chat({}),
     (e) => isLadderError(e, 'not-armed'),
   );
+});
+
+// ===========================================================================
+// limiter and backoff (spec 3.3)
+// ===========================================================================
+
+/** A promise plus its resolver, so a test can hold a request open. */
+function deferred() {
+  let resolve;
+  const promise = new Promise((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+test('the limiter runs at most its concurrency in parallel and drains the queue', async () => {
+  const limiter = createLimiter({ concurrency: 2 });
+  let active = 0;
+  let peak = 0;
+  const gates = [deferred(), deferred(), deferred(), deferred()];
+  const runs = gates.map((gate) =>
+    limiter.run(async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await gate.promise;
+      active -= 1;
+      return 'done';
+    }),
+  );
+  await Promise.resolve();
+  assert.equal(limiter.stats().active, 2);
+  assert.equal(limiter.stats().queued, 2);
+  for (const gate of gates) gate.resolve();
+  assert.deepEqual(await Promise.all(runs), ['done', 'done', 'done', 'done']);
+  assert.equal(peak, 2);
+  assert.equal(limiter.stats().active, 0);
+  assert.equal(limiter.stats().queued, 0);
+});
+
+test('a rejected task still frees its slot', async () => {
+  const limiter = createLimiter({ concurrency: 1 });
+  await assert.rejects(() => limiter.run(async () => { throw new Error('boom'); }), /boom/);
+  assert.equal(await limiter.run(async () => 'after'), 'after');
+});
+
+test('an aborted signal rejects a queued task without running it', async () => {
+  const limiter = createLimiter({ concurrency: 1 });
+  const gate = deferred();
+  const first = limiter.run(() => gate.promise);
+  const controller = new AbortController();
+  let ran = false;
+  const second = limiter.run(async () => {
+    ran = true;
+  }, { signal: controller.signal });
+  await Promise.resolve();
+  controller.abort();
+  await assert.rejects(() => second, (e) => e.name === 'AbortError');
+  gate.resolve('ok');
+  assert.equal(await first, 'ok');
+  assert.equal(ran, false);
+});
+
+test('a 429 halves concurrency for the penalty window and never goes below 1', () => {
+  let clock = 1000;
+  const limiter = createLimiter({ concurrency: 4, now: () => clock });
+  assert.equal(limiter.stats().concurrency, 4);
+  limiter.penalize({ ms: 60000 });
+  assert.equal(limiter.stats().concurrency, 2);
+  assert.equal(limiter.stats().throttled, true);
+  limiter.penalize({ ms: 60000 });
+  assert.equal(limiter.stats().concurrency, 1);
+  limiter.penalize({ ms: 60000 });
+  assert.equal(limiter.stats().concurrency, 1);
+  // The penalty expires on its own, with no timer holding the process open.
+  clock += 60001;
+  assert.equal(limiter.stats().concurrency, 4);
+  assert.equal(limiter.stats().throttled, false);
+});
+
+test('limiterFor caches one limiter per provider and honours the config override', () => {
+  resetLimiters();
+  try {
+    assert.equal(limiterFor('ollama', {}).stats().baseConcurrency, PROVIDER_CONCURRENCY_DEFAULTS.ollama);
+    assert.equal(limiterFor('anthropic', {}).stats().baseConcurrency, 4);
+    assert.equal(limiterFor('fake', {}).stats().baseConcurrency, Infinity);
+    assert.equal(limiterFor('mistral', {}).stats().baseConcurrency, 2);
+    const first = limiterFor('deepseek', {});
+    const again = limiterFor('deepseek', { providerConcurrency: { deepseek: 7 } });
+    assert.equal(first, again);
+    assert.equal(again.stats().baseConcurrency, 7);
+  } finally {
+    resetLimiters();
+  }
+});
+
+test('retryDelayMs honours Retry-After in seconds, as a date, and falls back to backoff', () => {
+  const at = Date.parse('2026-09-09T12:00:00Z');
+  const now = () => at;
+  assert.equal(retryDelayMs(0, { 'retry-after': '2' }, { now }), 2000);
+  assert.equal(retryDelayMs(3, { 'Retry-After': '5' }, { now }), 5000);
+  // A header-object with .get (fetch Headers) works the same way.
+  assert.equal(
+    retryDelayMs(0, { get: (name) => (name === 'retry-after' ? '3' : null) }, { now }),
+    3000,
+  );
+  // HTTP-date form.
+  assert.equal(
+    retryDelayMs(0, { 'retry-after': new Date(at + 4000).toUTCString() }, { now }),
+    4000,
+  );
+  // A date in the past is not a negative wait.
+  assert.equal(retryDelayMs(0, { 'retry-after': new Date(at - 9000).toUTCString() }, { now }), 0);
+  // Every result is capped at 30 s.
+  assert.equal(retryDelayMs(0, { 'retry-after': '600' }, { now }), 30000);
+  // No header: 1s, 2s, 4s, 8s with random()=0.5 cancelling the jitter.
+  const opts = { now, random: fixedRandom };
+  assert.deepEqual([0, 1, 2, 3].map((n) => retryDelayMs(n, null, opts)), [1000, 2000, 4000, 8000]);
+  // Jitter stays inside +-20%.
+  assert.equal(retryDelayMs(0, null, { now, random: () => 0 }), 800);
+  assert.equal(retryDelayMs(0, null, { now, random: () => 1 }), 1200);
+  // An unparseable header falls back to backoff rather than throwing.
+  assert.equal(retryDelayMs(0, { 'retry-after': 'soon' }, opts), 1000);
+});
+
+test('a 429 reaches the reply as meta.throttled and honours Retry-After', async () => {
+  const throttled = {
+    status: 429,
+    headers: { 'retry-after': '2' },
+    json: async () => ({ error: 'slow down' }),
+    text: async () => 'slow down',
+  };
+  const fetchImpl = fakeFetch([throttled, okResponse(chatCompletion())]);
+  const slept = [];
+  const limiter = createLimiter({ concurrency: 4, now: () => 0 });
+  const p = createOpenAICompatibleProvider('cerebras:qwen-3.8-27b', cfg({ cerebras: 'csk' }), {
+    fetchImpl,
+    limiter,
+    sleep: async (ms) => {
+      slept.push(ms);
+    },
+    random: fixedRandom,
+  });
+  const r = await p.chat({});
+  assert.equal(r.text, 'hi');
+  assert.deepEqual(slept, [2000]);
+  assert.equal(r.meta.throttled, true);
+  assert.equal(limiter.stats().concurrency, 2);
+});
+
+test('a 429 is worth four tries where a plain 500 is worth two', async () => {
+  const throttleFetch = fakeFetch(errResponse(429, 'rate limited'));
+  const throttled = createOpenAICompatibleProvider('cerebras:qwen-3.8-27b', cfg({ cerebras: 'csk' }), {
+    fetchImpl: throttleFetch,
+    limiter: createLimiter({ concurrency: 4, now: () => 0 }),
+    sleep: noSleep,
+    random: fixedRandom,
+  });
+  await assert.rejects(() => throttled.chat({}), (e) => isLadderError(e, 'provider-unavailable'));
+  assert.equal(throttleFetch.requests.length, 4);
+
+  const serverFetch = fakeFetch(errResponse(500, 'server error'));
+  const server = createOpenAICompatibleProvider('cerebras:qwen-3.8-27b', cfg({ cerebras: 'csk' }), {
+    fetchImpl: serverFetch,
+    sleep: noSleep,
+    random: fixedRandom,
+  });
+  await assert.rejects(() => server.chat({}), (e) => isLadderError(e, 'provider-unavailable'));
+  assert.equal(serverFetch.requests.length, 2);
+});
+
+// ===========================================================================
+// text tool protocol in the adapters (spec 3.2)
+// ===========================================================================
+
+const TEXT_TOOLS = [
+  {
+    name: 'read_file',
+    description: 'Read a file.',
+    input_schema: { type: 'object', properties: { path: { type: 'string' } } },
+  },
+];
+
+/** A reply written in the text tool protocol. */
+const TEXT_REPLY = 'reading it now\n<<<tool name="read_file">>>\n{"path": "a.js"}\n<<<end>>>';
+
+function textCompletion(text) {
+  return okResponse(chatCompletion({ choices: [{ finish_reason: 'stop', message: { content: text } }] }));
+}
+
+test('a 400 that says tools are unsupported flips the instance and retries once', async () => {
+  const fetchImpl = fakeFetch([
+    errResponse(400, 'registry.Model "deepseek-coder-v2" does not support tools'),
+    textCompletion(TEXT_REPLY),
+  ]);
+  const p = createOpenAICompatibleProvider('ollama:qwen3.8:latest', cfg(), {
+    fetchImpl,
+    sleep: noSleep,
+    random: fixedRandom,
+  });
+  assert.equal(p.textTools, false);
+
+  const r = await p.chat({ system: 'be brief', tools: TEXT_TOOLS });
+  assert.equal(fetchImpl.requests.length, 2);
+  // First attempt: native tools. Second: no tools field, protocol in the system.
+  assert.equal(Array.isArray(fetchImpl.requests[0].body.tools), true);
+  assert.equal('tools' in fetchImpl.requests[1].body, false);
+  const system = fetchImpl.requests[1].body.messages[0];
+  assert.equal(system.role, 'system');
+  assert.match(system.content, /^be brief\n\nTOOL CALLING PROTOCOL \(text mode, v1\)/);
+  assert.equal(system.content.includes('1. read_file - Read a file.'), true);
+
+  assert.equal(r.meta.textTools, true);
+  assert.equal(r.text, 'reading it now');
+  assert.equal(r.stopReason, 'tool_use');
+  assert.deepEqual(r.toolCalls, [{ id: 'text_1', name: 'read_file', input: { path: 'a.js' } }]);
+  assert.deepEqual(r.content, [
+    { type: 'text', text: 'reading it now' },
+    { type: 'tool_use', id: 'text_1', name: 'read_file', input: { path: 'a.js' } },
+  ]);
+
+  // The flip is latched for the rest of the process: no second 400 is needed.
+  assert.equal(p.textTools, true);
+  const next = fakeFetch([textCompletion(TEXT_REPLY)]);
+  const q = createOpenAICompatibleProvider('ollama:qwen3.8:latest', cfg(), { fetchImpl: next });
+  await q.chat({ tools: TEXT_TOOLS });
+  assert.equal(Array.isArray(next.requests[0].body.tools), true); // a fresh instance starts native
+});
+
+test('a 400 that is not about tools is not flipped', async () => {
+  const fetchImpl = fakeFetch(errResponse(400, 'context length exceeded'));
+  const p = createOpenAICompatibleProvider('ollama:qwen3.8:latest', cfg(), {
+    fetchImpl,
+    sleep: noSleep,
+  });
+  await assert.rejects(
+    () => p.chat({ tools: TEXT_TOOLS }),
+    (e) => isLadderError(e, 'provider-bad-request'),
+  );
+  assert.equal(fetchImpl.requests.length, 1);
+  assert.equal(p.textTools, false);
+});
+
+test('a registry entry with tools:false starts in text mode', async () => {
+  const fetchImpl = fakeFetch([textCompletion(TEXT_REPLY)]);
+  const p = createOpenAICompatibleProvider('ollama:deepseek-coder-v2', cfg(), { fetchImpl });
+  assert.equal(p.textTools, true);
+  const r = await p.chat({ tools: TEXT_TOOLS, messages: [{ role: 'user', content: 'fix it' }] });
+  assert.equal(fetchImpl.requests.length, 1);
+  assert.equal('tools' in fetchImpl.requests[0].body, false);
+  assert.equal(r.meta.textTools, true);
+  assert.equal(r.toolCalls[0].id, 'text_1');
+});
+
+test('KOLM_CODE_TEXT_TOOLS forces the protocol on any ref, wildcards included', async () => {
+  const fetchImpl = fakeFetch([textCompletion(TEXT_REPLY)]);
+  const p = createOpenAICompatibleProvider(
+    'openrouter:some/free-model',
+    cfg({ openrouter: 'sk-or' }, { textTools: ['openrouter:*'] }),
+    { fetchImpl },
+  );
+  assert.equal(p.textTools, true);
+  await p.chat({ tools: TEXT_TOOLS });
+  assert.equal('tools' in fetchImpl.requests[0].body, false);
+});
+
+test('text mode flattens tool_result history into user text', async () => {
+  const fetchImpl = fakeFetch([textCompletion('done')]);
+  const p = createOpenAICompatibleProvider('ollama:deepseek-coder-v2', cfg(), { fetchImpl });
+  await p.chat({
+    tools: TEXT_TOOLS,
+    messages: [
+      { role: 'user', content: 'fix it' },
+      {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'text_1', name: 'read_file', input: { path: 'a.js' } }],
+      },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'text_1', content: 'body' }] },
+    ],
+  });
+  const sent = fetchImpl.requests[0].body.messages;
+  // No tool role, no tool_calls: everything is plain text on the wire.
+  assert.equal(sent.some((m) => m.role === 'tool' || m.tool_calls), false);
+  for (const m of sent) assert.equal(typeof m.content, 'string');
+  assert.equal(sent.at(-2).content.includes('<<<tool name="read_file">>>'), true);
+  assert.equal(sent.at(-1).content.includes('<<<result id="text_1" tool="read_file">>>'), true);
+});
+
+test('a jsonSchema call in text mode asks for JSON only and still parses', async () => {
+  const schema = { type: 'object', properties: { ok: { type: 'boolean' } } };
+  const fetchImpl = fakeFetch([textCompletion('Sure. {"ok": true} hope that helps')]);
+  const p = createOpenAICompatibleProvider('ollama:deepseek-coder-v2', cfg(), { fetchImpl });
+  const r = await p.chat({ jsonSchema: { name: 'verdict', schema } });
+  const body = fetchImpl.requests[0].body;
+  assert.equal('response_format' in body, false);
+  assert.match(body.messages[0].content, /^OUTPUT FORMAT/);
+  assert.equal(body.messages[0].content.includes('{"type":"object"'), true);
+  assert.deepEqual(r.json, { ok: true });
+});
+
+test('broken tool JSON in text mode still produces a call, with the error attached', async () => {
+  const fetchImpl = fakeFetch([
+    textCompletion('<<<tool name="write_file">>>\n{"path": "a.js", oops}\n<<<end>>>'),
+  ]);
+  const p = createOpenAICompatibleProvider('ollama:deepseek-coder-v2', cfg(), { fetchImpl });
+  const r = await p.chat({ tools: TEXT_TOOLS });
+  assert.equal(r.toolCalls[0].name, 'write_file');
+  assert.equal(r.toolCalls[0].input.__parse_error, 'arguments are not valid JSON');
+  assert.deepEqual(r.meta.textToolErrors, ['tool "write_file": arguments are not valid JSON']);
+});
+
+test('the Anthropic adapter can be forced into text mode too', async () => {
+  const client = fakeAnthropicClient(() =>
+    anthropicMessage({ content: [{ type: 'text', text: TEXT_REPLY }] }),
+  );
+  const p = createAnthropicProvider(
+    'anthropic:claude-fable-5-1',
+    cfg({ anthropic: 'sk-ant' }, { textTools: ['anthropic:*'] }),
+    { client },
+  );
+  assert.equal(p.textTools, true);
+  const r = await p.chat({ system: 'be brief', tools: TEXT_TOOLS });
+  const params = client.calls[0].params;
+  assert.equal('tools' in params, false);
+  assert.match(params.system[0].text, /^be brief\n\nTOOL CALLING PROTOCOL/);
+  assert.equal(r.meta.textTools, true);
+  assert.deepEqual(r.toolCalls, [{ id: 'text_1', name: 'read_file', input: { path: 'a.js' } }]);
+  assert.equal(r.stopReason, 'tool_use');
+});
+
+// A coder session whose model describes tool calls in prose asks for the text
+// protocol per call (spec 4.3, live run r_20260909_b4d9777c). The instance must
+// not latch: its other candidates keep the native tool API.
+const FINISH_REPLY = '<<<tool name="finish">>>\n{"summary":"fixed the divisor"}\n<<<end>>>';
+
+test('textTools on a single call speaks the protocol for that call only', async () => {
+  const fetchImpl = fakeFetch([textCompletion(FINISH_REPLY), okResponse(chatCompletion())]);
+  const p = createOpenAICompatibleProvider('ollama:mistral:latest', cfg(), { fetchImpl });
+
+  const r = await p.chat({ system: 'be brief', tools: TEXT_TOOLS, textTools: true });
+  const body = fetchImpl.requests[0].body;
+  assert.equal('tools' in body, false, 'no native tools go on the wire');
+  assert.match(body.messages[0].content, /^be brief\n\nTOOL CALLING PROTOCOL \(text mode, v1\)/);
+  assert.equal(body.messages[0].content.includes('1. read_file - Read a file.'), true);
+  assert.equal(r.meta.textTools, true);
+  assert.equal(r.stopReason, 'tool_use');
+  assert.deepEqual(r.toolCalls, [{ id: 'text_1', name: 'finish', input: { summary: 'fixed the divisor' } }]);
+  assert.deepEqual(r.content, [
+    { type: 'tool_use', id: 'text_1', name: 'finish', input: { summary: 'fixed the divisor' } },
+  ]);
+
+  // Nothing latched: the same instance's next call is native again.
+  assert.equal(p.textTools, false);
+  const next = await p.chat({ system: 'be brief', tools: TEXT_TOOLS });
+  assert.equal(Array.isArray(fetchImpl.requests[1].body.tools), true);
+  assert.equal(next.meta.textTools, false);
+});
+
+test('the Anthropic adapter honours textTools on a single call too', async () => {
+  const client = fakeAnthropicClient((params) =>
+    anthropicMessage({
+      content: [{ type: 'text', text: 'tools' in params ? 'native' : FINISH_REPLY }],
+    }),
+  );
+  const p = createAnthropicProvider('anthropic:claude-fable-5-1', cfg({ anthropic: 'sk-ant' }), { client });
+
+  const r = await p.chat({ system: 'be brief', tools: TEXT_TOOLS, textTools: true });
+  assert.equal('tools' in client.calls[0].params, false);
+  assert.match(client.calls[0].params.system[0].text, /^be brief\n\nTOOL CALLING PROTOCOL/);
+  assert.equal(r.meta.textTools, true);
+  assert.deepEqual(r.toolCalls, [{ id: 'text_1', name: 'finish', input: { summary: 'fixed the divisor' } }]);
+
+  assert.equal(p.textTools, false);
+  const next = await p.chat({ system: 'be brief', tools: TEXT_TOOLS });
+  assert.equal(Array.isArray(client.calls[1].params.tools), true);
+  assert.equal(next.meta.textTools, false);
+  assert.deepEqual(next.toolCalls, []);
+});
+
+// ===========================================================================
+// streaming (spec 3.4)
+// ===========================================================================
+
+/** A fetch Response whose body is a ReadableStream of SSE chunks. */
+function sseResponse(events) {
+  const encoder = new TextEncoder();
+  const frames = events.map(
+    (e) => 'data: ' + (typeof e === 'string' ? e : JSON.stringify(e)) + '\n\n',
+  );
+  return {
+    status: 200,
+    body: new ReadableStream({
+      start(controller) {
+        for (const frame of frames) controller.enqueue(encoder.encode(frame));
+        controller.close();
+      },
+    }),
+    json: async () => {
+      throw new Error('a streamed response must not be read as JSON');
+    },
+  };
+}
+
+test('a long max_tokens streams and the deltas are reassembled', async () => {
+  const fetchImpl = fakeFetch([
+    sseResponse([
+      { id: 'cmpl_9', model: 'qwen-3.8-27b', choices: [{ index: 0, delta: { role: 'assistant', content: 'Hel' } }] },
+      { choices: [{ index: 0, delta: { content: 'lo ' } }] },
+      { choices: [{ index: 0, delta: { content: 'there' } }] },
+      {
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                { index: 0, id: 'call_1', type: 'function', function: { name: 'write', arguments: '{"pa' } },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        choices: [
+          { index: 0, delta: { tool_calls: [{ index: 0, function: { name: '_file', arguments: 'th":"a' } }] } },
+        ],
+      },
+      { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '.js"}' } }] } }] },
+      { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
+      { choices: [], usage: { prompt_tokens: 120, completion_tokens: 34 } },
+      '[DONE]',
+    ]),
+  ]);
+  const p = createOpenAICompatibleProvider('cerebras:qwen-3.8-27b', cfg({ cerebras: 'csk' }), {
+    fetchImpl,
+  });
+  const r = await p.chat({ maxTokens: 32000, tools: TEXT_TOOLS });
+  const body = fetchImpl.requests[0].body;
+  assert.equal(body.stream, true);
+  assert.deepEqual(body.stream_options, { include_usage: true });
+  assert.equal(r.meta.streamed, true);
+  assert.equal(r.text, 'Hello there');
+  assert.deepEqual(r.toolCalls, [{ id: 'call_1', name: 'write_file', input: { path: 'a.js' } }]);
+  assert.equal(r.stopReason, 'tool_use');
+  assert.deepEqual(r.usage, { input: 120, output: 34, cacheRead: 0, cacheWrite: 0 });
+  assert.equal(r.model, 'qwen-3.8-27b');
+});
+
+test('config.stream forces streaming and a missing usage chunk is estimated', async () => {
+  const fetchImpl = fakeFetch([
+    sseResponse([
+      { choices: [{ index: 0, delta: { content: 'short answer' } }] },
+      { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+      '[DONE]',
+    ]),
+  ]);
+  const p = createOpenAICompatibleProvider(
+    'cerebras:qwen-3.8-27b',
+    cfg({ cerebras: 'csk' }, { stream: true }),
+    { fetchImpl },
+  );
+  const r = await p.chat({ messages: [{ role: 'user', content: 'hi' }] });
+  assert.equal(fetchImpl.requests[0].body.stream, true);
+  assert.equal(r.text, 'short answer');
+  assert.equal(r.usage.estimated, true);
+  assert.equal(r.usage.output > 0, true);
+  assert.equal(r.usage.input > 0, true);
+});
+
+test('a partial SSE frame is skipped instead of failing the request', async () => {
+  const fetchImpl = fakeFetch([
+    sseResponse([
+      { choices: [{ index: 0, delta: { content: 'kept' } }] },
+      '{"choices":[{"delta":{"content":"lost"',
+      { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 1 } },
+      '[DONE]',
+    ]),
+  ]);
+  const p = createOpenAICompatibleProvider(
+    'cerebras:qwen-3.8-27b',
+    cfg({ cerebras: 'csk' }, { stream: true }),
+    { fetchImpl },
+  );
+  const r = await p.chat({});
+  assert.equal(r.text, 'kept');
+  assert.equal(r.usage.estimated, undefined);
+});
+
+test('a streamed reply in text mode is parsed back into tool_use blocks', async () => {
+  const fetchImpl = fakeFetch([
+    sseResponse([
+      { choices: [{ index: 0, delta: { content: '<<<tool name="read_file">>>{"path":' } }] },
+      { choices: [{ index: 0, delta: { content: '"a.js"}<<<end>>>' } }] },
+      { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 2 } },
+      '[DONE]',
+    ]),
+  ]);
+  const p = createOpenAICompatibleProvider(
+    'ollama:deepseek-coder-v2',
+    cfg({}, { stream: true }),
+    { fetchImpl },
+  );
+  const r = await p.chat({ tools: TEXT_TOOLS });
+  assert.deepEqual(r.toolCalls, [{ id: 'text_1', name: 'read_file', input: { path: 'a.js' } }]);
+  assert.equal(r.meta.streamed, true);
+  assert.equal(r.meta.textTools, true);
+});
+
+// ===========================================================================
+// registry additions (spec 3.5)
+// ===========================================================================
+
+test('the catalog marks the models that have no tool API', () => {
+  const noTools = describeModel('ollama:deepseek-coder-v2');
+  assert.equal(noTools.tools, false);
+  assert.equal(typeof noTools.textToolsHint, 'string');
+  assert.equal(supportsNativeTools('ollama:deepseek-coder-v2'), false);
+
+  const withTools = describeModel('anthropic:claude-fable-5-1');
+  assert.equal(withTools.tools, true);
+  assert.equal(withTools.textToolsHint, null);
+  assert.equal(supportsNativeTools('anthropic:claude-fable-5-1'), true);
+
+  // An unlisted Ollama model whose name matches a known tool-less family.
+  assert.equal(describeModel('ollama:deepseek-coder-v2:16b').tools, false);
+  assert.equal(describeModel('ollama:qwen3.8:latest').tools, true);
+});
+
+test('an unknown openrouter ref falls back to the wildcard entry', () => {
+  const wildcard = describeModel('openrouter:some/brand-new-model');
+  assert.equal(wildcard.unknownPricing, true);
+  assert.equal(wildcard.pricingVerified, false);
+  assert.equal(wildcard.ctx > 0, true);
+  assert.equal(typeof wildcard.textToolsHint, 'string');
+  assert.equal(Object.prototype.hasOwnProperty.call(MODEL_CATALOG, 'openrouter:*'), true);
+});
+
+// ===========================================================================
+// empty-on-length retry (thinking models that spend the budget on reasoning)
+// ===========================================================================
+
+test('an empty reply with finish_reason length is retried once with a larger budget', async () => {
+  const schema = { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] };
+  const fetchImpl = fakeFetch([
+    okResponse(
+      chatCompletion({
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'length',
+            message: { role: 'assistant', content: '', reasoning: 'let me think about this at length' },
+          },
+        ],
+        usage: { prompt_tokens: 300, completion_tokens: 2000 },
+      }),
+    ),
+    // 3000 tokens -> 12000 is above the streaming threshold, so the retry streams.
+    sseResponse([
+      { id: 'cmpl_2', model: 'qwen3.8:latest', choices: [{ index: 0, delta: { role: 'assistant', reasoning: 'short' } }] },
+      { choices: [{ index: 0, delta: { content: '{"ok":' } }] },
+      { choices: [{ index: 0, delta: { content: ' true}' } }] },
+      { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+      { choices: [], usage: { prompt_tokens: 300, completion_tokens: 40 } },
+      '[DONE]',
+    ]),
+  ]);
+  const p = createOpenAICompatibleProvider('ollama:qwen3.8:latest', cfg({}), { fetchImpl });
+  const r = await p.chat({ jsonSchema: { name: 'verdict', schema }, maxTokens: 3000 });
+
+  assert.equal(fetchImpl.requests.length, 2);
+  assert.equal(fetchImpl.requests[0].body.max_tokens, 3000);
+  assert.equal(fetchImpl.requests[0].body.stream, false);
+  assert.equal(fetchImpl.requests[1].body.max_tokens, 12000);
+  assert.equal(fetchImpl.requests[1].body.stream, true);
+  assert.equal(r.meta.streamed, true);
+  assert.deepEqual(r.meta.emptyRetry, { from: 3000, to: 12000 });
+  assert.equal(r.meta.reasoningChars, 'let me think about this at length'.length);
+  assert.equal(r.text, '{"ok": true}');
+  assert.deepEqual(r.json, { ok: true });
+  assert.equal(r.stopReason, 'end_turn');
+  // Both calls are billed: the wasted first reply still counts.
+  assert.deepEqual(r.usage, { input: 600, output: 2040, cacheRead: 0, cacheWrite: 0 });
+});
+
+test('the empty-on-length retry is capped at 16000 tokens and made only once', async () => {
+  const empty = () =>
+    okResponse(
+      chatCompletion({
+        choices: [{ index: 0, finish_reason: 'length', message: { role: 'assistant', content: '', reasoning: 'x' } }],
+      }),
+    );
+  const fetchImpl = fakeFetch([empty(), sseResponse([
+    { choices: [{ index: 0, delta: { role: 'assistant', reasoning: 'still thinking' } }] },
+    { choices: [{ index: 0, delta: {}, finish_reason: 'length' }] },
+    { choices: [], usage: { prompt_tokens: 10, completion_tokens: 16000 } },
+    '[DONE]',
+  ])]);
+  const p = createOpenAICompatibleProvider('ollama:qwen3.8:latest', cfg({}), { fetchImpl });
+  const r = await p.chat({ jsonSchema: { name: 'verdict', schema: { type: 'object' } }, maxTokens: 6000 });
+  assert.equal(fetchImpl.requests.length, 2);
+  assert.equal(fetchImpl.requests[1].body.max_tokens, 16000);
+  assert.deepEqual(r.meta.emptyRetry, { from: 6000, to: 16000 });
+  assert.equal(r.stopReason, 'max_tokens');
+  // Reasoning is the fallback text when the retry is empty too; it is not JSON.
+  assert.equal(r.text, 'still thinking');
+  assert.equal(r.json, null);
+
+  // Already at the cap: no retry at all (16000 streams, so the reply is SSE).
+  const capped = fakeFetch([
+    sseResponse([
+      { choices: [{ index: 0, delta: { role: 'assistant', reasoning: 'x' } }] },
+      { choices: [{ index: 0, delta: {}, finish_reason: 'length' }] },
+      '[DONE]',
+    ]),
+  ]);
+  const q = createOpenAICompatibleProvider('ollama:qwen3.8:latest', cfg({}), { fetchImpl: capped });
+  const s = await q.chat({ maxTokens: 16000 });
+  assert.equal(capped.requests.length, 1);
+  assert.equal(s.meta.emptyRetry, undefined);
+  assert.equal(s.stopReason, 'max_tokens');
+});
+
+test('a length-capped reply that carries content or tool calls is not retried', async () => {
+  const withText = fakeFetch([
+    okResponse(
+      chatCompletion({
+        choices: [{ index: 0, finish_reason: 'length', message: { role: 'assistant', content: 'partial' } }],
+      }),
+    ),
+  ]);
+  const p = createOpenAICompatibleProvider('ollama:qwen3.8:latest', cfg({}), { fetchImpl: withText });
+  const r = await p.chat({ maxTokens: 2000 });
+  assert.equal(withText.requests.length, 1);
+  assert.equal(r.text, 'partial');
+  assert.equal(r.stopReason, 'max_tokens');
+
+  const withCall = fakeFetch([
+    okResponse(
+      chatCompletion({
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'length',
+            message: {
+              role: 'assistant',
+              content: '',
+              tool_calls: [{ id: 'c1', type: 'function', function: { name: 'read_file', arguments: '{"path":"a"}' } }],
+            },
+          },
+        ],
+      }),
+    ),
+  ]);
+  const q = createOpenAICompatibleProvider('ollama:qwen3.8:latest', cfg({}), { fetchImpl: withCall, });
+  const s = await q.chat({ maxTokens: 2000, tools: TEXT_TOOLS });
+  assert.equal(withCall.requests.length, 1);
+  assert.deepEqual(s.toolCalls, [{ id: 'c1', name: 'read_file', input: { path: 'a' } }]);
+});
+
+test('the "reasoning" field is read like reasoning_content, on a plain reply and on a stream', async () => {
+  const plain = fakeFetch(
+    okResponse(
+      chatCompletion({
+        choices: [{ finish_reason: 'stop', message: { content: '', reasoning: 'only thoughts' } }],
+      }),
+    ),
+  );
+  const p = createOpenAICompatibleProvider('ollama:qwen3.8:latest', cfg({}), { fetchImpl: plain });
+  assert.equal((await p.chat({})).text, 'only thoughts');
+
+  const streamed = fakeFetch([
+    sseResponse([
+      { choices: [{ index: 0, delta: { role: 'assistant', reasoning: 'thought ' } }] },
+      { choices: [{ index: 0, delta: { reasoning: 'stream' } }] },
+      { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+      '[DONE]',
+    ]),
+  ]);
+  const q = createOpenAICompatibleProvider('ollama:qwen3.8:latest', cfg({}), { fetchImpl: streamed });
+  assert.equal((await q.chat({ maxTokens: 9000 })).text, 'thought stream');
 });

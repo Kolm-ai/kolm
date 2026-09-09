@@ -1,0 +1,14 @@
+{
+  "id": "add-cli-json-flag",
+  "title": "Add a --json flag to the stats CLI",
+  "text": "bin/cli.js prints a five-line text summary of the numbers given on the\ncommand line. Add a --json flag:\n\n  node bin/cli.js --json 1 2 3\n\nmust print exactly one line, JSON.stringify(summary), where summary is\nthe object returned by summarize() in src/stats.js, and nothing else.\nWithout --json the current text output must stay byte for byte the same.\nDocument the flag in README.md under Usage.",
+  "language": "javascript",
+  "expect": {
+    "verdict": "PASS",
+    "changedFiles": [
+      "bin/cli.js",
+      "README.md"
+    ],
+    "hiddenTest": "tests/hidden.test.js"
+  }
+}

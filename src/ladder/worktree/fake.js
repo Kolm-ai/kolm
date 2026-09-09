@@ -260,6 +260,56 @@ function applyHunks(originalLines, originalEof, hunks) {
   return { ok: true, lines: out, eofNewline: eof };
 }
 
+/**
+ * Conflict markers for one path, in git's format so a coder session sees exactly
+ * what it would see in a real repository.
+ * @param {string|null} ours content on the integration side (null = deleted)
+ * @param {string|null} theirs content on the incoming side (null = deleted)
+ * @param {string} label incoming ref name
+ * @returns {string}
+ */
+function conflictBlock(ours, theirs, label) {
+  const a = ours === null ? '' : String(ours);
+  const b = theirs === null ? '' : String(theirs);
+  const nl = (s) => (s === '' || s.endsWith('\n') ? s : `${s}\n`);
+  return `<<<<<<< ours\n${nl(a)}=======\n${nl(b)}>>>>>>> ${label}\n`;
+}
+
+/**
+ * Three-way merge of two file maps against a common base.
+ *
+ * Exported for tests: this is the whole of the fake driver's merge semantics.
+ * A path both sides changed differently (including a delete against an edit) is
+ * a conflict; the merged map gets git-style markers so a repair session has
+ * something real to fix.
+ *
+ * @param {Map<string,string>} base common ancestor
+ * @param {Map<string,string>} ours the integration side
+ * @param {Map<string,string>} theirs the incoming side
+ * @param {string} [label] incoming ref name, used in the markers
+ * @returns {{merged:Map<string,string>, conflicts:string[]}}
+ */
+export function threeWayMerge(base, ours, theirs, label = 'theirs') {
+  const merged = new Map(ours);
+  const conflicts = [];
+  const paths = [...new Set([...base.keys(), ...ours.keys(), ...theirs.keys()])].sort();
+  for (const p of paths) {
+    const b = base.has(p) ? base.get(p) : null;
+    const o = ours.has(p) ? ours.get(p) : null;
+    const t = theirs.has(p) ? theirs.get(p) : null;
+    if (o === t) continue;              // both sides agree (including both deleted)
+    if (t === b) continue;              // only we changed it
+    if (o === b) {                      // only they changed it
+      if (t === null) merged.delete(p);
+      else merged.set(p, t);
+      continue;
+    }
+    conflicts.push(p);                  // both changed it, differently
+    merged.set(p, conflictBlock(o, t, label));
+  }
+  return { merged, conflicts };
+}
+
 /* ------------------------------------------------------------------ driver */
 
 /**
@@ -290,10 +340,30 @@ export function createFakeDriver({
     create,
     open,
     destroyRun,
+    /**
+     * Merge `ref` into `wt` (spec 4.4); delegates to the worktree.
+     * @param {object} wt
+     * @param {string} ref
+     * @param {object} [opts]
+     * @returns {Promise<{ok:boolean, conflicts:string[], detail:string}>}
+     */
+    merge: (wt, ref, opts) => wt.merge(ref, opts),
   };
 
   function key(runId, candidateId) {
     return `${runId}/${candidateId}`;
+  }
+
+  /**
+   * Resolve a merge ref to one of this driver's worktrees. Accepts the branch
+   * name the ladder uses (`kolm/code/<runId>/<candidateId>`) or a bare candidate
+   * id within the same run.
+   */
+  function resolveRef(ref, runId) {
+    for (const wt of driver.worktrees.values()) {
+      if (wt.branch === ref) return wt;
+    }
+    return driver.worktrees.get(key(runId, ref)) ?? null;
   }
 
   function makeWorktree({ repoPath = null, repoUrl = null, runId, candidateId }) {
@@ -301,6 +371,9 @@ export function createFakeDriver({
     const current = new Map(baseFiles);
     const branch = `kolm/code/${runId}/${candidateId}`;
     let attempt = 0;
+    // The fake history: every spelling of every ref this worktree has merged.
+    // It stands in for `git merge-base --is-ancestor`.
+    const mergedRefs = new Set();
 
     const wt = {
       id: candidateId,
@@ -361,6 +434,14 @@ export function createFakeDriver({
       async readFile(rel) {
         const p = normalizeRel(rel);
         return current.has(p) ? current.get(p) : null;
+      },
+
+      // The fake has exactly one history point - the files it was created with -
+      // so every ref resolves to the base snapshot.
+      async readFileAt(ref, rel) {
+        if (typeof ref !== 'string' || ref.trim() === '') return null;
+        const p = normalizeRel(rel);
+        return base.has(p) ? base.get(p) : null;
       },
 
       async writeFile(rel, content) {
@@ -471,6 +552,45 @@ export function createFakeDriver({
         for (const p of removed) current.delete(p);
         for (const [p, content] of staged) current.set(p, content);
         return { ok: true };
+      },
+
+      async merge(ref, { message = null } = {}) {
+        // `ref` is a branch (`kolm/code/<runId>/<candidateId>`) or a candidate
+        // id; both resolve to another worktree of this driver. The merge is a
+        // three-way over the in-memory maps, and conflicts are written into the
+        // tree as markers rather than thrown, exactly like the git driver.
+        if (typeof ref !== 'string' || ref.trim() === '') {
+          throw new LadderError('bad-arg', 'merge requires a ref', { ref });
+        }
+        const other = resolveRef(ref, runId);
+        if (!other) {
+          return { ok: false, conflicts: [], detail: `fake: unknown merge ref ${ref}` };
+        }
+        const { merged, conflicts } = threeWayMerge(base, current, other.files, ref);
+        current.clear();
+        for (const [p, content] of merged) current.set(p, content);
+        wt.lastMergeMessage = message === null ? null : String(message);
+        // A merge that reached the tree counts as landed even when it
+        // conflicted, because the repair session plus the commit that follows
+        // conclude it, exactly like `git commit` concluding a git merge. Every
+        // spelling a caller may use is recorded, since a ref is either the
+        // ladder branch name or a bare candidate id.
+        mergedRefs.add(ref);
+        mergedRefs.add(other.branch);
+        mergedRefs.add(other.candidateId);
+        return {
+          ok: conflicts.length === 0,
+          conflicts,
+          detail: conflicts.length === 0 ? `merged ${ref}` : `conflicts in ${conflicts.join(', ')}`,
+        };
+      },
+
+      /** True when `ref` was merged into this worktree (the fake history). */
+      async isAncestor(ref) {
+        if (typeof ref !== 'string' || ref.trim() === '') {
+          throw new LadderError('bad-arg', 'isAncestor requires a ref', { ref });
+        }
+        return mergedRefs.has(ref);
       },
 
       async commit(message) {

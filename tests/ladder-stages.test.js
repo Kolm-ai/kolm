@@ -406,6 +406,34 @@ test('scenario D: a TODO marker stays unsure through the cascade and reaches the
     const semantic = store.getResult(runId, 'c0a0', 'l3-semantic', 1);
     assert.ok(Math.abs(semantic.metrics.rubric_score - 0.7) < 1e-9);
     assert.ok(Math.abs(semantic.metrics.reviewer_confidence - 0.6) < 1e-9);
+    // No adapter retry happened; the field is present so an operator can tell
+    // "no retry" from "an adapter that does not report one".
+    assert.equal(semantic.artifacts.emptyRetry, null);
+  } finally {
+    cleanup();
+  }
+});
+
+test('an adapter empty-on-length retry is recorded on the L3 result', options, async () => {
+  const { store, cleanup } = tempStore('retry');
+  const runId = newRunId();
+  const reviewer = fakeReviewer({ score: 0.7, confidence: 0.6 });
+  const plain = reviewer.chat.bind(reviewer);
+  reviewer.chat = async (req) => ({
+    ...(await plain(req)),
+    meta: { emptyRetry: { from: 2000, to: 8000 }, reasoningChars: 5120 },
+  });
+  try {
+    seedRun(store, runId);
+    await runCascade(cascadeCtx({
+      runId,
+      store,
+      commands: {},
+      providers: { reviewer },
+      candidates: makeCandidates(1, { diffText: TODO_DIFF, wt: fakeWorktree() }),
+    }));
+    const semantic = store.getResult(runId, 'c0a0', 'l3-semantic', 1);
+    assert.deepEqual(semantic.artifacts.emptyRetry, { from: 2000, to: 8000 });
   } finally {
     cleanup();
   }

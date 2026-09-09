@@ -57,6 +57,8 @@ const VERBS = Object.freeze([
   'funnel',
   'eval',
   'bands',
+  'bench',
+  'lessons',
   'clean',
   'receipt',
   'keys',
@@ -87,6 +89,8 @@ const BOOLEAN_FLAGS = new Set([
   'stdin',
   'events',
   'dryRun',
+  'clear',
+  'keepWork',
   'help',
   'version',
 ]);
@@ -328,12 +332,14 @@ usage: kolm code <verb> [options]
 
 verbs:
   run "<task>"            generate candidates, run them up the cascade, keep the winner
-  resume <runId>          continue an interrupted run
+  resume <runId>          continue an interrupted run, or reopen one that did not pass
   status [runId]          list runs newest-first, or show one run's candidates and stages
   show <runId>            full detail for one run
   funnel                  how many candidates cleared cheaply vs went to the judge
   eval                    cascade vs direct comparison over stored runs
   bands                   print, suggest or apply the confidence bands
+  bench                   run the bundled coding benchmark and score the hidden tests
+  lessons <repo>          print (or clear) the lessons remembered for a repository
   clean                   remove worktrees left behind by finished runs
   receipt verify|show     verify or print a signed evidence receipt
   keys set|list|unset|path|test
@@ -360,6 +366,20 @@ run options:
   --pr-base <branch>      base branch for that pull request (default: main)
   --json                  print the run summary as JSON
   --quiet                 do not stream stage events to stderr
+
+bench options:
+  --tasks <a,b>           only these bench task ids (default: all ten)
+  --concurrency <n>       bench tasks in flight at once (default 1)
+  --compare <file>        also print a delta table against an earlier result file
+  --keep-work             keep the seeded task repositories for inspection
+  --json                  print the bench result document as JSON
+                          run's model flags apply here too (--coder, --judge, ...)
+                          exit 0 when every non-skipped task passes its hidden test
+
+lessons options:
+  <repo>                  repository path or url whose lessons to show
+  --clear                 forget every lesson for that repository
+  --json                  machine readable output
 
 keys options:
   names                   anthropic cerebras deepseek openrouter github sandbox
@@ -838,6 +858,132 @@ async function cmdStatus(parsed) {
   }
 }
 
+/**
+ * Fold the orchestrator's subtask events (and the receipt's `subtasks` array,
+ * when one is present) into rows the viewer can print. Defensive on purpose:
+ * a run that never split into subtasks yields an empty list rather than an
+ * error, and an unknown payload shape degrades to a dash.
+ *
+ * @param {Array<{type: string, payload: object}>} events
+ * @param {object|null} [receipt] the stored receipt, if any
+ * @returns {{subtasks: Array<object>, integration: {merged: number|null, conflicts: number|null, verdict: string|null}}}
+ */
+export function subtaskViewFrom(events = [], receipt = null) {
+  const order = [];
+  const byId = new Map();
+  const integration = { merged: null, conflicts: null, verdict: null };
+
+  const touch = (rawId) => {
+    const id = rawId === undefined || rawId === null || rawId === '' ? null : String(rawId);
+    if (id === null) return null;
+    if (!byId.has(id)) {
+      byId.set(id, { id, title: null, status: null, verdict: null, winner: null, branch: null, sha: null, costUsd: 0 });
+      order.push(id);
+    }
+    return byId.get(id);
+  };
+
+  for (const event of Array.isArray(events) ? events : []) {
+    const type = String(event?.type ?? '');
+    const payload = event && typeof event.payload === 'object' && event.payload !== null ? event.payload : {};
+    if (type === 'subtasks.plan') {
+      const list = Array.isArray(payload.subtasks) ? payload.subtasks : [];
+      for (const entry of list) {
+        const row = touch(entry?.id ?? entry);
+        if (row && typeof entry === 'object' && entry !== null) {
+          row.title = entry.title ?? entry.text ?? row.title;
+        }
+      }
+      continue;
+    }
+    if (type === 'subtask.retry') {
+      // A resume is redoing a subtask that failed or ended JUDGE; the
+      // `subtask.start` right behind this event moves the row to 'running'.
+      const row = touch(payload.id);
+      if (row) row.status = 'retrying';
+      continue;
+    }
+    if (type === 'subtask.skipped') {
+      // A dependent of a failed subtask never ran, so it has no start, no end
+      // and no cost of its own.
+      const row = touch(payload.id);
+      if (row) {
+        row.status = 'skipped';
+        row.verdict = 'SKIPPED';
+      }
+      continue;
+    }
+    if (type === 'subtask.start') {
+      const row = touch(payload.id);
+      if (row) {
+        row.status = 'running';
+        row.title = row.title ?? payload.title ?? null;
+      }
+      continue;
+    }
+    if (type === 'subtask.end') {
+      const row = touch(payload.id);
+      if (row) {
+        row.status = 'done';
+        row.verdict = payload.verdict ?? row.verdict;
+        row.winner = payload.winner ?? row.winner;
+        row.costUsd += Number(payload.costUsd) || 0;
+      }
+      continue;
+    }
+    if (type === 'integration.merge') {
+      if (payload.merged !== undefined) integration.merged = Number(payload.merged) || 0;
+      else integration.merged = (integration.merged ?? 0) + 1;
+      if (payload.conflicts !== undefined) {
+        integration.conflicts = Array.isArray(payload.conflicts) ? payload.conflicts.length : Number(payload.conflicts) || 0;
+      }
+      continue;
+    }
+    if (type === 'integration.verdict') {
+      integration.verdict = payload.verdict ?? payload.value ?? integration.verdict;
+    }
+  }
+
+  const fromReceipt = Array.isArray(receipt?.subtasks) ? receipt.subtasks : [];
+  for (const entry of fromReceipt) {
+    const row = touch(entry?.id);
+    if (!row) continue;
+    row.winner = entry.winner ?? row.winner;
+    row.branch = entry.branch ?? row.branch;
+    row.sha = entry.sha ?? row.sha;
+  }
+
+  return { subtasks: order.map((id) => byId.get(id)), integration };
+}
+
+/**
+ * One line each for the two events that say what the run was given and how it
+ * was routed; null when the run predates them, so `show` prints nothing.
+ * @param {Array<{type?: string, payload?: object}>} events
+ * @returns {{context: string|null, route: string|null}}
+ */
+export function briefLinesFrom(events = []) {
+  let context = null;
+  let route = null;
+  for (const event of Array.isArray(events) ? events : []) {
+    const payload = event?.payload && typeof event.payload === 'object' ? event.payload : {};
+    if (event?.type === 'context.pack' && context === null) {
+      const files = Array.isArray(payload.instructionFiles) ? payload.instructionFiles.length : 0;
+      context = `instructions ${Number(payload.instructionsBytes) || 0}B from ${files} file${files === 1 ? '' : 's'}, `
+        + `lessons ${Number(payload.lessons) || 0}, `
+        + `retrieval ${Number(payload.retrievalFiles) || 0} files/${Number(payload.retrievalBytes) || 0}B`
+        + (payload.retrievalCached === true ? ' (cached)' : '');
+    } else if (event?.type === 'run.route' && route === null) {
+      route = `${payload.complexity ?? '-'}/${payload.risk ?? '-'} -> rung ${payload.startRung ?? '-'}, `
+        + `${payload.candidates ?? '-'} candidate${payload.candidates === 1 ? '' : 's'}, `
+        + `${payload.repairRounds ?? '-'} repair${payload.repairRounds === 1 ? '' : 's'}`
+        + (payload.reason ? ` (${payload.reason})` : '');
+    }
+    if (context !== null && route !== null) break;
+  }
+  return { context, route };
+}
+
 async function cmdShow(parsed) {
   const flags = parsed.flags;
   const runId = parsed.positional[1];
@@ -859,8 +1005,14 @@ async function cmdShow(parsed) {
     const events = store.eventsSince(runId, 0, 100000);
     const cost = store.costSummary(runId);
     const receiptPath = typeof ladder.receiptPathFor === 'function' ? ladder.receiptPathFor(config, runId) : null;
+    const view = subtaskViewFrom(events, run.receipt ?? null);
+    const brief = briefLinesFrom(events);
     const detail = {
       run: { ...run, receipt: run.receipt ? { present: true } : null },
+      context: brief.context,
+      route: brief.route,
+      subtasks: view.subtasks,
+      integration: view.integration,
       candidates,
       judgments: store.listJudgments(runId),
       funnel: store.funnel({ runIds: [runId] }),
@@ -887,6 +1039,8 @@ async function cmdShow(parsed) {
     out(`winner    ${run.winner_candidate ?? '-'}`);
     out(`cost      ${usd(cost.total_usd)}`);
     out(`events    ${events.length}`);
+    if (brief.context !== null) out(`context   ${brief.context}`);
+    if (brief.route !== null) out(`route     ${brief.route}`);
     out(`receipt   ${receiptPath ?? '-'}${detail.receiptOnDisk ? '' : ' (not on disk)'}`);
     out('');
     out(
@@ -900,6 +1054,30 @@ async function cmdShow(parsed) {
         ]),
       ),
     );
+    // A run that was never split has no subtask rows; printing an empty table
+    // would only add noise, so the whole block is conditional.
+    if (view.subtasks.length > 0) {
+      out('');
+      out(
+        renderTable(
+          ['SUBTASK', 'STATUS', 'VERDICT', 'WINNER', 'BRANCH', 'COST'],
+          view.subtasks.map((s) => [
+            truncate(s.id, 24),
+            s.status ?? '-',
+            s.verdict ?? '-',
+            truncate(s.winner ?? '-', 24),
+            truncate(s.branch ?? '-', 40),
+            usd(s.costUsd),
+          ]),
+        ),
+      );
+    }
+    if (view.integration.verdict !== null || view.integration.merged !== null) {
+      out('');
+      out(
+        `integration  verdict ${view.integration.verdict ?? '-'}  merged ${view.integration.merged ?? '-'}  conflicts ${view.integration.conflicts ?? '-'}`,
+      );
+    }
     const byModel = Object.entries(cost.by_model ?? {});
     if (byModel.length > 0) {
       out('');
@@ -1169,6 +1347,157 @@ async function cmdBands(parsed) {
   } finally {
     store.close();
   }
+}
+
+// ---------------------------------------------------------------------------
+// bench
+// ---------------------------------------------------------------------------
+
+async function cmdBench(parsed) {
+  const flags = parsed.flags;
+  const config = await configForModels(flags);
+  const arming = api('armingReport')(config);
+  const ladders = api('effectiveLadders')(config, arming);
+  for (const line of droppedRungLines(arming, ladders)) note(line);
+
+  const concurrency = flags.concurrency === undefined ? 1 : Number(flags.concurrency);
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 16) {
+    throw new LadderError('bad-args', `--concurrency must be an integer between 1 and 16, got "${flags.concurrency}"`);
+  }
+
+  // Read the comparison file before the bench runs: a typo in --compare should
+  // cost one line, not a whole benchmark.
+  let previous = null;
+  if (flags.compare !== undefined && flags.compare !== true) {
+    const comparePath = path.resolve(String(flags.compare));
+    if (!fs.existsSync(comparePath)) {
+      throw new LadderError('not-found', `--compare file does not exist: ${comparePath}`, { path: comparePath });
+    }
+    try {
+      previous = JSON.parse(fs.readFileSync(comparePath, 'utf8'));
+    } catch (err) {
+      throw new LadderError('bad-args', `--compare file is not readable JSON: ${comparePath}`, { path: comparePath, detail: err?.message });
+    }
+  }
+
+  const store = openStoreFor(config);
+  const driver = api('createDriver')(config.driver, config);
+  const createProvider = api('createProvider');
+  const providers = {
+    orchestrator: createProvider(config.orchestratorRef, config),
+    judge: createProvider(config.judgeRef, config),
+    coders: ladders.coders.map((ref) => createProvider(ref, config)),
+    reviewer: ladders.reviewer ? createProvider(ladders.reviewer, config) : null,
+  };
+
+  const controller = new AbortController();
+  const streaming = flags.quiet !== true;
+  const onSigint = () => {
+    controller.abort();
+    note('');
+    note('aborted; the tasks still pending are recorded as skipped');
+  };
+  process.on('SIGINT', onSigint);
+
+  try {
+    const result = await api('runBench')({
+      tasks: flags.tasks === undefined || flags.tasks === true ? null : String(flags.tasks),
+      concurrency,
+      config,
+      store,
+      driver,
+      providers,
+      signal: controller.signal,
+      keepWork: flags.keepWork === true,
+      ladder: {
+        coders: ladders.coders,
+        reviewer: ladders.reviewer,
+        orchestrator: config.orchestratorRef,
+        judge: config.judgeRef,
+      },
+      onEvent: (event) => {
+        if (streaming) note(formatEvent(event));
+      },
+    });
+
+    if (flags.json) {
+      jsonOut(previous ? { ...result, compare: api('compareBench')(previous, result) } : result);
+    } else {
+      out(api('formatBenchTable')(result));
+      if (result.resultPath) {
+        out('');
+        out(`result   ${result.resultPath}`);
+      }
+      if (previous) {
+        out('');
+        out(api('compareBench')(previous, result));
+      }
+    }
+
+    // A skipped task (no python, say) must not turn into a failing bench: the
+    // gate is every task that actually ran and was judgeable.
+    const graded = (result.results ?? []).filter((r) => r.verdict !== 'SKIP');
+    const allPassed = graded.length > 0 && graded.every((r) => r.hiddenPass === true);
+    return allPassed ? EXIT.OK : EXIT.GATE_FAIL;
+  } finally {
+    process.off('SIGINT', onSigint);
+    try {
+      store.close();
+    } catch {
+      // already closed; nothing to unwind
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// lessons
+// ---------------------------------------------------------------------------
+
+async function cmdLessons(parsed) {
+  const flags = parsed.flags;
+  const target = parsed.positional[1] ?? flags.repo;
+  if (!target || target === true) {
+    throw new LadderError('bad-args', 'lessons needs a repository: kolm code lessons <repo> [--clear]');
+  }
+  const config = configFrom(flags);
+  // A local path is stored under its resolved absolute form; a url is stored
+  // verbatim, so `lessons <url>` and a run against that url agree on the key.
+  const repoKey = /^[a-z][a-z0-9+.-]*:\/\//i.test(String(target)) ? String(target) : path.resolve(String(target));
+  const file = api('lessonsPath')(config, repoKey);
+
+  if (flags.clear === true) {
+    // Removing the file rather than writing an empty one, so `--clear` still
+    // works when KOLM_CODE_LESSONS=0 makes saveLessons a no-op.
+    const existed = fs.existsSync(file);
+    fs.rmSync(file, { force: true });
+    if (flags.json) jsonOut({ repo: repoKey, path: file, cleared: true, existed, lessons: [] });
+    else out(`cleared  ${file}${existed ? '' : ' (was not on disk)'}`);
+    return EXIT.OK;
+  }
+
+  const document = api('loadLessons')(config, repoKey);
+  const lessons = Array.isArray(document?.lessons) ? document.lessons : [];
+  if (flags.json) {
+    jsonOut({ repo: repoKey, path: file, enabled: config.lessons !== false, count: lessons.length, lessons });
+    return EXIT.OK;
+  }
+  out(`repo     ${repoKey}`);
+  out(`file     ${file}${fs.existsSync(file) ? '' : ' (not on disk)'}`);
+  out(`lessons  ${lessons.length}${config.lessons === false ? '  (KOLM_CODE_LESSONS=0: reads as empty)' : ''}`);
+  if (lessons.length === 0) return EXIT.OK;
+  out('');
+  out(
+    renderTable(
+      ['N', 'HITS', 'RUN', 'TEXT'],
+      lessons.map((lesson, i) => [
+        i + 1,
+        lesson?.hits ?? '-',
+        truncate(lesson?.runId ?? '-', 20),
+        truncate(lesson?.text ?? '-', 90),
+      ]),
+    ),
+  );
+  return EXIT.OK;
 }
 
 // ---------------------------------------------------------------------------
@@ -1595,6 +1924,24 @@ async function cmdDoctor(parsed) {
     });
   }
 
+  // The runtime toggles: none of them arm or disarm a rung, but every one of
+  // them changes how a run behaves, so an operator debugging "why did it not
+  // split / not retrieve / not stream" should see them here.
+  const runtime = {
+    routing: effectiveConfig.routing ?? 'auto',
+    subtasks: effectiveConfig.subtasks !== false,
+    subtaskConcurrency: effectiveConfig.subtaskConcurrency ?? 2,
+    coach: effectiveConfig.coach !== false,
+    selfReview: effectiveConfig.selfReview !== false,
+    lessons: effectiveConfig.lessons !== false,
+    contextTokens: effectiveConfig.contextTokens ?? 0,
+    retrievalBytes: effectiveConfig.retrievalBytes ?? 0,
+    textTools: Array.isArray(effectiveConfig.textTools) ? effectiveConfig.textTools : [],
+    providerConcurrency: effectiveConfig.providerConcurrency ?? {},
+    stream: effectiveConfig.stream === true,
+    benchDir: effectiveConfig.benchDir ?? null,
+  };
+
   const orchestratorArmed = rows.find((r) => r.id === 'orchestrator')?.armed === true;
   const coderArmed = rows.some((r) => r.kind === 'coder' && r.armed);
   const driverArmed = rows.find((r) => r.id === 'driver')?.armed === true;
@@ -1612,6 +1959,7 @@ async function cmdDoctor(parsed) {
       mode: effectiveConfig.mode,
       mockProvider: effectiveConfig.mockProvider === true,
       live,
+      runtime,
       rungs: rows,
     });
     return ok ? EXIT.OK : EXIT.MISSING_PREREQ;
@@ -1636,6 +1984,31 @@ async function cmdDoctor(parsed) {
         ];
         return live ? [...base, truncate(row.live ?? '-', 40)] : base;
       }),
+    ),
+  );
+  out('');
+  const onOff = (value) => (value ? 'on' : 'off');
+  const concurrencyPairs = Object.entries(runtime.providerConcurrency);
+  out(
+    renderTable(
+      ['SETTING', 'VALUE'],
+      [
+        ['routing', `${runtime.routing} (subtasks ${onOff(runtime.subtasks)}, up to ${runtime.subtaskConcurrency} at a time)`],
+        ['coach', onOff(runtime.coach)],
+        ['self-review', onOff(runtime.selfReview)],
+        ['lessons', onOff(runtime.lessons)],
+        ['context tokens', runtime.contextTokens === 0 ? '0 (no compaction)' : runtime.contextTokens],
+        ['retrieval bytes', runtime.retrievalBytes],
+        ['text tools', runtime.textTools.length > 0 ? truncate(runtime.textTools.join(', '), 60) : 'none'],
+        [
+          'provider concurrency',
+          concurrencyPairs.length > 0
+            ? truncate(concurrencyPairs.map(([name, n]) => `${name}=${n}`).join(', '), 60)
+            : 'defaults',
+        ],
+        ['stream', onOff(runtime.stream)],
+        ['bench dir', truncate(runtime.benchDir ?? '-', 60)],
+      ],
     ),
   );
   out('');
@@ -1828,6 +2201,10 @@ export async function main(argv = []) {
         return await cmdEval(parsed);
       case 'bands':
         return await cmdBands(parsed);
+      case 'bench':
+        return await cmdBench(parsed);
+      case 'lessons':
+        return await cmdLessons(parsed);
       case 'clean':
         return await cmdClean(parsed);
       case 'receipt':

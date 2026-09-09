@@ -25,7 +25,9 @@ export {
   DEFAULT_ORCHESTRATOR,
   DEFAULT_CODER_LADDER,
   DEFAULT_REVIEWER_LADDER,
+  DEFAULT_RETRIEVAL_BYTES,
   FILE_SECRET_NAMES,
+  ROUTING_MODES,
 } from './config.js';
 
 // --- keystore (bring your own key) -----------------------------------------
@@ -55,6 +57,20 @@ export {
   listModels,
   knownRefs,
   SUPPORTED_PROVIDERS,
+  TEXT_TOOL_PROTOCOL_VERSION,
+  parseTextToolCalls,
+  renderToolsForText,
+  renderToolResultsForText,
+  toTextProtocolMessages,
+  renderJsonOnlyForText,
+  refForcedToTextTools,
+  looksLikeToolsUnsupported,
+  PROVIDER_CONCURRENCY_DEFAULTS,
+  THROTTLE_PENALTY_MS,
+  createLimiter,
+  limiterFor,
+  resetLimiters,
+  retryDelayMs,
 } from './providers/index.js';
 
 // --- worktree drivers -------------------------------------------------------
@@ -79,6 +95,44 @@ export { assembleVerdict, flowsUp, funnel } from './verdict.js';
 export { detectCommands, parseTestOutput } from './context/detect.js';
 export { repoBrief, briefToPrompt } from './context/repo-brief.js';
 export { baseline, runCommand } from './context/baseline.js';
+export {
+  retrieveContext,
+  retrievalToPrompt,
+  extractTerms,
+  searchPatternFor,
+  toAscii,
+  isVendored,
+  posixPath,
+  extOf,
+  VENDOR_DIRS,
+  DEFAULT_MAX_FILES,
+  DEFAULT_MAX_BYTES,
+} from './context/retrieve.js';
+export {
+  loadInstructions,
+  instructionsToPrompt,
+  INSTRUCTIONS_BYTE_CAP,
+  INSTRUCTION_SOURCES,
+} from './context/instructions.js';
+
+// --- transcript compaction --------------------------------------------------
+export { estimateTokens, compactTranscript } from './transcript.js';
+
+// --- lessons (cross-run memory) ---------------------------------------------
+export {
+  LESSONS_VERSION,
+  LESSONS_CAP,
+  LESSONS_BYTE_CAP,
+  LESSON_TEXT_CAP,
+  LESSON_CANDIDATE_CAP,
+  repoKeySlug,
+  lessonsPath,
+  loadLessons,
+  saveLessons,
+  mergeLessons,
+  lessonsToPrompt,
+  extractLessonCandidates,
+} from './lessons.js';
 
 // --- cascade ----------------------------------------------------------------
 export { STAGES, runCascade } from './stages/index.js';
@@ -111,5 +165,49 @@ export {
   RECEIPT_VERSION,
 } from './receipt.js';
 
+// --- routing ----------------------------------------------------------------
+// Owned by the orchestrator half of the build; re-exported here so the CLI and
+// the bench never reach into src/ladder/routing.js directly.
+export {
+  routeRun,
+  normalizeComplexity,
+  COMPLEXITY_LEVELS,
+  MAX_ROUTED_CANDIDATES,
+} from './routing.js';
+
+// --- repair coach + subtask split -------------------------------------------
+export {
+  coachRepair,
+  transcriptTailFor,
+  normalizeHints,
+  COACH_SCHEMA,
+} from './coach.js';
+export {
+  validateSubtasks,
+  topoLevels,
+  subtaskCandidateIdFor,
+  parseSubtaskCandidateId,
+  subPlanFor,
+  scopedAcceptance,
+  conflictFeedback,
+  finishedSubtasks,
+  priorSubtaskVerdicts,
+} from './subtasks.js';
+
 // --- evaluation -------------------------------------------------------------
 export { evalRuns, formatEvalTable } from './eval.js';
+
+// --- benchmark --------------------------------------------------------------
+export {
+  listBenchTasks,
+  runBench,
+  formatBenchTable,
+  compareBench,
+  probeRequirement,
+  seedBenchRepo,
+  hiddenCommandFor,
+  benchCountersFor,
+  BENCH_TASKS_DIR,
+  BENCH_RESULT_VERSION,
+  SKIP_VERDICT,
+} from './bench/index.js';

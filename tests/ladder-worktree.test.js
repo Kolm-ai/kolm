@@ -14,6 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { createDriver, DRIVER_KINDS } from '../src/ladder/worktree/index.js';
 import { createLocalGitDriver } from '../src/ladder/worktree/local-git.js';
 import { createFakeDriver, globToRegExp } from '../src/ladder/worktree/fake.js';
+import { createCloudflareSandboxDriver } from '../src/ladder/worktree/cloudflare-sandbox.js';
 
 const gitProbe = spawnSync('git', ['--version'], { encoding: 'utf8' });
 const gitMissing = gitProbe.error || gitProbe.status !== 0;
@@ -158,6 +159,32 @@ test('reading writing and deleting files round trips inside the worktree', { ski
   assert.equal(await wt.readFile('doomed.txt'), null);
   await wt.deleteFile('doomed.txt');
   assert.equal(await exists(path.join(wt.path, 'doomed.txt')), false);
+  await wt.destroy();
+});
+
+test('readFileAt reads the base commit, not the working tree', { skip: skipWithoutGit }, async () => {
+  const repoPath = await makeRepo();
+  const { driver } = await makeDriver();
+  const wt = await driver.create({ repoPath, runId: 'run1', candidateId: 'cand1' });
+  const base = await wt.baseSha();
+
+  // The plan audit compares what the candidate wrote with what it started from
+  // (spec 4.8), so the base has to stay readable after the tree has moved on.
+  await wt.writeFile('README.md', 'hello\r\nworld\r\n');
+  assert.equal(await wt.readFile('README.md'), 'hello\r\nworld\r\n');
+  assert.equal(await wt.readFileAt(base, 'README.md'), 'hello\nworld\n', 'the commit is untouched');
+  assert.equal(await wt.readFileAt('HEAD', 'src/nested/b.js'), 'export const b = 2;\n');
+
+  // A deleted file is still in the base; everything unreadable is null, never a throw.
+  await wt.deleteFile('doomed.txt');
+  assert.equal(await wt.readFileAt(base, 'doomed.txt'), 'delete me\n');
+  assert.equal(await wt.readFileAt(base, 'never/existed.txt'), null);
+  assert.equal(await wt.readFileAt('no-such-ref', 'README.md'), null);
+  assert.equal(await wt.readFileAt('', 'README.md'), null);
+  assert.equal(await wt.readFileAt(null, 'README.md'), null);
+
+  // The path guard is the same one every other file operation uses.
+  await assert.rejects(() => wt.readFileAt(base, '../escape.txt'), (err) => err.code === 'path-escape');
   await wt.destroy();
 });
 
@@ -432,6 +459,13 @@ test('the fake driver gives every worktree its own copy of the base files', asyn
   assert.equal(await two.readFile('nope.js'), null);
   assert.equal(await one.baseSha(), driver.baseSha);
   assert.deepEqual(driver.created.map((row) => row.candidateId), ['cand1', 'cand2']);
+
+  // The fake has exactly one history point, so every ref reads the files the
+  // driver was created with - which is what the plan audit needs from it.
+  assert.equal(await one.readFileAt(await one.baseSha(), 'src/a.js'), 'export const a = 1;\n');
+  assert.equal(await one.readFileAt('HEAD', 'nope.js'), null);
+  assert.equal(await one.readFileAt('', 'src/a.js'), null, 'no ref, no read');
+  await assert.rejects(() => one.readFileAt('HEAD', '../escape'), (err) => err.code === 'path-escape');
 });
 
 test('the fake driver refuses paths that would escape the worktree', async () => {
@@ -592,4 +626,183 @@ test('the fake driver reopens a worktree it already created', async () => {
   assert.equal(await reopened.readFile('src/a.js'), 'export const a = 42;\n');
   const fresh = await driver.open({ runId: 'run1', candidateId: 'cand9' });
   assert.equal(await fresh.readFile('src/a.js'), 'export const a = 1;\n');
+});
+
+/* --------------------------------------------------------------- merge */
+
+test('the fake driver merges another worktree and writes conflicts as markers', async () => {
+  const driver = createFakeDriver({ files: FAKE_FILES });
+  const integration = await driver.create({ runId: 'run1', candidateId: 'integration' });
+  const alpha = await driver.create({ runId: 'run1', candidateId: 's0c0a0' });
+  const beta = await driver.create({ runId: 'run1', candidateId: 's1c0a0' });
+  await alpha.writeFile('src/alpha.js', 'export const alpha = 1;\n');
+  await alpha.deleteFile('doomed.txt');
+  await beta.writeFile('src/beta.js', 'export const beta = 2;\n');
+
+  // A ref is either the ladder branch name or a bare candidate id of the run.
+  const first = await integration.merge(alpha.branch, { message: 'merge subtask alpha' });
+  assert.deepEqual(first, { ok: true, conflicts: [], detail: `merged ${alpha.branch}` });
+  assert.equal(integration.lastMergeMessage, 'merge subtask alpha');
+  const second = await driver.merge(integration, 's1c0a0');
+  assert.equal(second.ok, true);
+  assert.deepEqual(second.conflicts, []);
+
+  // Both halves landed, and a delete on one side propagates like an edit.
+  assert.equal(await integration.readFile('src/alpha.js'), 'export const alpha = 1;\n');
+  assert.equal(await integration.readFile('src/beta.js'), 'export const beta = 2;\n');
+  assert.equal(await integration.readFile('doomed.txt'), null, 'the deletion came across');
+  assert.equal(await alpha.readFile('src/beta.js'), null, 'merging does not touch the source worktree');
+
+  // Both sides changed the same file differently: markers in the tree, not a throw.
+  const clash = await driver.create({ runId: 'run1', candidateId: 's2c0a0' });
+  await clash.writeFile('README.md', 'their version\n');
+  await integration.writeFile('README.md', 'our version\n');
+  const conflicted = await integration.merge(clash.branch);
+  assert.equal(conflicted.ok, false);
+  assert.deepEqual(conflicted.conflicts, ['README.md']);
+  assert.match(conflicted.detail, /README\.md/);
+  const merged = await integration.readFile('README.md');
+  assert.ok(merged.includes('<<<<<<<'), 'the conflict is left in the tree for a repair session');
+  assert.ok(merged.includes('======='));
+  assert.ok(merged.includes('>>>>>>>'));
+  assert.ok(merged.includes('our version') && merged.includes('their version'));
+
+  // The fake history answers the same question git answers with merge-base.
+  assert.equal(await integration.isAncestor(alpha.branch), true);
+  assert.equal(await integration.isAncestor('s1c0a0'), true, 'a bare candidate id resolves too');
+  assert.equal(await integration.isAncestor('kolm/code/run1/nobody'), false);
+  assert.equal(await alpha.isAncestor(beta.branch), false, 'merging does not touch the source worktree');
+
+  // A ref this driver has never heard of is a failed merge, not an exception.
+  const unknown = await integration.merge('kolm/code/run1/nobody');
+  assert.equal(unknown.ok, false);
+  assert.deepEqual(unknown.conflicts, []);
+  assert.match(unknown.detail, /unknown merge ref/);
+  await assert.rejects(() => integration.merge(''), (err) => err.code === 'bad-arg');
+});
+
+test('the local driver merges subtask branches and leaves real conflicts on disk', { skip: skipWithoutGit }, async () => {
+  const repoPath = await makeRepo();
+  const { driver } = await makeDriver();
+
+  const alpha = await driver.create({ repoPath, runId: 'run1', candidateId: 's0c0a0' });
+  await alpha.writeFile('src/alpha.js', 'export const alpha = 1;\n');
+  const alphaCommit = await alpha.commit('subtask alpha');
+  const beta = await driver.create({ repoPath, runId: 'run1', candidateId: 's1c0a0' });
+  await beta.writeFile('src/beta.js', 'export const beta = 2;\n');
+  const betaCommit = await beta.commit('subtask beta');
+
+  const integration = await driver.create({ repoPath, runId: 'run1', candidateId: 'integration' });
+  const first = await integration.merge(alphaCommit.branch, { message: 'merge alpha' });
+  assert.equal(first.ok, true, first.detail);
+  assert.deepEqual(first.conflicts, []);
+  const second = await driver.merge(integration, betaCommit.branch, { message: 'merge beta' });
+  assert.equal(second.ok, true, second.detail);
+
+  assert.equal(await integration.readFile('src/alpha.js'), 'export const alpha = 1;\n');
+  assert.equal(await integration.readFile('src/beta.js'), 'export const beta = 2;\n');
+  assert.equal(git(['status', '--porcelain'], integration.path).trim(), '', 'a clean merge leaves nothing staged');
+
+  // Now a real conflict: two candidates rewrite the same lines.
+  const ours = await driver.create({ repoPath, runId: 'run2', candidateId: 's0c0a0' });
+  await ours.writeFile('README.md', 'our version\n');
+  const oursCommit = await ours.commit('our README');
+  const theirs = await driver.create({ repoPath, runId: 'run2', candidateId: 's1c0a0' });
+  await theirs.writeFile('README.md', 'their version\n');
+  const theirsCommit = await theirs.commit('their README');
+
+  const clash = await driver.create({ repoPath, runId: 'run2', candidateId: 'integration' });
+  assert.equal((await clash.merge(oursCommit.branch)).ok, true);
+  const conflicted = await clash.merge(theirsCommit.branch);
+  assert.equal(conflicted.ok, false, 'the second merge conflicts');
+  assert.deepEqual(conflicted.conflicts, ['README.md']);
+  assert.ok(conflicted.detail.length > 0, 'git said why');
+  const text = await clash.readFile('README.md');
+  assert.ok(text.includes('<<<<<<<'), 'the markers are on disk for the repair session');
+  assert.ok(text.includes('our version') && text.includes('their version'));
+
+  await assert.rejects(() => clash.merge(''), (err) => err.code === 'bad-arg');
+  await driver.destroyRun('run1');
+  await driver.destroyRun('run2');
+});
+
+test('a conflict resolved to HEAD is still concluded so the next merge can start', { skip: skipWithoutGit }, async () => {
+  // The live sequence of run r_20260909_6a5142fd: two subtasks add the same
+  // file, the repair keeps HEAD's side, and the level's third merge used to be
+  // refused because MERGE_HEAD was never cleared.
+  const repoPath = await makeRepo();
+  const { driver } = await makeDriver();
+
+  const first = await driver.create({ repoPath, runId: 'run3', candidateId: 's0c0a0' });
+  await first.writeFile('src/table.js', 'export const table = 1;\n');
+  const firstCommit = await first.commit('subtask one');
+  const second = await driver.create({ repoPath, runId: 'run3', candidateId: 's1c0a0' });
+  await second.writeFile('src/table.js', 'export const table = 2;\n');
+  const secondCommit = await second.commit('subtask two');
+  const third = await driver.create({ repoPath, runId: 'run3', candidateId: 's2c0a0' });
+  await third.writeFile('src/extra.js', 'export const extra = 3;\n');
+  const thirdCommit = await third.commit('subtask three');
+
+  const integration = await driver.create({ repoPath, runId: 'run3', candidateId: 'integration' });
+  assert.equal((await integration.merge(firstCommit.branch)).ok, true);
+  const beforeRepair = git(['rev-parse', 'HEAD'], integration.path).trim();
+  const conflicted = await integration.merge(secondCommit.branch);
+  assert.equal(conflicted.ok, false);
+  assert.deepEqual(conflicted.conflicts, ['src/table.js']);
+
+  // The repair resolves by keeping HEAD's version, so the tree is byte
+  // identical to HEAD and `git status --porcelain` says nothing.
+  await integration.writeFile('src/table.js', 'export const table = 1;\n');
+  const concluded = await integration.commit('kolm code: merge two (conflict resolved)');
+  assert.notEqual(concluded.sha, beforeRepair, 'the merge commit is a real new commit');
+  assert.equal(
+    spawnSync('git', ['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { cwd: integration.path, encoding: 'utf8' }).status !== 0,
+    true,
+    'MERGE_HEAD is gone: the merge is over',
+  );
+  assert.equal(git(['status', '--porcelain'], integration.path).trim(), '');
+  assert.equal(await integration.isAncestor(secondCommit.branch), true, 'the branch really landed');
+  assert.equal(await integration.isAncestor(thirdCommit.branch), false, 'the third one has not');
+  await assert.rejects(() => integration.isAncestor(''), (err) => err.code === 'bad-arg');
+
+  // The next subtask of the same level now merges instead of being refused.
+  const next = await integration.merge(thirdCommit.branch);
+  assert.equal(next.ok, true, next.detail);
+  assert.equal(await integration.isAncestor(thirdCommit.branch), true);
+
+  // A clean tree with NO merge in progress still reports HEAD, no new commit.
+  const head = git(['rev-parse', 'HEAD'], integration.path).trim();
+  const count = git(['rev-list', '--count', 'HEAD'], integration.path).trim();
+  const again = await integration.commit('nothing to conclude');
+  assert.equal(again.sha, head);
+  assert.equal(git(['rev-list', '--count', 'HEAD'], integration.path).trim(), count, 'no empty commit was added');
+
+  // A merge git refuses outright lists no conflicted file, only a reason.
+  const unknown = await integration.merge('kolm/code/run3/nobody');
+  assert.equal(unknown.ok, false);
+  assert.deepEqual(unknown.conflicts, [], 'git never started the merge, so nothing conflicted');
+  assert.ok(unknown.detail.length > 0, 'the reason is the only diagnosis there is');
+
+  await driver.destroyRun('run3');
+});
+
+test('the cloudflare driver refuses to merge instead of guessing a tree', async () => {
+  // Armed with a stub fetch, so the merge refusal is reached without a network.
+  const created = {
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify({ id: 'integration', path: '/work/integration', baseSha: 'a'.repeat(40) }),
+  };
+  const driver = createCloudflareSandboxDriver(
+    { sandboxUrl: 'https://sandbox.invalid', sandboxToken: 'test-token' },
+    { fetchImpl: async () => created },
+  );
+  const wt = await driver.create({ repoUrl: 'https://example.invalid/demo.git', runId: 'run1', candidateId: 'integration' });
+
+  await assert.rejects(
+    () => wt.merge('kolm/code/run1/s0c0a0'),
+    (err) => err.code === 'unsupported' && /local git driver/.test(err.message),
+    'a sandbox merge fails loud so the orchestrator can fall back to a single unit',
+  );
+  await assert.rejects(() => driver.merge(wt, 'kolm/code/run1/s0c0a0'), (err) => err.code === 'unsupported');
 });

@@ -180,6 +180,18 @@ export function createCloudflareSandboxDriver(config = {}, opts = {}) {
         return { sha: body?.sha ?? null, branch: body?.branch ?? wt.branch };
       },
 
+      async merge() {
+        // Subtask integration (spec 4.4) needs a real three-way merge in the
+        // container. The sandbox protocol has no endpoint for it yet, so this
+        // fails loud rather than silently producing a wrong tree; the
+        // orchestrator falls back to a single-unit run.
+        throw new LadderError(
+          'unsupported',
+          'the cloudflare sandbox driver does not support merge yet; subtasks need the local git driver',
+          { driver: 'cloudflare' },
+        );
+      },
+
       async destroy() {
         await request('DELETE', wtBase(runId, id));
         return { removed: true };
@@ -236,6 +248,13 @@ export function createCloudflareSandboxDriver(config = {}, opts = {}) {
     create,
     open,
     destroyRun,
+    /**
+     * Not supported by the sandbox protocol; always throws `unsupported`.
+     * @param {object} wt
+     * @param {string} ref
+     * @returns {Promise<never>}
+     */
+    merge: (wt, ref) => wt.merge(ref),
   };
 }
 

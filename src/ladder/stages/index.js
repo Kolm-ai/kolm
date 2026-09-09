@@ -30,6 +30,20 @@ const STAGE_TIMEOUT_MARGIN_MS = 5000;
 const TIMEOUT = Symbol('stage-timeout');
 
 /**
+ * The brief without the task-relevant code retrieval (spec 4.6). Returns the
+ * SAME object when there is nothing to strip, so a brief that never had a
+ * retrieval block reaches the stage byte-identically.
+ * @param {object|null|undefined} brief
+ * @returns {object|null|undefined}
+ */
+export function briefWithoutRetrieval(brief) {
+  if (!brief || typeof brief !== 'object' || brief.retrieval == null) return brief;
+  const rest = { ...brief };
+  delete rest.retrieval;
+  return rest;
+}
+
+/**
  * Run `worker` over `items` with at most `limit` in flight.
  * @param {Array} items
  * @param {number} limit
@@ -202,7 +216,19 @@ export async function runCascade(ctx = {}) {
             wt: cand.wt,
             diffText: cand.diffText,
             priorResults: state.results,
-            plan, brief, baseline, commands, bands, rubric, providers, config, store,
+            plan,
+            // The reviewer judges the diff against the plan, not against the
+            // code the retrieval happened to pull in for the CODER. Handing it
+            // that block both wastes the context window and invites it to
+            // review code the candidate never touched (spec 4.6).
+            brief: stage.id === 'l3-semantic' ? briefWithoutRetrieval(brief) : brief,
+            baseline,
+            commands,
+            bands,
+            rubric,
+            providers,
+            config,
+            store,
           };
           try {
             result = normalizeResult(await runBounded(stage, args, timeoutMs, signal), stage, Date.now() - started);
