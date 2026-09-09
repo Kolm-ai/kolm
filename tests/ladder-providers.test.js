@@ -687,6 +687,18 @@ test('a tool-only assistant turn has null content and block results stringify', 
   assert.deepEqual(out[2], { role: 'user', content: 'and now this' });
 });
 
+test('an assistant turn with no text and no tool call is sent as an empty string, not null', () => {
+  // Ollama's OpenAI layer rejects content:null unless tool_calls is present
+  // ("invalid message content type: <nil>"); the coder hits this after a
+  // silent turn (live run r_20260909_2fb26394).
+  const out = toOpenAIMessages(null, [
+    { role: 'assistant', content: [] },
+    { role: 'user', content: 'You made no tool call.' },
+  ]);
+  assert.deepEqual(out[0], { role: 'assistant', content: '' });
+  assert.equal('tool_calls' in out[0], false);
+});
+
 test('toOpenAITools maps input_schema to parameters', () => {
   assert.deepEqual(toOpenAITools([{ name: 'run', description: 'run it', input_schema: { type: 'object' } }]), [
     { type: 'function', function: { name: 'run', description: 'run it', parameters: { type: 'object' } } },

@@ -8,6 +8,7 @@
 // response is 'unsure' (escalate), never 'bad' (reject).
 
 import { bandFor, worst } from '../bands.js';
+import { modelTimeoutMs } from '../config.js';
 import { flowsUp } from '../verdict.js';
 import { rubricToPrompt, scoreRubric, blockingFailures } from '../rubric.js';
 import { briefToPrompt } from '../context/repo-brief.js';
@@ -156,7 +157,7 @@ export async function run({
   parts.push('Return JSON matching the schema. Every rubric item id must appear exactly once in "items".');
   const prompt = parts.join('\n');
 
-  const timeoutMs = Number(config?.stageTimeoutMs) > 0 ? Number(config.stageTimeoutMs) : 600000;
+  const timeoutMs = modelTimeoutMs(config);
   let res;
   try {
     res = await reviewer.chat({

@@ -57,6 +57,7 @@ const VERBS = Object.freeze([
   'funnel',
   'eval',
   'bands',
+  'clean',
   'receipt',
   'keys',
   'doctor',
@@ -84,9 +85,14 @@ const BOOLEAN_FLAGS = new Set([
   'apply',
   'yes',
   'stdin',
+  'events',
+  'dryRun',
   'help',
   'version',
 ]);
+
+/** Statuses after which a run's worktrees are safe to remove. */
+export const FINISHED_RUN_STATUSES = Object.freeze(['done', 'error', 'fail']);
 
 /** Flags that accumulate; `--coder a --coder b,c` -> ['a','b','c']. */
 const LIST_FLAGS = new Set(['coder', 'reviewer']);
@@ -328,6 +334,7 @@ verbs:
   funnel                  how many candidates cleared cheaply vs went to the judge
   eval                    cascade vs direct comparison over stored runs
   bands                   print, suggest or apply the confidence bands
+  clean                   remove worktrees left behind by finished runs
   receipt verify|show     verify or print a signed evidence receipt
   keys set|list|unset|path|test
                           store your own provider keys once, in <data>/code/keys.json
@@ -364,9 +371,18 @@ keys options:
   environment             KOLM_CODE_KEYS_PATH moves the file,
                           KOLM_CODE_NO_KEYSTORE=1 makes every verb env-only
 
+clean options:
+  --run <id>              clean one run instead of every finished run
+  --older-than <days>     only runs last touched more than N days ago
+  --dry-run               list what would go without removing anything
+  --json                  machine readable output
+                          running runs are never touched and branches
+                          (kolm/code/<runId>/<candidate>) are never deleted
+
 other options:
   --since <iso>           funnel/eval window
   --limit <n>             status list length
+  --events                show: include the event list in --json output
   --suggest               bands: print proposed thresholds from stored runs
   --apply --yes           bands: write the proposal (never over the bundled file)
   --live                  doctor: probe Ollama, gh, the driver and every armed model
@@ -449,19 +465,19 @@ async function cmdRun(parsed) {
   const arming = api('armingReport')(config);
   const ladders = api('effectiveLadders')(config, arming);
 
-  if (!config.mockProvider) {
-    const orchestrator = arming.rungs.find((r) => r.id === 'orchestrator');
-    const anyCoder = arming.rungs.some((r) => r.kind === 'coder' && r.armed);
-    if (!orchestrator?.armed && !anyCoder) {
-      throw new LadderError(
-        'not-armed',
-        `no armed model: ${orchestrator?.reason ?? 'orchestrator unavailable'}. Run "kolm code doctor" for the full table.`,
-        { rungs: arming.rungs.filter((r) => !r.armed).map((r) => r.id) },
-      );
-    }
-  }
-
   const repoPath = path.resolve(String(flags.repo ?? process.cwd()));
+  // Everything checkable BEFORE a run row exists is checked here: a typo'd
+  // --repo used to cost an error row and an empty worktree directory, and the
+  // message came back three times (run.error event, logger, reportError).
+  validateRunPreconditions({
+    repoPath,
+    baseRef: flags.base ? String(flags.base) : null,
+    config,
+    arming,
+    ladders,
+  });
+  for (const line of droppedRungLines(arming, ladders)) note(line);
+
   const store = openStoreFor(config);
   const driver = api('createDriver')(config.driver, config);
   const createProvider = api('createProvider');
@@ -531,6 +547,105 @@ async function cmdRun(parsed) {
       // the store is already closed; nothing to unwind
     }
   }
+}
+
+/**
+ * One line per ladder rung that `effectiveLadders` left out because it is
+ * not armed. The run still works (the orchestrator codes when no coder rung
+ * is armed), but a ladder that quietly collapsed onto one model is the kind
+ * of surprise an operator should see at run start, not in the ledger.
+ *
+ * @param {object} arming output of `armingReport`
+ * @param {object} ladders output of `effectiveLadders`
+ * @returns {string[]} lines for stderr; empty when every rung is armed
+ */
+export function droppedRungLines(arming, ladders) {
+  const rungs = arming?.rungs ?? [];
+  const lines = [];
+  const coders = new Set(ladders?.coders ?? []);
+  const unarmedCoders = rungs.filter((r) => r.kind === 'coder' && !r.armed);
+  for (const r of unarmedCoders) {
+    if (coders.has(r.ref)) continue;
+    lines.push(`skipping coder rung ${r.ref}: ${r.reason ?? 'not armed'}`);
+  }
+  const anyCoderArmed = rungs.some((r) => r.kind === 'coder' && r.armed);
+  if (unarmedCoders.length > 0 && !anyCoderArmed) {
+    lines.push(`no coder rung is armed; the orchestrator ${ladders?.coders?.[0] ?? ''} writes the candidates`.trimEnd());
+  }
+  const unarmedReviewers = rungs.filter((r) => r.kind === 'reviewer' && !r.armed);
+  if (unarmedReviewers.length > 0 && !ladders?.reviewer) {
+    for (const r of unarmedReviewers) {
+      lines.push(`skipping reviewer rung ${r.ref}: ${r.reason ?? 'not armed'}`);
+    }
+    lines.push('no reviewer rung is armed; l3-semantic is skipped and unsure candidates go straight to the judge');
+  }
+  return lines;
+}
+
+/**
+ * Everything `run` can check before `createRun` writes a row: a real directory,
+ * a real git repository, a base ref git can resolve, and an armed model on
+ * every rung this run will actually use. Failing here costs nothing and prints
+ * one line; failing later leaves a status=error row behind.
+ *
+ * @param {object} args `{repoPath, baseRef, config, arming, ladders}`
+ * @param {object} [deps] `{statSync, git}` injected by the tests
+ * @returns {true}
+ */
+export function validateRunPreconditions(args, deps = {}) {
+  const { repoPath, baseRef, config, arming, ladders } = args;
+  const statSync = deps.statSync ?? fs.statSync;
+  const git = deps.git ?? ((gitArgs, cwd) => spawnSync('git', gitArgs, { cwd, encoding: 'utf8' }));
+
+  if ((config?.driver ?? 'local') === 'local') {
+    let stat = null;
+    try {
+      stat = statSync(repoPath);
+    } catch {
+      stat = null;
+    }
+    if (!stat || !stat.isDirectory()) {
+      throw new LadderError('bad-args', `--repo is not a directory: ${repoPath}`, { repoPath });
+    }
+    const inside = git(['rev-parse', '--git-dir'], repoPath);
+    if (!inside || inside.status !== 0) {
+      throw new LadderError('bad-args', `not a git repository: ${repoPath}`, { repoPath });
+    }
+    if (baseRef) {
+      const resolved = git(['rev-parse', '--verify', `${baseRef}^{commit}`], repoPath);
+      if (!resolved || resolved.status !== 0) {
+        throw new LadderError('bad-ref', `--base ref does not resolve in ${repoPath}: ${baseRef}`, {
+          repoPath,
+          baseRef,
+        });
+      }
+    }
+  }
+
+  if (config?.mockProvider === true) return true;
+
+  const rungs = arming?.rungs ?? [];
+  const used = [];
+  const orchestrator = rungs.find((r) => r.id === 'orchestrator');
+  if (orchestrator) used.push(orchestrator);
+  if ((config?.mode ?? 'cascade') === 'cascade') {
+    const judge = rungs.find((r) => r.id === 'judge');
+    if (judge) used.push(judge);
+  }
+  const coderRefs = new Set(ladders?.coders ?? []);
+  for (const rung of rungs) {
+    if (rung.kind === 'coder' && coderRefs.has(rung.ref)) used.push(rung);
+  }
+  const unarmed = used.filter((r) => !r.armed);
+  if (unarmed.length > 0) {
+    const detail = unarmed.map((r) => `${r.id} (${r.ref ?? '-'}): ${r.reason}`).join('; ');
+    throw new LadderError(
+      'not-armed',
+      `no armed model for ${unarmed.map((r) => r.id).join(', ')} - ${detail}. Run "kolm code doctor" for the full table.`,
+      { rungs: unarmed.map((r) => r.id) },
+    );
+  }
+  return true;
 }
 
 /** Drop the diff blobs so `--json` stays a summary, not a patch dump. */
@@ -603,6 +718,7 @@ async function cmdResume(parsed) {
     const driver = api('createDriver')(config.driver, config);
     const arming = api('armingReport')(config);
     const ladders = api('effectiveLadders')(config, arming);
+    for (const line of droppedRungLines(arming, ladders)) note(line);
     const createProvider = api('createProvider');
     const controller = new AbortController();
     const onSigint = () => {
@@ -749,7 +865,10 @@ async function cmdShow(parsed) {
       judgments: store.listJudgments(runId),
       funnel: store.funnel({ runIds: [runId] }),
       cost,
-      events: events.length,
+      eventCount: events.length,
+      // `--events` swaps the count for the list; without it the payload stays
+      // a summary, because a long run carries thousands of events.
+      events: flags.events === true ? events : events.length,
       receiptPath,
       receiptOnDisk: receiptPath ? fs.existsSync(receiptPath) : false,
     };
@@ -786,6 +905,120 @@ async function cmdShow(parsed) {
       out('');
       out(renderTable(['MODEL', 'CALLS', 'IN', 'OUT', 'COST'], byModel.map(([model, b]) => [model, b.calls, b.input_tokens, b.output_tokens, usd(b.cost_usd)])));
     }
+    if (flags.events === true) {
+      out('');
+      for (const event of events) out(formatEvent(event));
+    }
+    return EXIT.OK;
+  } finally {
+    store.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// clean
+// ---------------------------------------------------------------------------
+
+/**
+ * Which stored runs `clean` may touch, and why the others were left alone.
+ * Pure, so the tests can pin the policy without a driver or a filesystem.
+ *
+ * @param {Array<object>} runs store rows, newest first
+ * @param {{olderThanDays?: number|null, now?: number}} [opts]
+ * @returns {{clean: object[], skipped: Array<{runId:string, reason:string}>}}
+ */
+export function selectRunsToClean(runs = [], opts = {}) {
+  const olderThanDays = opts.olderThanDays ?? null;
+  const now = Number.isFinite(opts.now) ? opts.now : Date.now();
+  const cutoff = olderThanDays === null ? null : now - olderThanDays * 86400000;
+  const clean = [];
+  const skipped = [];
+  for (const run of runs) {
+    const status = String(run?.status ?? '');
+    if (!FINISHED_RUN_STATUSES.includes(status)) {
+      // A running run owns its worktrees; removing them under it is sabotage.
+      skipped.push({ runId: run?.id ?? '-', reason: `status ${status || 'unknown'}` });
+      continue;
+    }
+    if (cutoff !== null) {
+      const ts = Date.parse(run.updated_at ?? run.created_at ?? '');
+      if (!Number.isFinite(ts) || ts > cutoff) {
+        skipped.push({ runId: run.id, reason: `newer than ${olderThanDays} day(s)` });
+        continue;
+      }
+    }
+    const kind = run.driver ? String(run.driver) : 'local';
+    if (kind !== 'local' && kind !== 'fake') {
+      skipped.push({ runId: run.id, reason: `driver ${kind}` });
+      continue;
+    }
+    clean.push(run);
+  }
+  return { clean, skipped };
+}
+
+async function cmdClean(parsed) {
+  const flags = parsed.flags;
+  const config = configFrom(flags);
+  const dryRun = flags.dryRun === true;
+  const olderThanDays = flags.olderThan === undefined ? null : Number(flags.olderThan);
+  if (olderThanDays !== null && (!Number.isFinite(olderThanDays) || olderThanDays < 0)) {
+    throw new LadderError('bad-args', `--older-than takes a number of days, got "${flags.olderThan}"`);
+  }
+  const store = openStoreFor(config);
+  try {
+    const runId = flags.run && flags.run !== true ? String(flags.run) : null;
+    let runs;
+    if (runId) {
+      const run = store.getRun(runId);
+      if (!run) throw new LadderError('not-found', `no run ${runId} in ${config.dbPath}`, { runId });
+      runs = [run];
+    } else {
+      const limit = Number(flags.limit ?? 500);
+      runs = store.listRuns({ limit: Number.isFinite(limit) ? limit : 500 });
+    }
+
+    const { clean, skipped } = selectRunsToClean(runs, { olderThanDays });
+    const drivers = new Map();
+    const removed = [];
+    for (const run of clean) {
+      const kind = run.driver ? String(run.driver) : 'local';
+      if (!drivers.has(kind)) drivers.set(kind, api('createDriver')(kind, config));
+      const result = await drivers.get(kind).destroyRun(run.id, {
+        repoPath: run.repo_path ?? undefined,
+        dryRun,
+      });
+      removed.push({
+        runId: run.id,
+        status: run.status ?? '-',
+        worktrees: dryRun ? (result?.paths?.length ?? 0) : (result?.removed ?? 0),
+        directory: result?.runDir ?? null,
+        existed: result?.existed !== false,
+      });
+    }
+
+    const worktrees = removed.reduce((sum, r) => sum + r.worktrees, 0);
+    if (flags.json) {
+      jsonOut({ dryRun, runs: removed, worktrees, skipped });
+      return EXIT.OK;
+    }
+    if (removed.length === 0) {
+      out('nothing to clean');
+    } else {
+      out(
+        renderTable(
+          ['RUN', 'STATUS', 'WORKTREES', 'DIRECTORY'],
+          removed.map((r) => [r.runId, r.status, r.worktrees, r.directory ?? '-']),
+        ),
+      );
+      out('');
+    }
+    out(`${dryRun ? 'would remove' : 'removed'}  ${removed.length} run(s), ${worktrees} worktree(s)`);
+    if (skipped.length > 0) {
+      const head = skipped.slice(0, 5).map((s) => `${s.runId} (${s.reason})`).join(', ');
+      out(`skipped      ${skipped.length} run(s): ${head}${skipped.length > 5 ? ', ...' : ''}`);
+    }
+    out('branches kolm/code/<runId>/<candidate> are never deleted');
     return EXIT.OK;
   } finally {
     store.close();
@@ -891,16 +1124,26 @@ async function cmdBands(parsed) {
 
   const store = openStoreFor(config);
   try {
-    const proposal = await api('suggestBands')({ store, bands });
+    const proposal = await api('suggestBands')({
+      store,
+      bands,
+      minDisagreements: config.calibrationMinDisagreements,
+    });
     const patched = proposal.bandsPatched ?? bands;
     const changes = diffBands(bands, patched);
+    const skipped = proposal.skipped ?? [];
 
     if (flags.json) {
-      jsonOut({ source, proposals: proposal.proposals ?? [], changes, applied: false });
+      jsonOut({ source, proposals: proposal.proposals ?? [], changes, skipped, applied: false });
     } else {
       out(`bands ${source}`);
       if (changes.length === 0) out('no threshold would change from the stored runs');
       for (const change of changes) out(`${change.where}: ${change.from} -> ${change.to}`);
+      // A key that disagreed but did not move says more than silence: locked is
+      // a deliberate safety band, n<N is not enough evidence yet.
+      for (const skip of skipped) {
+        out(`${skip.stage}.${skip.key}: not proposed (${skip.reason}, ${skip.disagreements} disagreement(s))`);
+      }
     }
 
     if (!flags.apply) return EXIT.OK;
@@ -1480,6 +1723,7 @@ async function cmdTruffleWorker(parsed) {
   const driver = api('createDriver')(config.driver, config);
   const arming = api('armingReport')(config);
   const ladders = api('effectiveLadders')(config, arming);
+  for (const line of droppedRungLines(arming, ladders)) note(line);
   const createProvider = api('createProvider');
   const controller = new AbortController();
   const onSigint = () => controller.abort();
@@ -1584,6 +1828,8 @@ export async function main(argv = []) {
         return await cmdEval(parsed);
       case 'bands':
         return await cmdBands(parsed);
+      case 'clean':
+        return await cmdClean(parsed);
       case 'receipt':
         return await cmdReceipt(parsed);
       case 'keys':

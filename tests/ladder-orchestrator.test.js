@@ -150,7 +150,8 @@ function baseConfig(dir, extra = {}) {
     mode: 'cascade',
     candidates: 1,
     coderTurns: 6,
-    repairTurns: 0,
+    repairRounds: 0,
+    repairTurns: 6,
     maxCostUsd: 5,
     calibrationRate: 0,
     stageTimeoutMs: 60000,
@@ -242,7 +243,7 @@ test('a run escalates through every rung before giving up', options, async () =>
   const result = await runTask({
     task: { text: 'add a function add(a,b) to src/math.js' },
     repoPath: '/repo/demo',
-    config: baseConfig(dir, { repairTurns: 1 }),
+    config: baseConfig(dir, { repairRounds: 1 }),
     store,
     driver,
     providers: {

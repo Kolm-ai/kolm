@@ -25,7 +25,9 @@ import {
 import { LadderError } from './errors.js';
 
 export const RECEIPT_SCHEMA = 'kolm-code-receipt-v1';
-export const RECEIPT_VERSION = 1;
+export const RECEIPT_VERSION = 2;
+/** Receipt versions this build will verify. v1 carried the full repo path. */
+export const SUPPORTED_RECEIPT_VERSIONS = Object.freeze([1, 2]);
 
 const REASON_CAP = 300;
 
@@ -60,6 +62,21 @@ export function scrubSecrets(text) {
   let out = String(text ?? '');
   for (const re of SECRET_PATTERNS) out = out.replace(re, '[redacted]');
   return out;
+}
+
+/**
+ * The last path segment of a local repo path. A receipt is a portable artifact;
+ * "/home/alice/work/secret-client" is not something it should carry.
+ * @param {string|null} repoPath
+ * @returns {string|null}
+ */
+export function repoBasename(repoPath) {
+  if (repoPath === null || repoPath === undefined) return null;
+  const text = String(repoPath).trim().replace(/[\\/]+$/, '');
+  if (text === '') return null;
+  const parts = text.split(/[\\/]/);
+  const last = parts[parts.length - 1];
+  return last === '' ? null : cleanString(last, 200);
 }
 
 function cleanString(value, cap) {
@@ -207,7 +224,10 @@ export function buildReceipt({
       text_sha256: sha256(task.text ?? null),
     },
     repo: {
-      path: run.repo_path ?? run.repoPath ?? null,
+      // v2: the receipt travels; the operator's directory layout does not. Only
+      // the basename and the hash of the full path go in, and the full path
+      // stays in the local SQLite run row where it belongs.
+      basename: repoBasename(run.repo_path ?? run.repoPath ?? null),
       // Spec 6.5 wants the path hashed as well: a receipt often travels further
       // than the machine it was produced on, and the hash is enough to prove two
       // receipts describe the same checkout without publishing a home directory.
@@ -252,6 +272,7 @@ export function buildReceipt({
     ladder_config: {
       candidates: Math.trunc(num(config.candidates, 0)),
       coder_turns: Math.trunc(num(config.coderTurns ?? config.coder_turns, 0)),
+      repair_rounds: Math.trunc(num(config.repairRounds ?? config.repair_rounds, 0)),
       repair_turns: Math.trunc(num(config.repairTurns ?? config.repair_turns, 0)),
       max_cost_usd: num(config.maxCostUsd ?? config.max_cost_usd, 0),
       calibration_rate: num(config.calibrationRate ?? config.calibration_rate, 0),
@@ -311,6 +332,16 @@ export function verifyReceipt(receiptOrPath, { publicKey } = {}) {
   if (!receipt || typeof receipt !== 'object') {
     return { ok: false, kid: null, reason: 'receipt is not an object' };
   }
+  if (receipt.schema && receipt.schema !== RECEIPT_SCHEMA) {
+    return { ok: false, kid: receipt.signer_kid ?? null, reason: `unknown receipt schema ${receipt.schema}` };
+  }
+  if (receipt.version !== undefined && !SUPPORTED_RECEIPT_VERSIONS.includes(Number(receipt.version))) {
+    return {
+      ok: false,
+      kid: receipt.signer_kid ?? null,
+      reason: `unsupported receipt version ${receipt.version} (supported: ${SUPPORTED_RECEIPT_VERSIONS.join(', ')})`,
+    };
+  }
   const block = receipt.signature_ed25519;
   if (!block) return { ok: false, kid: receipt.signer_kid ?? null, reason: 'receipt is not signed' };
   if (publicKey && block.public_key !== publicKey) {
@@ -367,4 +398,5 @@ export default {
   sha256Canonical,
   RECEIPT_SCHEMA,
   RECEIPT_VERSION,
+  SUPPORTED_RECEIPT_VERSIONS,
 };

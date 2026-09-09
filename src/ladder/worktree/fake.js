@@ -267,14 +267,22 @@ function applyHunks(originalLines, originalEof, hunks) {
  * @param {Record<string,string>} [spec.files] base checkout, path -> content
  * @param {Record<string,object|Function>} [spec.exec] scripted command table
  * @param {string} [spec.baseSha]
+ * @param {{kind:string, path:string|null, posix:boolean, platform:string}} [spec.shell]
+ *   what `wt.shell` reports; defaults to a POSIX sh so tests are host-independent
  */
-export function createFakeDriver({ files = {}, exec = {}, baseSha = DEFAULT_BASE_SHA } = {}) {
+export function createFakeDriver({
+  files = {},
+  exec = {},
+  baseSha = DEFAULT_BASE_SHA,
+  shell = { kind: 'sh', path: null, posix: true, platform: 'linux' },
+} = {}) {
   const baseFiles = new Map();
   for (const [k, v] of Object.entries(files)) baseFiles.set(normalizeRel(k), String(v));
 
   const driver = {
     kind: 'fake',
     baseSha,
+    shell,
     created: [],
     destroyed: [],
     commands: [],
@@ -303,6 +311,7 @@ export function createFakeDriver({ files = {}, exec = {}, baseSha = DEFAULT_BASE
       runId,
       candidateId,
       branch,
+      shell,
       commands: [],
       /** Test-only view of the in-memory tree. */
       files: current,
@@ -496,14 +505,18 @@ export function createFakeDriver({ files = {}, exec = {}, baseSha = DEFAULT_BASE
     return create({ repoPath, repoUrl, runId, candidateId });
   }
 
-  async function destroyRun(runId) {
+  async function destroyRun(runId, destroyOpts = {}) {
+    const dryRun = destroyOpts.dryRun === true;
+    const paths = [];
     let removed = 0;
     for (const [k, wt] of [...driver.worktrees.entries()]) {
       if (!k.startsWith(`${runId}/`)) continue;
+      paths.push(wt.path);
+      if (dryRun) continue;
       await wt.destroy();
       removed += 1;
     }
-    return { removed };
+    return { removed, paths, runDir: `/fake/${runId}`, existed: paths.length > 0, dryRun };
   }
 
   return driver;

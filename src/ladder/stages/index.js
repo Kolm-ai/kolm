@@ -24,6 +24,9 @@ import l3 from './l3-semantic.js';
 export const STAGES = Object.freeze([l0, l1, l2, l3]);
 
 const DEFAULT_STAGE_TIMEOUT_MS = 600000;
+// The wrapper always outlives the command it wraps by this much, so a command
+// that times out reports its own reason instead of the generic 'stage timed out'.
+const STAGE_TIMEOUT_MARGIN_MS = 5000;
 const TIMEOUT = Symbol('stage-timeout');
 
 /**
@@ -132,7 +135,14 @@ export async function runCascade(ctx = {}) {
   if (!runId) throw new LadderError('bad-arg', 'runCascade needs a runId');
   if (!store) throw new LadderError('bad-arg', 'runCascade needs a store');
 
-  const timeoutMs = Number(config.stageTimeoutMs) > 0 ? Number(config.stageTimeoutMs) : DEFAULT_STAGE_TIMEOUT_MS;
+  // A stage's inner command gets the whole budget, so the wrapper has to be
+  // strictly more patient than the command it wraps: otherwise the wrapper wins
+  // the race and reports the useless 'stage timed out' instead of the command's
+  // own, informative 'test command timed out after N ms'.
+  const stageBudget = Number(config.stageTimeoutMs) > 0
+    ? Number(config.stageTimeoutMs)
+    : DEFAULT_STAGE_TIMEOUT_MS;
+  const timeoutMs = stageBudget + STAGE_TIMEOUT_MARGIN_MS;
   const perCandidate = new Map();
   for (const cand of candidates) {
     perCandidate.set(cand.candidateId, { decisions: {}, results: {}, verdict: null, _last: undefined, _blocked: false });

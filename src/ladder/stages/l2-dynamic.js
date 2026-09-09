@@ -69,6 +69,20 @@ export async function run({ wt, baseline, commands = {}, bands, config, signal }
     };
   }
   const timeoutMs = Number(config?.stageTimeoutMs) > 0 ? Number(config.stageTimeoutMs) : 600000;
+  // The base commit could not finish its own tests inside the budget, so no
+  // measurement taken here says anything about the patch. Skip rather than
+  // charge the candidate for the repo's own slowness.
+  if (baseline?.tests?.timedOut === true) {
+    return {
+      decision: 'skip',
+      reasons: [`test command timed out at baseline too (${timeoutMs} ms)`],
+      hits: [],
+      metrics: {},
+      artifacts: { baselineTimedOut: true },
+      costUsd: 0,
+      latencyMs: Date.now() - started,
+    };
+  }
   const runner = detectRunner(commands.test);
   const reasons = [];
   const hits = [];

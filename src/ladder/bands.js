@@ -122,9 +122,25 @@ export function validateBands(bands, source = '<inline>') {
       if (typeof spec.low_is_bad !== 'boolean') {
         throw new LadderError('bad-bands', `bands.${where}.low_is_bad must be a boolean (${source})`, { source, stageId, key });
       }
+      if (spec.locked !== undefined && typeof spec.locked !== 'boolean') {
+        throw new LadderError('bad-bands', `bands.${where}.locked must be a boolean (${source})`, { source, stageId, key });
+      }
     }
   }
   return bands;
+}
+
+/**
+ * True when a band key is pinned against calibration. A locked band is a safety
+ * threshold (a failing test is a failing test; a secret in the patch is a
+ * secret), and one wrong judge verdict must never be able to move it.
+ * @param {object} bands
+ * @param {string} stageId
+ * @param {string} key
+ * @returns {boolean}
+ */
+export function isLocked(bands, stageId, key) {
+  return bands?.[stageId]?.[key]?.locked === true;
 }
 
 /**
@@ -147,4 +163,4 @@ export function loadBands(bandsPath) {
   return validateBands(bands, target);
 }
 
-export default { band, bandFor, worst, loadBands, validateBands, BUNDLED_BANDS_PATH };
+export default { band, bandFor, worst, isLocked, loadBands, validateBands, BUNDLED_BANDS_PATH };

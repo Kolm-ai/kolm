@@ -578,7 +578,9 @@ test('fake commits are deterministic and destruction is recorded', async () => {
   await other.create({ runId: 'run2', candidateId: 'cand1' });
   await other.create({ runId: 'run2', candidateId: 'cand2' });
   await other.create({ runId: 'run3', candidateId: 'cand1' });
-  assert.deepEqual(await other.destroyRun('run2'), { removed: 2 });
+  const destroyed = await other.destroyRun('run2');
+  assert.equal(destroyed.removed, 2);
+  assert.deepEqual(destroyed.paths, ['/fake/run2/cand1', '/fake/run2/cand2']);
   assert.equal(other.worktrees.size, 1);
 });
 

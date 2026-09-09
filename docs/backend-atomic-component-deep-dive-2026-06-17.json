@@ -72,7 +72,7 @@
       "environment_configuration_boundary": 386,
       "execution_or_subprocess_boundary": 335,
       "http_route_surface": 41,
-      "large_component_contract_risk": 48,
+      "large_component_contract_risk": 49,
       "money_or_entitlement_path": 17,
       "network_or_provider_boundary": 191,
       "open_marker_requires_owner_review": 4,
@@ -2486,10 +2486,10 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/path-to-100-w2-truth-in-labeling.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface"
@@ -2748,10 +2748,10 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/path-to-100-w2-truth-in-labeling.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface"
@@ -4351,8 +4351,8 @@
         "tests/finalized-c6-significance-bounded-regression-gate.test.js",
         "tests/fixtures/fake-native-shim.js",
         "tests/ladder-cli.test.js",
-        "tests/ladder-providers.test.js",
-        "tests/receipt-export-registry.test.js"
+        "tests/ladder-hardening.test.js",
+        "tests/ladder-providers.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -5317,10 +5317,10 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/path-to-100-w2-truth-in-labeling.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -8620,10 +8620,10 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/path-to-100-w2-truth-in-labeling.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -9556,29 +9556,29 @@
       "surface": "cli",
       "domain": "developer_distribution",
       "language": "javascript",
-      "sha256": "8b83f121ebcb3867b427eadca63a9e86b6f4b140e64512747a9372ce8bf1e3a2",
+      "sha256": "2bd144c42186118180997655acecb9d174eceaf3c005ac8840fec4041850b972",
       "metrics": {
-        "bytes": 57710,
-        "lines": 1638,
+        "bytes": 67566,
+        "lines": 1884,
         "imports": 14,
-        "exports": 5,
+        "exports": 9,
         "routes": 0,
         "env_refs": 4,
         "fs_writes": 1,
-        "subprocess_refs": 6,
+        "subprocess_refs": 7,
         "network_refs": 0,
         "crypto_refs": 2,
         "markers": 0
       },
       "test_refs": [
         "tests/ladder-cli.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-config.test.js",
         "tests/ladder-github.test.js",
         "tests/ladder-truffle.test.js",
         "tests/ladder-viewer.test.js",
         "tests/ladder-worktree-cloudflare.test.js",
-        "tests/ladder-worktree.test.js",
-        "tests/wave382-dev-agent.test.js"
+        "tests/ladder-worktree.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -9772,13 +9772,13 @@
       },
       "test_refs": [
         "tests/ladder-cli.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/path-to-100-w1-tui-real-runner.test.js",
         "tests/r3-kolm-serve.test.js",
         "tests/server.test.js",
         "tests/site.test.js",
         "tests/sota-cli.test.js",
-        "tests/sota-tui.test.js",
-        "tests/wave166-auditor-attestation.test.js"
+        "tests/sota-tui.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -9846,11 +9846,11 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
         "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js",
-        "tests/research-docs.test.js"
+        "tests/r4-deploy-generators.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface"
@@ -9971,11 +9971,11 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
         "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js",
-        "tests/research-docs.test.js"
+        "tests/r4-deploy-generators.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -10723,11 +10723,11 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
         "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js",
-        "tests/research-docs.test.js"
+        "tests/r4-deploy-generators.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -10922,11 +10922,11 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
         "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js",
-        "tests/research-docs.test.js"
+        "tests/r4-deploy-generators.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -11177,11 +11177,11 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
         "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js",
-        "tests/research-docs.test.js"
+        "tests/r4-deploy-generators.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -11432,11 +11432,11 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
         "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js",
-        "tests/research-docs.test.js"
+        "tests/r4-deploy-generators.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -11757,11 +11757,11 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
         "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js",
-        "tests/research-docs.test.js"
+        "tests/r4-deploy-generators.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -12083,11 +12083,11 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
         "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js",
-        "tests/research-docs.test.js"
+        "tests/r4-deploy-generators.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -12401,11 +12401,11 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
         "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js",
-        "tests/research-docs.test.js"
+        "tests/r4-deploy-generators.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -13378,10 +13378,10 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/path-to-100-w2-truth-in-labeling.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -13767,11 +13767,11 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
         "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js",
-        "tests/research-docs.test.js"
+        "tests/r4-deploy-generators.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -14191,10 +14191,10 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/path-to-100-w2-truth-in-labeling.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface"
@@ -14442,10 +14442,10 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/path-to-100-w2-truth-in-labeling.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -14688,11 +14688,11 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
         "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js",
-        "tests/research-docs.test.js"
+        "tests/r4-deploy-generators.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -14939,10 +14939,10 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/path-to-100-w2-truth-in-labeling.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface"
@@ -15677,11 +15677,11 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
         "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js",
-        "tests/research-docs.test.js"
+        "tests/r4-deploy-generators.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -22454,12 +22454,12 @@
       "test_refs": [
         "tests/ladder-cli.test.js",
         "tests/ladder-config.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-keystore.test.js",
         "tests/ladder-providers.test.js",
         "tests/wave697-cerebras-adapter-contract.test.js",
         "tests/wave888b-cloud-providers.test.js",
-        "tests/wave888c-devices.test.js",
-        "tests/wave923-session-surfaces.test.js"
+        "tests/wave888c-devices.test.js"
       ],
       "risk_signals": [
         "environment_configuration_boundary",
@@ -22784,12 +22784,12 @@
       "test_refs": [
         "tests/wave669-cf-config-api-contract.test.js",
         "tests/ladder-config.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-worktree-cloudflare.test.js",
         "tests/ladder-worktree.test.js",
         "tests/wave553-codegraph-cloud-platform.test.js",
         "tests/wave555-user-completion-cloud-optimizer.test.js",
-        "tests/wave558-object-storage-cloud-contract.test.js",
-        "tests/wave583-cloud-compute-broker.test.js"
+        "tests/wave558-object-storage-cloud-contract.test.js"
       ],
       "risk_signals": [
         "environment_configuration_boundary",
@@ -23859,12 +23859,12 @@
       "test_refs": [
         "tests/ladder-cli.test.js",
         "tests/ladder-config.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-keystore.test.js",
         "tests/ladder-providers.test.js",
         "tests/wave697-cerebras-adapter-contract.test.js",
         "tests/wave888b-cloud-providers.test.js",
-        "tests/wave888c-devices.test.js",
-        "tests/wave923-session-surfaces.test.js"
+        "tests/wave888c-devices.test.js"
       ],
       "risk_signals": [
         "environment_configuration_boundary",
@@ -38713,12 +38713,12 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "0dcb21631e9e68cee6e0f193c45eb5a10f00e0513384e19ca3e85e5aded1ee85",
+      "sha256": "8a045d12f26088694c9bb2644c9e4e2771f16c86fa65b8d53b762813a10a780b",
       "metrics": {
-        "bytes": 6398,
-        "lines": 151,
+        "bytes": 7050,
+        "lines": 167,
         "imports": 4,
-        "exports": 7,
+        "exports": 8,
         "routes": 0,
         "env_refs": 1,
         "fs_writes": 0,
@@ -38730,12 +38730,12 @@
       "test_refs": [
         "tests/ladder-bands.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-receipt.test.js",
         "tests/ladder-stages.test.js",
         "tests/ladder-cli.test.js",
-        "tests/ladder-config.test.js",
-        "tests/wave458-dod-12-step-e2e.test.js"
+        "tests/ladder-config.test.js"
       ],
       "risk_signals": [
         "environment_configuration_boundary"
@@ -38781,10 +38781,10 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "json",
-      "sha256": "55b9a056b22d9f634b6f32bb01d51f86df41f297d3acbad24f02683b6f351e10",
+      "sha256": "ac3f6d7e6f500efb5b25448e974625025c315c1b2c24d4be27f4e863ae5c48c5",
       "metrics": {
-        "bytes": 641,
-        "lines": 19,
+        "bytes": 731,
+        "lines": 20,
         "imports": 0,
         "exports": 0,
         "routes": 0,
@@ -38798,12 +38798,12 @@
       "test_refs": [
         "tests/ladder-bands.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-receipt.test.js",
         "tests/ladder-stages.test.js",
         "tests/ladder-cli.test.js",
-        "tests/ladder-config.test.js",
-        "tests/wave458-dod-12-step-e2e.test.js"
+        "tests/ladder-config.test.js"
       ],
       "risk_signals": [],
       "priority_score": 0,
@@ -38847,29 +38847,29 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "39018e9453be4d0f0762b394408db3e12e7c595d6028259cc66aa1ad86a9b53b",
+      "sha256": "756635de919679825dc373a8b70d0f802eb71e02f9e2900c4f0da51b3d662948",
       "metrics": {
-        "bytes": 17044,
-        "lines": 473,
-        "imports": 4,
-        "exports": 6,
+        "bytes": 25950,
+        "lines": 689,
+        "imports": 6,
+        "exports": 9,
         "routes": 0,
         "env_refs": 0,
-        "fs_writes": 1,
+        "fs_writes": 2,
         "subprocess_refs": 1,
         "network_refs": 0,
         "crypto_refs": 0,
         "markers": 1
       },
       "test_refs": [
+        "tests/ladder-hardening.test.js",
         "tests/cid.test.js",
         "tests/finalized-c1-provenance-receipt-transparency-chain.test.js",
         "tests/ladder-cli.test.js",
         "tests/ladder-config.test.js",
         "tests/ladder-e2e.test.js",
         "tests/ladder-orchestrator.test.js",
-        "tests/ladder-providers.test.js",
-        "tests/ladder-receipt.test.js"
+        "tests/ladder-providers.test.js"
       ],
       "risk_signals": [
         "execution_or_subprocess_boundary",
@@ -38917,12 +38917,12 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "f2ba5a6efba9240aded126960de8efd9370024bd66c7d9a915206864f7d888c5",
+      "sha256": "bb86f9e1544a525a350527fbb592ebec8a1901f2004d7ef9d6570f2b36cc11fc",
       "metrics": {
-        "bytes": 28077,
-        "lines": 760,
+        "bytes": 29456,
+        "lines": 795,
         "imports": 5,
-        "exports": 16,
+        "exports": 18,
         "routes": 0,
         "env_refs": 1,
         "fs_writes": 0,
@@ -39048,12 +39048,12 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "8716af77407a56a83dcf176f55bd99d368d7e713315936a01372043cccc8922e",
+      "sha256": "48fd5262de162fd5c648944f44d148bc8299fcd5bd0f146a0899b8e957c9ded1",
       "metrics": {
-        "bytes": 16169,
-        "lines": 488,
+        "bytes": 17113,
+        "lines": 514,
         "imports": 1,
-        "exports": 7,
+        "exports": 8,
         "routes": 0,
         "env_refs": 0,
         "fs_writes": 0,
@@ -39064,13 +39064,13 @@
       },
       "test_refs": [
         "tests/ladder-context.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/agent-attestation-report.test.js",
         "tests/agent-audit-event.test.js",
         "tests/agent-audit-orchestrator.test.js",
         "tests/agent-audit-report-ready-notify.test.js",
         "tests/agent-audit-trail-analyzer.test.js",
-        "tests/agent-permission-analyzer.test.js",
-        "tests/artifact-end-to-end.test.js"
+        "tests/agent-permission-analyzer.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -39258,13 +39258,13 @@
       },
       "test_refs": [
         "tests/ladder-config.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-keystore.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-providers.test.js",
         "tests/ladder-stages.test.js",
         "tests/agent-audit-ingest.test.js",
-        "tests/agent-audit-pipeline.test.js",
-        "tests/agent-evidence-tier.test.js"
+        "tests/agent-audit-pipeline.test.js"
       ],
       "risk_signals": [],
       "priority_score": 0,
@@ -39614,12 +39614,12 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "a797ac76abb0686de3b6240528a063311721889318e361bf5c6659d74b1ae590",
+      "sha256": "0ba096933ec9d3e5349010acb546251d11233303e02c77bb76bd489bde9e879b",
       "metrics": {
-        "bytes": 29991,
-        "lines": 817,
+        "bytes": 36025,
+        "lines": 961,
         "imports": 14,
-        "exports": 6,
+        "exports": 8,
         "routes": 0,
         "env_refs": 0,
         "fs_writes": 0,
@@ -39630,18 +39630,19 @@
       },
       "test_refs": [
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/active-redteam.test.js",
         "tests/agent-attestation-report.test.js",
         "tests/agent-audit-orchestrator.test.js",
         "tests/agent-evidence-tier.test.js",
-        "tests/agent-verify-hardening.test.js",
-        "tests/asr-paid-loop.test.js"
+        "tests/agent-verify-hardening.test.js"
       ],
       "risk_signals": [
-        "cryptographic_or_proof_boundary"
+        "cryptographic_or_proof_boundary",
+        "large_component_contract_risk"
       ],
-      "priority_score": 3,
+      "priority_score": 6,
       "deep_dive": {
         "status": "atomic_deep_dive_complete",
         "reviewed_at": "2026-06-17",
@@ -39682,11 +39683,11 @@
       "surface": "core-backend",
       "domain": "billing_marketplace",
       "language": "javascript",
-      "sha256": "4073267e0c2b826936c0b61b27c5cb88019e870d9b3882c506b6741f56af33ed",
+      "sha256": "eb7df08284e62e55f591c5bcfcc5338d1aed0d13b04e1561a8957c6b9f56d36e",
       "metrics": {
-        "bytes": 7399,
-        "lines": 197,
-        "imports": 2,
+        "bytes": 7393,
+        "lines": 198,
+        "imports": 3,
         "exports": 3,
         "routes": 0,
         "env_refs": 0,
@@ -39697,14 +39698,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/ladder-hardening.test.js",
         "tests/delegation-analyzer.test.js",
         "tests/ladder-e2e.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-providers.test.js",
         "tests/sota-capturedata.test.js",
         "tests/sota-compileartifact.test.js",
-        "tests/wave2-integration.test.js",
-        "tests/wave371-builder.test.js"
+        "tests/wave2-integration.test.js"
       ],
       "risk_signals": [],
       "priority_score": 0,
@@ -39828,6 +39829,7 @@
       },
       "test_refs": [
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-providers.test.js"
       ],
@@ -39937,10 +39939,10 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "f0a103afd8e322172c44adcfd0c5b7e24809bed0b96e0307bcb7e61314dfde34",
+      "sha256": "b2cdce0f70077079139c141776f19ae5d489133a6d616eb3106dfcc887605661",
       "metrics": {
-        "bytes": 14895,
-        "lines": 457,
+        "bytes": 15151,
+        "lines": 460,
         "imports": 3,
         "exports": 7,
         "routes": 0,
@@ -40070,12 +40072,12 @@
       "surface": "core-backend",
       "domain": "trust_security_compliance",
       "language": "javascript",
-      "sha256": "f4e7c3d431b6b49ad377f62af77b3170eca5dec2163b1d2005fdc2f75df3e00b",
+      "sha256": "778e5b0c741113a24f62b7bfdca301329d10e973cf804d5a74fab8a7217f6651",
       "metrics": {
-        "bytes": 13687,
-        "lines": 371,
+        "bytes": 15214,
+        "lines": 403,
         "imports": 6,
-        "exports": 12,
+        "exports": 14,
         "routes": 0,
         "env_refs": 0,
         "fs_writes": 0,
@@ -40086,13 +40088,13 @@
       },
       "test_refs": [
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-receipt.test.js",
         "tests/agent-evidence-tier.test.js",
         "tests/agent-kolm-capture-bridge.test.js",
         "tests/artifact-end-to-end.test.js",
-        "tests/asr-entitlement-webhook.test.js",
-        "tests/asr-money-loop-http.test.js"
+        "tests/asr-entitlement-webhook.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary"
@@ -40151,6 +40153,7 @@
       },
       "test_refs": [
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-receipt.test.js",
         "tests/ladder-stages.test.js",
@@ -40218,6 +40221,7 @@
       },
       "test_refs": [
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-receipt.test.js",
         "tests/ladder-stages.test.js",
@@ -40269,10 +40273,10 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "a79c5d1837a9e8835cf4a902fd96b197a6c474af5ed3ee52cfd972219cd2cc54",
+      "sha256": "93530beb470b487b02f4ecadbb704053083e6b608727acc3d249588cb2f66403",
       "metrics": {
-        "bytes": 9699,
-        "lines": 253,
+        "bytes": 10266,
+        "lines": 263,
         "imports": 6,
         "exports": 3,
         "routes": 0,
@@ -40284,6 +40288,7 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/ladder-hardening.test.js",
         "tests/ladder-stages.test.js"
       ],
       "risk_signals": [],
@@ -40397,10 +40402,10 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "b92f2f50ec90509df4669e6f04cb093306fbfe62c02f54f5698fb6d665ddcfc9",
+      "sha256": "7f6ce0437f691fefdd63806126daacdb35437c1970e63bb99b2f9df12277f73d",
       "metrics": {
-        "bytes": 4674,
-        "lines": 119,
+        "bytes": 5564,
+        "lines": 141,
         "imports": 4,
         "exports": 7,
         "routes": 0,
@@ -40412,6 +40417,7 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/ladder-hardening.test.js",
         "tests/ladder-bands.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-stages.test.js",
@@ -40461,10 +40467,10 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "c2ab005203d1c64cf58b930c95bcf26dd43deec47f44691a8508e0f714363b71",
+      "sha256": "f0c2612f088b6f8d68150c650b9706af6fd5a45ca034fecd0add8900b9f99f25",
       "metrics": {
-        "bytes": 5832,
-        "lines": 144,
+        "bytes": 6346,
+        "lines": 158,
         "imports": 4,
         "exports": 8,
         "routes": 0,
@@ -40476,14 +40482,14 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/ladder-hardening.test.js",
         "tests/ladder-stages.test.js",
         "tests/ladder-bands.test.js",
         "tests/ladder-cli.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-receipt.test.js",
         "tests/ladder-store.test.js",
-        "tests/ladder-verdict.test.js",
-        "tests/ladder-viewer.test.js"
+        "tests/ladder-verdict.test.js"
       ],
       "risk_signals": [
         "execution_or_subprocess_boundary"
@@ -40529,11 +40535,11 @@
       "surface": "core-backend",
       "domain": "runtime_serving_routing",
       "language": "javascript",
-      "sha256": "24abc00e69c1c5843c8820da94171eea30cd4c58ee49852f1924aa280eb031c4",
+      "sha256": "0cb2d5c6b2270cde5b6fa75ff4cf823550fd3b6086ba805490c53e0185c23d96",
       "metrics": {
-        "bytes": 9706,
-        "lines": 275,
-        "imports": 4,
+        "bytes": 9700,
+        "lines": 276,
+        "imports": 5,
         "exports": 10,
         "routes": 0,
         "env_refs": 0,
@@ -40544,6 +40550,7 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/ladder-hardening.test.js",
         "tests/ladder-stages.test.js",
         "tests/ladder-bands.test.js",
         "tests/ladder-orchestrator.test.js",
@@ -40590,12 +40597,12 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "f45da08d8d0121329df1f633d23046e5714d07590d90e0d012dd950ebf969cd9",
+      "sha256": "9c6e23c8e72bde11987899041bc91bd7d71e6c37b092f1c2935e3ae5ae6aa759",
       "metrics": {
-        "bytes": 18799,
-        "lines": 492,
-        "imports": 6,
-        "exports": 12,
+        "bytes": 20874,
+        "lines": 536,
+        "imports": 7,
+        "exports": 13,
         "routes": 0,
         "env_refs": 0,
         "fs_writes": 0,
@@ -40605,6 +40612,7 @@
         "markers": 0
       },
       "test_refs": [
+        "tests/ladder-hardening.test.js",
         "tests/ladder-store.test.js",
         "tests/ladder-viewer.test.js"
       ],
@@ -40667,12 +40675,12 @@
       "test_refs": [
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-stages.test.js",
         "tests/ladder-store.test.js",
         "tests/active-redteam.test.js",
-        "tests/agent-audit-delta-badge-routes.test.js",
-        "tests/agent-audit-ingest.test.js"
+        "tests/agent-audit-delta-badge-routes.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",
@@ -41032,10 +41040,10 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "7cba8f8066813f91e29cb80db3b17bbc4bb9a2641264e714e4459764b3622b15",
+      "sha256": "f51dc87a4e14ab3f2c32aac1dacea6f533b5481ea4b9fd40bc323107f199a469",
       "metrics": {
-        "bytes": 18066,
-        "lines": 513,
+        "bytes": 18550,
+        "lines": 526,
         "imports": 2,
         "exports": 5,
         "routes": 0,
@@ -41048,6 +41056,7 @@
       },
       "test_refs": [
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js"
       ],
@@ -41160,21 +41169,22 @@
       "surface": "core-backend",
       "domain": "platform_support",
       "language": "javascript",
-      "sha256": "919513cd75677b83a7bba02c95322ce61dbdef720660711cf61e0c34dc14932f",
+      "sha256": "89c024f37108e8c5c3666372c16be49af4b671093cf8dbfbb2553895114bd011",
       "metrics": {
-        "bytes": 24426,
-        "lines": 680,
-        "imports": 5,
-        "exports": 6,
+        "bytes": 29156,
+        "lines": 795,
+        "imports": 6,
+        "exports": 9,
         "routes": 0,
-        "env_refs": 2,
+        "env_refs": 4,
         "fs_writes": 6,
-        "subprocess_refs": 7,
+        "subprocess_refs": 8,
         "network_refs": 0,
         "crypto_refs": 0,
         "markers": 0
       },
       "test_refs": [
+        "tests/ladder-hardening.test.js",
         "tests/ladder-worktree.test.js",
         "tests/ladder-e2e.test.js"
       ],
@@ -43516,10 +43526,10 @@
         "tests/finalized-c1-verifier-filtered-active-synthesis-loop.test.js",
         "tests/finalized-c4-speculative-decoding-acceptance-eval-harness.test.js",
         "tests/ladder-bands.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-receipt.test.js",
         "tests/ladder-stages.test.js",
-        "tests/ladder-store.test.js",
-        "tests/ladder-viewer.test.js"
+        "tests/ladder-store.test.js"
       ],
       "risk_signals": [
         "network_or_provider_boundary"
@@ -57161,12 +57171,12 @@
       "test_refs": [
         "tests/ladder-cli.test.js",
         "tests/ladder-config.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-keystore.test.js",
         "tests/ladder-providers.test.js",
         "tests/wave697-cerebras-adapter-contract.test.js",
         "tests/wave888b-cloud-providers.test.js",
-        "tests/wave888c-devices.test.js",
-        "tests/wave923-session-surfaces.test.js"
+        "tests/wave888c-devices.test.js"
       ],
       "risk_signals": [
         "environment_configuration_boundary",
@@ -60660,11 +60670,11 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
         "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js",
-        "tests/research-docs.test.js"
+        "tests/r4-deploy-generators.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -63779,10 +63789,10 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
-        "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js"
+        "tests/path-to-100-w2-truth-in-labeling.test.js"
       ],
       "risk_signals": [
         "distribution_or_worker_surface",
@@ -64359,11 +64369,11 @@
         "tests/ladder-cli.test.js",
         "tests/ladder-context.test.js",
         "tests/ladder-e2e.test.js",
+        "tests/ladder-hardening.test.js",
         "tests/ladder-orchestrator.test.js",
         "tests/ladder-worktree.test.js",
         "tests/path-to-100-w2-truth-in-labeling.test.js",
-        "tests/r4-deploy-generators.test.js",
-        "tests/research-docs.test.js"
+        "tests/r4-deploy-generators.test.js"
       ],
       "risk_signals": [
         "cryptographic_or_proof_boundary",

@@ -185,7 +185,8 @@ function baseConfig(codeDir) {
     mode: 'cascade',
     candidates: 2,
     coderTurns: 6,
-    repairTurns: 1,
+    repairRounds: 1,
+    repairTurns: 6,
     maxCostUsd: 5,
     calibrationRate: 0,
     stageTimeoutMs: 60000,
@@ -283,7 +284,7 @@ test('a rung that cannot repair its patch escalates to the next rung', options, 
   const strongRef = 'anthropic:claude-sonnet';
   const events = [];
 
-  const config = { ...baseConfig(path.join(dir, 'code')), candidates: 1, repairTurns: 1 };
+  const config = { ...baseConfig(path.join(dir, 'code')), candidates: 1, repairRounds: 1 };
   const result = await runTask({
     task: { text: 'add a function add(a,b) to src/math.js with a test', title: 'add add()' },
     repoPath: '/repo/demo',
@@ -360,7 +361,7 @@ test('runTask commits a real branch through the local git driver', gitOptions, a
     task: { text: 'add a function add(a,b) to src/math.js with a test', title: 'add add()' },
     repoPath: repo,
     baseRef: 'HEAD',
-    config: { ...baseConfig(path.join(dir, 'code')), candidates: 1, repairTurns: 0 },
+    config: { ...baseConfig(path.join(dir, 'code')), candidates: 1, repairRounds: 0 },
     store,
     driver,
     providers: {

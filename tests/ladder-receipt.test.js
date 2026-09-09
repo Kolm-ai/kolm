@@ -142,7 +142,7 @@ function passingReceipt(overrides = {}) {
 test('receipt carries the spec 6.5 shape and never the raw diff', () => {
   const receipt = passingReceipt();
   assert.equal(receipt.schema, RECEIPT_SCHEMA);
-  assert.equal(receipt.version, 1);
+  assert.equal(receipt.version, 2);
   assert.equal(receipt.run_id, RUN_ROW.id);
   assert.equal(receipt.mode, 'cascade');
   assert.equal(receipt.verdict, 'PASS');
@@ -250,8 +250,9 @@ test('every absent value is an explicit null, never undefined', () => {
   assert.ok(!text.includes('undefined'));
   assert.equal(receipt.winner, null);
   assert.equal(receipt.judge, null);
-  assert.equal(receipt.repo.path, null);
+  assert.equal(receipt.repo.basename, null);
   assert.equal(receipt.repo.path_sha256, null);
+  assert.equal(receipt.repo.path, undefined, 'the local path never travels with a receipt');
   assert.equal(receipt.task.text_sha256, null);
   assert.equal(receipt.calibration.agreement_rate, null);
   // canonicalJson refuses to represent undefined, so it must survive a round trip.

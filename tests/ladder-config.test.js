@@ -148,10 +148,15 @@ test('loadConfig defaults match the spec', () => {
   assert.deepEqual(c.reviewerLadder, DEFAULT_REVIEWER_LADDER.split(','));
   assert.equal(c.candidates, 3);
   assert.equal(c.coderTurns, 24);
-  assert.equal(c.repairTurns, 2);
+  // repairRounds = how many repair passes; repairTurns = the turn cap inside one.
+  assert.equal(c.repairRounds, 2);
+  assert.equal(c.repairTurns, 12);
   assert.equal(c.maxCostUsd, 5);
   assert.equal(c.calibrationRate, 0.1);
+  assert.equal(c.calibrationMinDisagreements, 3);
   assert.equal(c.stageTimeoutMs, 600000);
+  assert.equal(c.modelTimeoutMs, 600000);
+  assert.equal(c.shellPath, null);
   assert.equal(c.keepWorktrees, 'losers-destroyed');
   assert.equal(c.driver, 'local');
   assert.equal(c.ollamaUrl, DEFAULT_OLLAMA_URL);
@@ -217,10 +222,14 @@ test('loadConfig honours every documented env override', () => {
       KOLM_CODE_REVIEWER_LADDER: 'ollama:qwen3.8:latest',
       KOLM_CODE_CANDIDATES: '5',
       KOLM_CODE_CODER_TURNS: '40',
-      KOLM_CODE_REPAIR_TURNS: '0',
+      KOLM_CODE_REPAIR_ROUNDS: '0',
+      KOLM_CODE_REPAIR_TURNS: '7',
       KOLM_CODE_MAX_COST_USD: '12.5',
       KOLM_CODE_CALIBRATION_RATE: '0.25',
+      KOLM_CODE_CALIBRATION_MIN_DISAGREEMENTS: '5',
       KOLM_CODE_STAGE_TIMEOUT_MS: '90000',
+      KOLM_CODE_MODEL_TIMEOUT_MS: '120000',
+      KOLM_CODE_SHELL: '/usr/bin/bash',
       KOLM_CODE_KEEP_WORKTREES: 'all',
       KOLM_CODE_DRIVER: 'cloudflare',
       KOLM_DATA_DIR: dataDir,
@@ -246,10 +255,14 @@ test('loadConfig honours every documented env override', () => {
   assert.deepEqual(c.reviewerLadder, ['ollama:qwen3.8:latest']);
   assert.equal(c.candidates, 5);
   assert.equal(c.coderTurns, 40);
-  assert.equal(c.repairTurns, 0);
+  assert.equal(c.repairRounds, 0);
+  assert.equal(c.repairTurns, 7);
   assert.equal(c.maxCostUsd, 12.5);
   assert.equal(c.calibrationRate, 0.25);
+  assert.equal(c.calibrationMinDisagreements, 5);
   assert.equal(c.stageTimeoutMs, 90000);
+  assert.equal(c.modelTimeoutMs, 120000);
+  assert.equal(c.shellPath, '/usr/bin/bash');
   assert.equal(c.keepWorktrees, 'all');
   assert.equal(c.driver, 'cloudflare');
   assert.equal(c.dataDir, path.resolve(dataDir));

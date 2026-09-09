@@ -17,6 +17,7 @@
 // failure must never be read as "the patch is bad".
 
 import { LadderError } from '../errors.js';
+import { modelTimeoutMs } from '../config.js';
 import { rubricToPrompt, scoreRubric, blockingFailures } from '../rubric.js';
 import { briefToPrompt } from '../context/repo-brief.js';
 import { runCommand } from '../context/baseline.js';
@@ -33,6 +34,8 @@ const BRIEF_CAP = 8 * 1024;
 const TEST_OUTPUT_CAP = 16 * 1024;
 /** A blocking rubric item below this fails the patch at L4 (spec 6.3 + owner brief). */
 export const BLOCKING_THRESHOLD = 0.5;
+/** How many disagreements a key needs before calibration may propose a move. */
+export const DEFAULT_MIN_DISAGREEMENTS = 3;
 
 const SYSTEM = [
   'You are the kolm code judge: the last and most expensive rung of a confidence cascade.',
@@ -133,7 +136,7 @@ async function askJudge({ judge, system, prompt, config, signal }) {
     effort: 'high',
     cacheSystem: true,
     signal,
-    timeoutMs: Number(config?.stageTimeoutMs) > 0 ? Number(config.stageTimeoutMs) : 600000,
+    timeoutMs: modelTimeoutMs(config),
   });
 }
 
@@ -407,15 +410,29 @@ function above(v) {
  * Only the offending side of the band moves, and repeated evidence takes the
  * strictest proposal.
  *
+ * Two guards keep a single wrong judge verdict from moving a threshold:
+ *   - a band marked `locked` in bands.json never moves (safety metrics);
+ *   - a key needs at least `minDisagreements` distinct disagreements before any
+ *     proposal is made (KOLM_CODE_CALIBRATION_MIN_DISAGREEMENTS, default 3).
+ * Both cases are reported in `skipped` so `--suggest` can say why.
+ *
  * @param {object} args
  * @param {object} args.store
  * @param {object} args.bands loadBands() output
  * @param {string[]} [args.runIds] default: every run that has judgments
- * @returns {{proposals:Array<{stage:string, key:string, from:number, to:number, evidence:string}>, bandsPatched:object}}
+ * @param {number} [args.minDisagreements] default 3
+ * @returns {{proposals:Array<{stage:string, key:string, from:number, to:number, evidence:string}>,
+ *   bandsPatched:object, skipped:Array<{stage:string, key:string, reason:string, disagreements:number}>}}
  */
-export function suggestBands({ store, bands, runIds } = {}) {
+export function suggestBands({ store, bands, runIds, minDisagreements } = {}) {
   const patched = JSON.parse(JSON.stringify(bands || {}));
   const proposals = new Map();
+  const minSupport = Number.isFinite(Number(minDisagreements)) && Number(minDisagreements) > 0
+    ? Math.trunc(Number(minDisagreements))
+    : DEFAULT_MIN_DISAGREEMENTS;
+  // stage + NUL + key -> Set of "runId/candidateId" that disagreed on that key
+  const support = new Map();
+  const lockedKeys = new Set();
 
   const runs = Array.isArray(runIds) && runIds.length > 0
     ? runIds
@@ -424,6 +441,12 @@ export function suggestBands({ store, bands, runIds } = {}) {
   const propose = (stage, key, field, value, evidence) => {
     const spec = patched?.[stage]?.[key];
     if (!spec) return;
+    // A locked band is a safety threshold; calibration may observe it but never
+    // moves it.
+    if (spec.locked === true) {
+      lockedKeys.add(`${stage}\u0000${key}`);
+      return;
+    }
     const from = Number(spec[field]);
     if (!Number.isFinite(from) || !Number.isFinite(value)) return;
     // Every rule above moves `lo` down and `hi` up; anything else is a bug in
@@ -456,6 +479,9 @@ export function suggestBands({ store, bands, runIds } = {}) {
           if (!Number.isFinite(value)) continue;
           const lowIsBad = spec.low_is_bad === true;
           const evidence = `${runId}/${dis.candidateId}: cascade ${dis.cascade}, judge ${dis.judge}, ${stage}.${hit.key}=${value} banded ${hit.band}`;
+          const supportKey = `${stage}\u0000${hit.key}`;
+          if (!support.has(supportKey)) support.set(supportKey, new Set());
+          support.get(supportKey).add(`${runId}/${dis.candidateId}`);
           if (dis.cascade === 'PASS' && dis.judge === 'bad' && hit.band === 'good') {
             if (lowIsBad) propose(stage, hit.key, 'hi', above(value), evidence);
             else propose(stage, hit.key, 'lo', below(value), evidence);
@@ -469,12 +495,30 @@ export function suggestBands({ store, bands, runIds } = {}) {
   }
 
   const out = [];
+  const skipped = [];
+  const seenSkip = new Set();
+  const noteSkip = (stage, key, reason, n) => {
+    const mapKey = `${stage}\u0000${key}\u0000${reason}`;
+    if (seenSkip.has(mapKey)) return;
+    seenSkip.add(mapKey);
+    skipped.push({ stage, key, reason, disagreements: n });
+  };
+  for (const mapKey of lockedKeys) {
+    const [stage, key] = mapKey.split('\u0000');
+    noteSkip(stage, key, 'locked', support.get(mapKey)?.size ?? 0);
+  }
   for (const p of proposals.values()) {
+    const n = support.get(`${p.stage}\u0000${p.key}`)?.size ?? 0;
+    if (n < minSupport) {
+      noteSkip(p.stage, p.key, `n<${minSupport}`, n);
+      continue;
+    }
     patched[p.stage][p.key][p.field] = p.to;
     out.push({ stage: p.stage, key: p.key, field: p.field, from: p.from, to: p.to, evidence: p.evidence });
   }
   out.sort((a, b) => (a.stage.localeCompare(b.stage) || a.key.localeCompare(b.key)));
-  return { proposals: out, bandsPatched: patched };
+  skipped.sort((a, b) => (a.stage.localeCompare(b.stage) || a.key.localeCompare(b.key)));
+  return { proposals: out, bandsPatched: patched, skipped };
 }
 
 export default {

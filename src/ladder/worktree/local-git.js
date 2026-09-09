@@ -12,6 +12,7 @@
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { LadderError } from '../errors.js';
@@ -233,17 +234,105 @@ async function countLines(abs) {
   }
 }
 
+/* -------------------------------------------------------------------- shell */
+
+/** Commands that only exist in a POSIX shell. */
+export const POSIX_ONLY_COMMANDS = Object.freeze(['ls', 'cat', 'grep']);
+
+/** Find `name` on PATH without spawning anything. */
+function findOnPath(name, env, existsSync) {
+  const raw = env.PATH ?? env.Path ?? env.path ?? '';
+  for (const dir of String(raw).split(path.delimiter)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, name);
+    try {
+      if (existsSync(candidate)) return candidate;
+    } catch {
+      // an unreadable PATH entry is not an error, just not the shell
+    }
+  }
+  return null;
+}
+
+/**
+ * Which shell a coder's `run` command should go through.
+ *
+ * On win32 `shell:true` means cmd.exe, where `ls`, `cat` and `grep` do not
+ * exist and quoting rules differ from everything the model was trained on. Git
+ * for Windows always ships a bash, so prefer it: `<dir of git.exe>/../bin/bash.exe`
+ * or `../usr/bin/bash.exe`. `KOLM_CODE_SHELL` overrides the search.
+ *
+ * @param {object} [opts]
+ * @param {object} [opts.env] defaults to process.env
+ * @param {string} [opts.platform] defaults to process.platform
+ * @param {string|null} [opts.override] explicit shell path (config.shellPath)
+ * @param {(p:string)=>boolean} [opts.existsSync] injected for tests
+ * @param {string|null} [opts.gitPath] injected for tests; skips the PATH scan
+ * @returns {{kind:'bash'|'sh'|'cmd', path:string|null, posix:boolean, platform:string}}
+ */
+export function resolveShell(opts = {}) {
+  const env = opts.env ?? process.env;
+  const platform = opts.platform ?? process.platform;
+  const existsSync = opts.existsSync ?? fsSync.existsSync;
+  const override = String(opts.override ?? env.KOLM_CODE_SHELL ?? '').trim();
+
+  if (override) {
+    const isCmd = /(?:^|[\\/])(?:cmd|powershell|pwsh)(?:\.exe)?$/i.test(override);
+    return {
+      kind: isCmd ? 'cmd' : (/bash/i.test(override) ? 'bash' : 'sh'),
+      path: isCmd ? null : override,
+      posix: !isCmd,
+      platform,
+    };
+  }
+  if (platform !== 'win32') {
+    return { kind: 'sh', path: null, posix: true, platform };
+  }
+  const gitPath = opts.gitPath !== undefined ? opts.gitPath : findOnPath('git.exe', env, existsSync);
+  if (gitPath) {
+    const dir = path.dirname(gitPath);
+    for (const rel of [['..', 'bin', 'bash.exe'], ['..', 'usr', 'bin', 'bash.exe']]) {
+      const candidate = path.resolve(dir, ...rel);
+      try {
+        if (existsSync(candidate)) return { kind: 'bash', path: candidate, posix: true, platform };
+      } catch {
+        // keep looking
+      }
+    }
+  }
+  // No bash: cmd.exe it is, and the caller drops the POSIX-only prefixes.
+  return { kind: 'cmd', path: null, posix: false, platform };
+}
+
+/**
+ * The `run` allow-list for a given shell: cmd.exe has no ls/cat/grep, so
+ * offering them would only produce confusing failures.
+ * @param {string[]} allowed
+ * @param {{posix?:boolean}} [shell]
+ * @returns {string[]}
+ */
+export function allowedForShell(allowed, shell) {
+  const list = Array.isArray(allowed) ? allowed : [];
+  if (shell && shell.posix === false) {
+    return list.filter((c) => !POSIX_ONLY_COMMANDS.includes(String(c).trim()));
+  }
+  return list;
+}
+
 /* ------------------------------------------------------------------- driver */
 
 /**
- * @param {object} config  ladder config; only `worktreesDir` and
- *                         `stageTimeoutMs` are read.
- * @param {object} [opts]  `{ worktreesDir, timeoutMs, maxOutputBytes, reuse }`
+ * @param {object} config  ladder config; only `worktreesDir`, `stageTimeoutMs`
+ *                         and `shellPath` are read.
+ * @param {object} [opts]  `{ worktreesDir, timeoutMs, maxOutputBytes, reuse, shell }`
+ *                         `shell` is a resolveShell() result; inject it in tests
+ *                         so the suite never depends on the machine's git.
  */
 export function createLocalGitDriver(config = {}, opts = {}) {
   const worktreesDir = path.resolve(
     opts.worktreesDir ?? config.worktreesDir ?? defaultWorktreesDir(),
   );
+  const shell = opts.shell ?? resolveShell({ override: config.shellPath ?? null });
   const defaultTimeoutMs = opts.timeoutMs ?? config.stageTimeoutMs ?? DEFAULT_TIMEOUT_MS;
   const defaultMaxOutputBytes = opts.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
   const reuseByDefault = Boolean(opts.reuse);
@@ -318,6 +407,7 @@ export function createLocalGitDriver(config = {}, opts = {}) {
       runId,
       candidateId,
       branch,
+      shell,
 
       async baseSha() {
         return baseSha;
@@ -329,6 +419,18 @@ export function createLocalGitDriver(config = {}, opts = {}) {
         }
         const cwd = execOpts.cwd ? resolveInside(root, execOpts.cwd) : root;
         // Arbitrary user command -> a shell is required here (and only here).
+        // On win32 `shell:true` is cmd.exe; when a POSIX shell was resolved we
+        // spawn it directly with `-c` instead, so the coder gets the shell it
+        // was told it has.
+        if (shell.posix && shell.path) {
+          return runProcess(shell.path, ['-c', cmd], {
+            cwd,
+            shell: false,
+            env: execOpts.env,
+            timeoutMs: execOpts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+            maxOutputBytes: execOpts.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
+          });
+        }
         return runProcess(cmd, [], {
           cwd,
           shell: true,
@@ -620,8 +722,16 @@ export function createLocalGitDriver(config = {}, opts = {}) {
 
   /* --------------------------------------------------------- destroyRun */
 
+  /**
+   * Remove every worktree this run registered plus its metadata directory.
+   * `dryRun` reports what would go without touching anything.
+   * @param {string} runId
+   * @param {{repoPath?: string, dryRun?: boolean}} [destroyOpts]
+   * @returns {Promise<{removed:number, paths:string[], runDir:string, existed:boolean, dryRun:boolean}>}
+   */
   async function destroyRun(runId, destroyOpts = {}) {
     assertSegment(runId, 'runId');
+    const dryRun = destroyOpts.dryRun === true;
     const runDir = path.join(worktreesDir, runId);
     const repoPaths = new Set();
     if (destroyOpts.repoPath) repoPaths.add(destroyOpts.repoPath);
@@ -629,7 +739,7 @@ export function createLocalGitDriver(config = {}, opts = {}) {
     try {
       entries = await fs.readdir(runDir, { withFileTypes: true });
     } catch {
-      return { removed: 0 };
+      return { removed: 0, paths: [], runDir, existed: false, dryRun };
     }
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.kolm.json')) continue;
@@ -640,6 +750,7 @@ export function createLocalGitDriver(config = {}, opts = {}) {
     }
 
     const runDirResolved = path.resolve(runDir);
+    const paths = [];
     let removed = 0;
     for (const rp of repoPaths) {
       const listed = await git(['worktree', 'list', '--porcelain'], { cwd: rp });
@@ -648,18 +759,22 @@ export function createLocalGitDriver(config = {}, opts = {}) {
         if (!line.startsWith('worktree ')) continue;
         const candidatePath = path.resolve(line.slice('worktree '.length).trim());
         if (!isInside(runDirResolved, candidatePath)) continue;
+        paths.push(candidatePath);
+        if (dryRun) continue;
         const res = await git(['worktree', 'remove', '--force', candidatePath], { cwd: rp });
         if (res.exitCode === 0) removed += 1;
       }
-      await git(['worktree', 'prune'], { cwd: rp });
+      if (!dryRun) await git(['worktree', 'prune'], { cwd: rp });
     }
-    await fs.rm(runDir, { recursive: true, force: true }).catch(() => {});
-    return { removed };
+    // The branch kolm/code/<runId>/<cid> is never touched: the work survives.
+    if (!dryRun) await fs.rm(runDir, { recursive: true, force: true }).catch(() => {});
+    return { removed, paths, runDir, existed: true, dryRun };
   }
 
   return {
     kind: 'local',
     worktreesDir,
+    shell,
     create,
     open,
     destroyRun,

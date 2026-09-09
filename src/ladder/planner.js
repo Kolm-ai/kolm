@@ -8,6 +8,7 @@
 // planner gets `effort:'medium'` and a strict schema rather than free text.
 
 import { LadderError } from './errors.js';
+import { modelTimeoutMs } from './config.js';
 import { briefToPrompt } from './context/repo-brief.js';
 
 const BRIEF_CAP = 10 * 1024;
@@ -136,7 +137,7 @@ export async function plan({
         effort: 'medium',
         cacheSystem: true,
         signal,
-        timeoutMs: Number(config.stageTimeoutMs) > 0 ? Number(config.stageTimeoutMs) : 600000,
+        timeoutMs: modelTimeoutMs(config),
       });
     } catch (err) {
       lastError = err;

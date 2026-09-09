@@ -192,6 +192,29 @@ function stripTiming(name) {
     .trim();
 }
 
+// node --test closes its run with a summary block and then a header line
+// ("✖ failing tests:") before listing the tests that failed. The header
+// carries the same tick glyph as a failing test, so without this guard the
+// header itself lands in the failing-test list and shows up in an l2 reason as
+// a test named "failing tests:".
+const RUNNER_NOISE = [
+  /^(failing|passing|cancelled|skipped|todo)\s+tests?\s*:?$/i,
+  /^(tests|suites|pass|fail|cancelled|skipped|todo|duration_ms)\s+[\d.]+$/i,
+  /^test\s+at\s+\S+:\d+:\d+$/i,
+  /^[-=*_\s:]*$/,
+];
+
+/**
+ * True when a parsed "test name" is really a summary or header line.
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isRunnerNoise(name) {
+  const clean = stripTiming(name);
+  if (!clean) return true;
+  return RUNNER_NOISE.some((re) => re.test(clean));
+}
+
 /**
  * Parse a test runner's combined stdout+stderr.
  * Handles: node --test (spec + TAP), jest, vitest, pytest, go test, cargo test.
@@ -211,6 +234,7 @@ export function parseTestOutput(text, runnerHint) {
   let sumSource = null; // 'node' | 'jsts' | 'pytest' | 'cargo'
 
   const addFailing = (name) => {
+    if (isRunnerNoise(name)) return;
     const clean = stripTiming(name);
     if (clean && !failing.includes(clean)) failing.push(clean);
   };
@@ -238,14 +262,16 @@ export function parseTestOutput(text, runnerHint) {
     let m = TICK_FAIL.exec(line);
     if (m) {
       parsed = true;
-      countFail += 1;
-      addFailing(m[1]);
+      if (!isRunnerNoise(m[1])) {
+        countFail += 1;
+        addFailing(m[1]);
+      }
       continue;
     }
     m = TICK_PASS.exec(line);
     if (m) {
       parsed = true;
-      countPass += 1;
+      if (!isRunnerNoise(m[1])) countPass += 1;
       continue;
     }
     m = TAP_NOT_OK.exec(line);

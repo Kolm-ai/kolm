@@ -148,7 +148,10 @@ export function toOpenAIMessages(system, messages = []) {
         }
       }
       const text = blockText(blocks);
-      const msg = { role: 'assistant', content: text === '' ? null : text };
+      // Null content is only legal next to tool_calls: Ollama's OpenAI layer
+      // rejects a bare null ("invalid message content type: <nil>"), so an
+      // assistant turn that produced neither text nor a call goes out as ''.
+      const msg = { role: 'assistant', content: text === '' && toolCalls.length > 0 ? null : text };
       if (toolCalls.length > 0) msg.tool_calls = toolCalls;
       out.push(msg);
       continue;

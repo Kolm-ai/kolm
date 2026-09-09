@@ -40,8 +40,16 @@ section 10 for reading and calibrating them.
 
 **The generation ladder** decides who writes the patch. `KOLM_CODE_CODER_LADDER`
 is an ordered list of model refs, cheapest first. Candidate 0 is written by the
-first armed coder, and when a candidate fails L0 a repair attempt is made
-before escalating to the next rung of the generation ladder. That is why run
+first armed coder, and when a candidate fails L0 a repair pass is made
+(`KOLM_CODE_REPAIR_ROUNDS` of them, each capped at `KOLM_CODE_REPAIR_TURNS`
+tool-call turns) before escalating to the next rung of the generation ladder.
+A repair pass only runs when the failing rung produced something actionable:
+failing test names, lint or typecheck output, reviewer findings, judge
+blocking items. A timeout or a provider failure is infrastructure, not
+feedback, so it emits `repair.skipped` and the candidate keeps its `unsure`.
+When a whole coder rung fails at the provider (a 400, an unreachable model),
+the run emits `escalate` with `reason: rung-failed` and tries the next rung
+instead of ending. That is why run
 output shows candidate ids like `c0a0`, `c0a1`, `c1a0`: `c<coder rung>a<attempt>`.
 
 Everything a run learns is written to a SQLite store and summarised in a
@@ -230,7 +238,7 @@ the environment (section 3); the variable wins when both are set.
 |----------|---------|------|
 | `KOLM_CODE_ORCHESTRATOR` | `anthropic:claude-fable-5-1` | the planner and repair model |
 | `KOLM_CODE_JUDGE` | same as the orchestrator | the L4 judge |
-| `KOLM_CODE_CODER_LADDER` | `cerebras:qwen-3.8-27b,deepseek:deepseek-v4-flash,anthropic:claude-opus-5` | generation, cheapest rung first; unarmed refs are dropped with a reason |
+| `KOLM_CODE_CODER_LADDER` | `cerebras:qwen-3.8-27b,deepseek:deepseek-v4-flash,anthropic:claude-opus-5` | generation, cheapest rung first; unarmed refs are dropped, and `run`, `resume` and `truffle-worker` print one `skipping coder rung ...` line per dropped ref at start; with no coder armed the orchestrator writes the candidates |
 | `KOLM_CODE_REVIEWER_LADDER` | `ollama:qwen3.8:latest,cerebras:gpt-oss-120b,deepseek:deepseek-v4-flash` | L3; the first armed ref is used, and L3 returns `skip` if none is |
 | `KOLM_CODE_MODE` | `cascade` | `cascade` or `direct` (see section 10) |
 
@@ -240,10 +248,13 @@ the environment (section 3); the variable wins when both are set.
 |----------|---------|------|
 | `KOLM_CODE_CANDIDATES` | `3` | how many candidates a run generates |
 | `KOLM_CODE_CODER_TURNS` | `24` | tool-call turns allowed per candidate |
-| `KOLM_CODE_REPAIR_TURNS` | `2` | repair attempts before escalating the generation ladder |
+| `KOLM_CODE_REPAIR_ROUNDS` | `2` | repair passes over a candidate before escalating the generation ladder |
+| `KOLM_CODE_REPAIR_TURNS` | `12` | tool-call turns allowed inside one repair pass |
 | `KOLM_CODE_MAX_COST_USD` | `5` | hard ceiling; the run stops when it is reached |
 | `KOLM_CODE_CALIBRATION_RATE` | `0.1` | fraction of confident candidates also sent to L4, to measure the cheap rungs |
-| `KOLM_CODE_STAGE_TIMEOUT_MS` | `600000` | per-stage timeout |
+| `KOLM_CODE_CALIBRATION_MIN_DISAGREEMENTS` | `3` | disagreements a metric needs before `bands --suggest` proposes a move |
+| `KOLM_CODE_STAGE_TIMEOUT_MS` | `600000` | per-stage timeout (typecheck, lint, tests) |
+| `KOLM_CODE_MODEL_TIMEOUT_MS` | `600000` | per-model-call timeout (planner, coder, L3, L4) |
 | `KOLM_CODE_KEEP_WORKTREES` | `losers-destroyed` | `all`, `none` or `losers-destroyed` |
 | `KOLM_CODE_BANDS_PATH` | bundled `src/ladder/bands.json` | an operator-owned bands file |
 
@@ -259,6 +270,7 @@ the environment (section 3); the variable wins when both are set.
 | `KOLM_CODE_DRIVER` | `local` | `local` (git worktrees), `cloudflare` (sandbox), `fake` (tests) |
 | `KOLM_CODE_SANDBOX_URL` | - | the Cloudflare sandbox worker; required by the `cloudflare` driver |
 | `KOLM_CODE_SANDBOX_TOKEN` (+) | - | bearer token for that worker |
+| `KOLM_CODE_SHELL` | Git-for-Windows `bash.exe` on win32, `/bin/sh` elsewhere | the shell the coder's `run` tool goes through |
 
 ### GitHub pull requests
 
@@ -357,10 +369,15 @@ kolm code status --limit 50 --json
 ```
 kolm code show <runId>
 kolm code show <runId> --json
+kolm code show <runId> --json --events
 ```
 
 Full detail: the candidate x stage grid, per-model and per-stage cost, the
-event count, and the receipt path.
+event count, and the receipt path. `--events` swaps the `events` count for the
+event list itself (`eventCount` still carries the number), which is how you
+read back what each `coder.turn` actually called: every tool call carries its
+name, the path or command it named (200 chars) and the head of what came back
+(300 chars). File contents are never in there.
 
 ### `funnel`
 
@@ -396,6 +413,28 @@ kolm code bands --apply --yes   # write the proposal
 set `KOLM_CODE_BANDS_PATH`, it writes `<code home>/bands.json` and tells you to
 point that variable at it. Each changed threshold is printed as a before/after
 line.
+
+Two safety bands are `locked` and can never be moved by calibration:
+`l2-dynamic.newly_failing_tests` and `l0-meta.secrets`. A band entry marked
+`"locked": true` in the bands file gets the same treatment. `--suggest` prints
+the keys it skipped and why (`locked`, or `n<3` when fewer than
+`KOLM_CODE_CALIBRATION_MIN_DISAGREEMENTS` candidates disagreed on that key).
+
+### `clean`
+
+```
+kolm code clean                       # every finished run
+kolm code clean --run r_20260908_bdc3b49a
+kolm code clean --older-than 7 --dry-run
+kolm code clean --older-than 30 --json
+```
+
+Removes the worktrees finished runs left behind: `git worktree remove --force`
+for every worktree registered under `<code home>/worktrees/<runId>`, then
+`git worktree prune`, then the run directory itself. A run whose status is
+still `running` is never touched, and no branch is ever deleted - the work on
+`kolm/code/<runId>/<candidate>` survives the cleanup. `--dry-run` lists what
+would go and removes nothing.
 
 ### `receipt`
 
@@ -536,6 +575,11 @@ it was at run time, every candidate, every stage decision with its metric
 values and the band that produced the call, the model refs and their costs, the
 winning diff hash, and the verdict.
 
+The receipt names the repository by basename only (`version` 2 of the
+`kolm-code-receipt-v1` schema); the full local path stays in the SQLite run row
+and never travels with a receipt you hand to someone else. `verify` accepts
+both version 1 and version 2 receipts.
+
 The receipt is canonicalised with stable key ordering and signed with Ed25519,
 so anyone with the public key can check that a receipt was not edited after the
 fact:
@@ -631,6 +675,9 @@ end. So:
 * `kolm code resume <runId>` re-verifies nothing that already has a decision.
 * `KOLM_CODE_KEEP_WORKTREES=all` keeps the losing candidates' worktrees so you
   can inspect what the cascade rejected.
+* A run that ends in an error destroys the worktrees it had open (unless
+  `KOLM_CODE_KEEP_WORKTREES=all`); `kolm code clean` sweeps up whatever an
+  earlier version, or a killed process, left behind.
 
 ---
 

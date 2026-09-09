@@ -109,7 +109,9 @@ test('loadBands reads the bundled defaults from spec 5.2', () => {
   assert.deepEqual(bands['l0-meta'].files_touched, { lo: 15, hi: 40, low_is_bad: false });
   assert.deepEqual(bands['l1-static'].new_type_errors, { lo: 0, hi: 3, low_is_bad: false });
   assert.deepEqual(bands['l1-static'].new_lint_errors, { lo: 0, hi: 10, low_is_bad: false });
-  assert.deepEqual(bands['l2-dynamic'].newly_failing_tests, { lo: 0, hi: 0, low_is_bad: false });
+  // newly_failing_tests is a locked safety band: calibration may never move it.
+  assert.deepEqual(bands['l2-dynamic'].newly_failing_tests, { lo: 0, hi: 0, low_is_bad: false, locked: true });
+  assert.deepEqual(bands['l0-meta'].secrets, { lo: 0, hi: 0, low_is_bad: false, locked: true });
   assert.deepEqual(bands['l2-dynamic'].changed_line_coverage, { lo: 0.4, hi: 0.8, low_is_bad: true });
   assert.deepEqual(bands['l3-semantic'].rubric_score, { lo: 0.55, hi: 0.85, low_is_bad: true });
   assert.deepEqual(bands['l3-semantic'].reviewer_confidence, { lo: 0.4, hi: 0.75, low_is_bad: true });

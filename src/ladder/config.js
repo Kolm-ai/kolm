@@ -252,14 +252,29 @@ export function loadConfig(env = process.env, opts = {}) {
   // --- budgets and shape ---------------------------------------------------
   const candidates = num(env, 'KOLM_CODE_CANDIDATES', 3, { min: 1, max: 64, integer: true });
   const coderTurns = num(env, 'KOLM_CODE_CODER_TURNS', 24, { min: 1, max: 500, integer: true });
-  const repairTurns = num(env, 'KOLM_CODE_REPAIR_TURNS', 2, { min: 0, max: 50, integer: true });
+  // Two different budgets that used to share one name. `repairRounds` is how
+  // many repair passes the orchestrator runs over a candidate; `repairTurns` is
+  // the per-pass turn cap handed to the coder loop.
+  const repairRounds = num(env, 'KOLM_CODE_REPAIR_ROUNDS', 2, { min: 0, max: 50, integer: true });
+  const repairTurns = num(env, 'KOLM_CODE_REPAIR_TURNS', 12, { min: 1, max: 500, integer: true });
   const maxCostUsd = num(env, 'KOLM_CODE_MAX_COST_USD', 5, { min: 0, max: 100000 });
   const calibrationRate = num(env, 'KOLM_CODE_CALIBRATION_RATE', 0.1, { min: 0, max: 1 });
+  const calibrationMinDisagreements = num(env, 'KOLM_CODE_CALIBRATION_MIN_DISAGREEMENTS', 3, {
+    min: 1,
+    max: 1000,
+    integer: true,
+  });
   const stageTimeoutMs = num(env, 'KOLM_CODE_STAGE_TIMEOUT_MS', 600000, {
     min: 1000,
     max: 24 * 60 * 60 * 1000,
     integer: true,
   });
+  const modelTimeoutMs = num(env, 'KOLM_CODE_MODEL_TIMEOUT_MS', 600000, {
+    min: 1000,
+    max: 24 * 60 * 60 * 1000,
+    integer: true,
+  });
+  const shellPath = str(env, 'KOLM_CODE_SHELL', null);
   const keepWorktrees = enumValue(
     env,
     'KOLM_CODE_KEEP_WORKTREES',
@@ -405,10 +420,14 @@ export function loadConfig(env = process.env, opts = {}) {
     // budgets
     candidates,
     coderTurns,
+    repairRounds,
     repairTurns,
     maxCostUsd,
     calibrationRate,
+    calibrationMinDisagreements,
     stageTimeoutMs,
+    modelTimeoutMs,
+    shellPath,
     keepWorktrees,
     // worktrees / data
     driver,
@@ -507,6 +526,22 @@ export function loadConfig(env = process.env, opts = {}) {
  * @param {object} config
  * @param {boolean|null} reachable
  */
+/** Default budget for a single model call, in ms. */
+export const DEFAULT_MODEL_TIMEOUT_MS = 600000;
+
+/**
+ * The budget for ONE model call. Deliberately separate from stageTimeoutMs: a
+ * stage's shell command and the model call a stage makes are different kinds of
+ * slow, and sharing one number made a slow judge look like a hung test run.
+ * @param {object} [config] loadConfig() output (or any object with modelTimeoutMs)
+ * @returns {number} milliseconds
+ */
+export function modelTimeoutMs(config) {
+  const v = Number(config?.modelTimeoutMs);
+  if (Number.isFinite(v) && v > 0) return v;
+  return DEFAULT_MODEL_TIMEOUT_MS;
+}
+
 export function withOllamaReachable(config, reachable) {
   const next = { ...config, ollamaReachable: reachable };
   for (const key of ['secrets', 'sandboxToken', 'getSecret', 'githubPrivateKeyPem']) {

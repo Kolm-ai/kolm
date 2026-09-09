@@ -151,6 +151,57 @@ function failingFeedback(state) {
   return { stage: 'unknown', reasons: ['no stage produced a decision'], hits: [], failing: [] };
 }
 
+/**
+ * Error codes that mean "this rung cannot code at all" rather than "this patch
+ * is bad". When every attempt of a rung dies with one of these the ladder
+ * escalates to the next rung instead of taking the whole run down.
+ */
+export const RUNG_LEVEL_ERROR_CODES = Object.freeze([
+  'provider-bad-request',
+  'not-armed',
+  'provider-unavailable',
+  'provider-timeout',
+  'bad-ref',
+  'execution',
+]);
+const RUNG_LEVEL = new Set(RUNG_LEVEL_ERROR_CODES);
+
+/**
+ * Reasons that describe the infrastructure rather than the patch. Repair rounds
+ * are expensive and a coder cannot fix a timeout, so they are never spent on
+ * one of these.
+ */
+const NON_ACTIONABLE_REASONS = [
+  [/timed out|timeout/i, 'timeout'],
+  [/provider|not armed|unavailable|bad request|could not produce a verdict/i, 'provider-failure'],
+];
+
+/**
+ * null when the feedback is actionable, otherwise the reason repair is skipped.
+ * @param {{judgeFailed?:boolean}} row
+ * @param {{reasons?:string[], hits?:Array, failing?:Array}} feedback
+ * @returns {string|null}
+ */
+export function repairSkipReason(row, feedback) {
+  if (row?.judgeFailed) return 'judge-failed';
+  const failing = Array.isArray(feedback?.failing) ? feedback.failing : [];
+  // Named failing tests are actionable on their own, whatever the prose says.
+  if (failing.length > 0) return null;
+  const reasons = (feedback?.reasons || [])
+    .filter((r) => typeof r === 'string' && r.trim() !== '');
+  if (reasons.length === 0) {
+    // No prose at all: a banded metric is still something a coder can aim at.
+    const hits = Array.isArray(feedback?.hits) ? feedback.hits : [];
+    return hits.length > 0 ? null : 'no-actionable-reasons';
+  }
+  const blocked = reasons.filter((r) => NON_ACTIONABLE_REASONS.some(([re]) => re.test(r)));
+  if (blocked.length < reasons.length) return null;
+  for (const [re, label] of NON_ACTIONABLE_REASONS) {
+    if (reasons.some((r) => re.test(r))) return label;
+  }
+  return 'no-actionable-reasons';
+}
+
 function stageCostOf(state) {
   let sum = 0;
   for (const result of Object.values(state?.results || {})) sum += Number(result?.costUsd) || 0;
@@ -240,6 +291,7 @@ export async function runTask(opts = {}) {
       ...callerConfig,
       candidates: storedConfig.candidates ?? callerConfig.candidates,
       coderTurns: storedConfig.coderTurns ?? callerConfig.coderTurns,
+      repairRounds: storedConfig.repairRounds ?? callerConfig.repairRounds,
       repairTurns: storedConfig.repairTurns ?? callerConfig.repairTurns,
     }
     : callerConfig;
@@ -258,12 +310,31 @@ export async function runTask(opts = {}) {
     : (providers.coders || []);
   if (coderRungs.length === 0) throw new LadderError('bad-arg', 'runTask needs at least one coder provider');
   const perRung = mode === 'direct' ? 1 : Math.max(1, Math.trunc(Number(config.candidates) || 1));
-  const repairRounds = Math.max(0, Math.trunc(Number(config.repairTurns) || 0));
+  const repairRounds = Math.max(0, Math.trunc(Number(config.repairRounds ?? 2) || 0));
+  const repairTurns = Math.max(1, Math.trunc(Number(config.repairTurns ?? 12) || 12));
   const maxCost = Number(config.maxCostUsd);
 
   const openWorktrees = new Map(); // candidateId -> wt
   let baseWt = null;
   let stopReason = null;
+
+  /**
+   * Record a failed attempt without taking the run down. `aborted` is the one
+   * failure that always propagates: the operator asked for the run to stop.
+   */
+  const noteCandidateError = (candidateId, err) => {
+    if (isLadderError(err, 'aborted') || err?.name === 'AbortError') throw err;
+    const code = isLadderError(err) ? err.code : 'execution';
+    const message = scrubSecrets(err?.message || String(err));
+    try {
+      store.upsertCandidate({ runId, candidateId, status: 'errored', summary: message });
+    } catch {
+      // The store may itself be the thing that failed; the event below stands.
+    }
+    store.emit(runId, 'candidate.error', { candidateId, code, message });
+    logger?.warn?.(`candidate ${candidateId} failed (${code}): ${message}`);
+    return { code, message };
+  };
 
   const spent = () => Number(store.costSummary(runId).total_usd) || 0;
   const budgetExhausted = () => Number.isFinite(maxCost) && maxCost > 0 && spent() >= maxCost;
@@ -324,7 +395,8 @@ export async function runTask(opts = {}) {
           candidates: perRung,
           mode,
           coderTurns: config.coderTurns,
-          repairTurns: repairRounds,
+          repairRounds,
+          repairTurns,
           maxCostUsd: maxCost,
         },
       });
@@ -455,6 +527,7 @@ export async function runTask(opts = {}) {
               // Unresolved: the cascade could not decide and neither could the
               // judge. That is a JUDGE verdict, not a failure of the patch.
               judgeUnresolved = true;
+              row.judgeFailed = true;
               row.verdict = 'JUDGE';
               row.reasons = [...row.reasons, 'judge could not produce a verdict'];
               store.emit(runId, 'judge.failed', { candidateId: row.candidateId, message: scrubSecrets(err.message) });
@@ -555,31 +628,58 @@ export async function runTask(opts = {}) {
         });
         store.emit(runId, 'candidate.start', { candidateId: att.candidateId, generatorRef: coderRef, rung });
         if (budgetExhausted()) return;
-        const coded = await runCoder({
-          runId,
-          candidateId: att.candidateId,
-          wt: att.wt,
-          plan: taskPlan,
-          brief,
-          baseline: baselineData,
-          commands,
-          rubric,
-          coder,
-          store,
-          config,
-          signal,
-          logger,
-        });
-        att.diff = coded.diff;
-        att.costUsd = coded.costUsd;
-        store.emit(runId, 'candidate.diff', {
-          candidateId: att.candidateId,
-          changedFiles: coded.changedFiles.length,
-          turns: coded.turns,
-          finished: coded.finished,
-          reason: coded.reason,
-        });
+        try {
+          const coded = await runCoder({
+            runId,
+            candidateId: att.candidateId,
+            wt: att.wt,
+            plan: taskPlan,
+            brief,
+            baseline: baselineData,
+            commands,
+            rubric,
+            coder,
+            store,
+            config,
+            signal,
+            logger,
+          });
+          att.diff = coded.diff;
+          att.costUsd = coded.costUsd;
+          store.emit(runId, 'candidate.diff', {
+            candidateId: att.candidateId,
+            changedFiles: coded.changedFiles.length,
+            turns: coded.turns,
+            finished: coded.finished,
+            reason: coded.reason,
+          });
+        } catch (err) {
+          att.error = noteCandidateError(att.candidateId, err);
+        }
       });
+
+      // A rung whose every attempt died of a rung-level fault (the model does
+      // not take tools, the rung is not armed, the endpoint is down) is a
+      // failure of the RUNG, not of the run: escalate. Only the last rung
+      // throws.
+      const erroredAttempts = attempts.filter((a) => a.error);
+      if (attempts.length > 0 && erroredAttempts.length === attempts.length) {
+        const last = erroredAttempts[erroredAttempts.length - 1].error;
+        const rungLevel = erroredAttempts.every((a) => RUNG_LEVEL.has(a.error.code));
+        if (!rungLevel || rung === coderRungs.length - 1) {
+          throw new LadderError(last.code, last.message, { runId, rung });
+        }
+        store.emit(runId, 'escalate', {
+          from: coderRef,
+          to: refOf(coderRungs[rung + 1]),
+          rung: rung + 1,
+          reason: 'rung-failed',
+        });
+        logger?.warn?.(`rung ${coderRef} failed (${last.code}); escalating`);
+        continue;
+      }
+      // A mixed rung carries on with whatever survived.
+      attempts = attempts.filter((a) => !a.error);
 
       if (checkBudget('cascade')) break;
       let rows = await settle({ attempts, coderRef });
@@ -595,6 +695,28 @@ export async function runTask(opts = {}) {
         for (const row of failing) {
           const source = attempts.find((a) => a.candidateId === row.candidateId)
             ?? { idx: Number(store.getCandidate(runId, row.candidateId)?.idx ?? 0) };
+          const feedback = row.judged && row.judged.decision === 'bad'
+            ? {
+              stage: 'l4-judge',
+              reasons: [row.judged.rationale, ...(row.judged.blocking || []).map((b) => `blocking: ${b}`)]
+                .filter(Boolean),
+              hits: [],
+              failing: [],
+            }
+            : failingFeedback(row.state);
+          // A repair round is a model call. Spending one on "the stage timed
+          // out" or "the provider is down" buys nothing: the candidate keeps
+          // whatever verdict it has and the run carries on.
+          const skip = repairSkipReason(row, feedback);
+          if (skip) {
+            store.emit(runId, 'repair.skipped', {
+              candidateId: row.candidateId,
+              round,
+              stage: feedback.stage ?? null,
+              reason: skip,
+            });
+            continue;
+          }
           repaired.push({
             idx: source.idx,
             attempt: round,
@@ -602,17 +724,10 @@ export async function runTask(opts = {}) {
             wt: row.wt,
             diff: null,
             costUsd: 0,
-            feedback: row.judged && row.judged.decision === 'bad'
-              ? {
-                stage: 'l4-judge',
-                reasons: [row.judged.rationale, ...(row.judged.blocking || []).map((b) => `blocking: ${b}`)]
-                  .filter(Boolean),
-                hits: [],
-                failing: [],
-              }
-              : failingFeedback(row.state),
+            feedback,
           });
         }
+        if (repaired.length === 0) break;
 
         await pool(repaired, perRung, async (att) => {
           if (budgetExhausted()) return;
@@ -631,28 +746,36 @@ export async function runTask(opts = {}) {
             stage: att.feedback.stage,
             reasons: att.feedback.reasons.slice(0, 6),
           });
-          const coded = await runRepair({
-            runId,
-            candidateId: att.candidateId,
-            wt: att.wt,
-            plan: taskPlan,
-            brief,
-            baseline: baselineData,
-            commands,
-            rubric,
-            coder,
-            store,
-            config,
-            signal,
-            logger,
-            feedback: att.feedback,
-          });
-          att.diff = coded.diff;
-          att.costUsd = coded.costUsd;
+          try {
+            const coded = await runRepair({
+              runId,
+              candidateId: att.candidateId,
+              wt: att.wt,
+              plan: taskPlan,
+              brief,
+              baseline: baselineData,
+              commands,
+              rubric,
+              coder,
+              store,
+              config,
+              signal,
+              logger,
+              maxTurns: repairTurns,
+              feedback: att.feedback,
+            });
+            att.diff = coded.diff;
+            att.costUsd = coded.costUsd;
+          } catch (err) {
+            att.error = noteCandidateError(att.candidateId, err);
+          }
         });
 
         if (checkBudget('cascade')) break ladder;
-        attempts = repaired;
+        // Every repair died on the provider: escalate rather than cascade over
+        // a set of candidates that never got a second pass.
+        if (repaired.every((a) => a.error)) break;
+        attempts = repaired.filter((a) => !a.error);
         rows = await settle({ attempts, coderRef });
         winnerRow = pickWinner(rows);
         if (winnerRow) break ladder;
@@ -791,6 +914,27 @@ export async function runTask(opts = {}) {
       // The store may itself be the thing that failed; the throw below stands.
     }
     logger?.error?.(`run ${runId} failed (${code}): ${message}`);
+    // The error path used to leak every candidate worktree it had opened. The
+    // branch (kolm/code/<runId>/<cid>) survives either way, so the work is not
+    // lost; only the checkout goes.
+    if (config.keepWorktrees !== 'all') {
+      const done = new Set();
+      for (const [candidateId, wt] of openWorktrees) {
+        if (!wt || done.has(wt)) continue;
+        done.add(wt);
+        try {
+          await wt.destroy();
+        } catch (e) {
+          logger?.warn?.(`could not destroy worktree ${candidateId}: ${scrubSecrets(e?.message || String(e))}`);
+          continue;
+        }
+        try {
+          store.upsertCandidate({ runId, candidateId, status: 'destroyed' });
+        } catch {
+          // The store may itself be the thing that failed.
+        }
+      }
+    }
     if (isLadderError(err)) throw err;
     throw new LadderError('execution', message, { runId });
   } finally {

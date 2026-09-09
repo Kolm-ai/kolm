@@ -60,7 +60,14 @@ export async function run({ wt, baseline, commands = {}, bands, config, signal }
   const metrics = {};
   const artifacts = {};
 
-  if (commands.typecheck) {
+  const baselineTypecheckTimedOut = baseline?.typecheck?.timedOut === true;
+  const baselineLintTimedOut = baseline?.lint?.timedOut === true;
+
+  if (commands.typecheck && baselineTypecheckTimedOut) {
+    // The base commit could not typecheck itself inside the budget.
+    reasons.push(`typecheck timed out at baseline too (${timeoutMs} ms)`);
+    artifacts.baselineTypecheckTimedOut = true;
+  } else if (commands.typecheck) {
     const res = await runCommand(wt, commands.typecheck, { timeoutMs, signal });
     const ids = parseTypecheckErrors(res.output, toolFor(commands.typecheck, 'typecheck'), { root });
     const base = new Set(baseline?.typecheck?.errors || []);
@@ -85,7 +92,10 @@ export async function run({ wt, baseline, commands = {}, bands, config, signal }
     }
   }
 
-  if (commands.lint) {
+  if (commands.lint && baselineLintTimedOut) {
+    reasons.push(`lint timed out at baseline too (${timeoutMs} ms)`);
+    artifacts.baselineLintTimedOut = true;
+  } else if (commands.lint) {
     const res = await runCommand(wt, commands.lint, { timeoutMs, signal });
     const ids = parseLintErrors(res.output, toolFor(commands.lint, 'lint'), { root });
     const base = new Set(baseline?.lint?.errors || []);
@@ -108,6 +118,18 @@ export async function run({ wt, baseline, commands = {}, bands, config, signal }
     }
   }
 
+  // Nothing measurable ran: both tools timed out at the base commit already.
+  if (hits.length === 0 && (baselineTypecheckTimedOut || baselineLintTimedOut)) {
+    return {
+      decision: 'skip',
+      reasons,
+      hits,
+      metrics,
+      artifacts,
+      costUsd: 0,
+      latencyMs: Date.now() - started,
+    };
+  }
   const decision = worst(hits);
   if (decision === 'good' && reasons.length === 0) {
     reasons.push('no new type or lint errors versus the baseline');
