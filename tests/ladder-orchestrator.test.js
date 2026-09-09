@@ -67,6 +67,10 @@ const BASE_FILES = {
 const GOOD_MATH = 'export function add(a, b) {\n  return a + b;\n}\n';
 const BROKEN_MATH = 'export function add(a, b) {\n  // TODO: implement\n  return 0;\n}\n';
 
+// Key-shaped fixtures are assembled at runtime so public Git never stores a
+// scanner-shaped literal (same convention as tests/sensitive-data.test.js).
+const fakeKey = (...parts) => parts.join('');
+
 /** Passing or failing scripted test output, depending on the worktree. */
 function scriptedTests(cmd, wt) {
   const math = wt.readFileSync('src/math.js');
@@ -682,7 +686,7 @@ test('a driver failure marks the run as errored and rethrows a LadderError', opt
     kind: 'fake',
     async create() {
       // A realistic failure message that happens to carry a credential.
-      throw new Error('cannot reach the sandbox with token sk-ant-api03-NOTAREALVALUE99');
+      throw new Error(`cannot reach the sandbox with token ${fakeKey('sk-ant-', 'api03-', 'NOTAREALVALUE99')}`);
     },
     async open() {
       throw new Error('unreachable');

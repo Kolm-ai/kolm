@@ -196,6 +196,28 @@ function readDocument(file) {
  * @param {string} file
  * @param {object} document
  */
+/**
+ * Replace `file` with `tmp`. On Windows a scanner or indexer can hold the
+ * target open for a moment and the rename reports EPERM or EBUSY; a few short
+ * retries turn that race into a successful write (seen once in the test suite).
+ * @param {string} tmp
+ * @param {string} file
+ */
+function renameWithRetry(tmp, file) {
+  const RETRIES = 5;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      fs.renameSync(tmp, file);
+      return;
+    } catch (err) {
+      const transient = err?.code === 'EPERM' || err?.code === 'EBUSY';
+      if (!transient || attempt >= RETRIES) throw err;
+      const until = Date.now() + 20 * (attempt + 1);
+      while (Date.now() < until) { /* brief synchronous wait */ }
+    }
+  }
+}
+
 function writeDocument(file, document) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.tmp.${process.pid}.${crypto.randomBytes(4).toString('hex')}`;
@@ -207,7 +229,7 @@ function writeDocument(file, document) {
     } catch {
       // deliberate: chmod is a no-op on Windows, the write already succeeded
     }
-    fs.renameSync(tmp, file);
+    renameWithRetry(tmp, file);
   } catch (err) {
     try {
       fs.rmSync(tmp, { force: true });

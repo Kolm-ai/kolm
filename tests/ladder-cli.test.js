@@ -21,6 +21,10 @@ const CLI = path.join(REPO_ROOT, 'cli', 'kolm-code.mjs');
 const KOLM = path.join(REPO_ROOT, 'cli', 'kolm.js');
 const HAS_SQLITE = sqliteAvailable();
 
+// Key-shaped fixtures are assembled at runtime so public Git never stores a
+// scanner-shaped literal (same convention as tests/sensitive-data.test.js).
+const fakeKey = (...parts) => parts.join('');
+
 /** Names that could arm a provider, a repo host or the partner worker. */
 const SECRET_ENV_NAMES = [
   'ANTHROPIC_API_KEY',
@@ -244,7 +248,7 @@ describe('kolm code doctor', () => {
   });
 
   it('never echoes a credential value while reporting it as armed', () => {
-    const secret = 'sk-ant-test123456789';
+    const secret = fakeKey('sk-ant-', 'test123456789');
     const res = runCli(['doctor'], { home, extra: { ANTHROPIC_API_KEY: secret } });
     assert.ok(!res.all.includes(secret), 'the key value never reaches stdout or stderr');
     const orchestratorRow = res.stdout.split('\n').find((line) => line.startsWith('orchestrator'));

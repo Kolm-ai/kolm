@@ -24,6 +24,10 @@ const BANDS = loadBands();
 const RUBRIC = loadRubric();
 const RUBRIC_IDS = RUBRIC.items.map((item) => item.id);
 
+// Key-shaped fixtures are assembled at runtime so public Git never stores a
+// scanner-shaped literal (same convention as tests/sensitive-data.test.js).
+const fakeKey = (...parts) => parts.join('');
+
 // --------------------------------------------------------------- fixtures
 
 const CLEAN_DIFF = [
@@ -48,7 +52,7 @@ const SECRET_DIFF = [
   '+++ b/src/config.js',
   '@@ -1,2 +1,3 @@',
   ' export const region = "us-east-1";',
-  "+const key = 'AKIAIOSFODNN7EXAMPLE';",
+  `+const key = '${fakeKey('AKIA', 'IOSFODNN7EXAMPLE')}';`,
   ' export const stage = "prod";',
   '',
 ].join('\n');
@@ -322,7 +326,7 @@ test('scenario B: a secret in the patch dies at L0 and nothing above it runs', o
 
     const row = store.getResult(runId, 'c0a0', 'l0-meta', 1);
     assert.equal(row.artifacts.secrets[0].kind, 'aws-access-key');
-    assert.ok(!JSON.stringify(row).includes('AKIAIOSFODNN7EXAMPLE'), 'the stored row must redact the credential');
+    assert.ok(!JSON.stringify(row).includes(fakeKey('AKIA', 'IOSFODNN7EXAMPLE')), 'the stored row must redact the credential');
     assert.equal(store.getResult(runId, 'c0a0', 'l1-static', 1), null);
   } finally {
     probe.restore();

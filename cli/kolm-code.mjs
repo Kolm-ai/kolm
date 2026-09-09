@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// kolm code — the confidence-cascade coding agent CLI (owner E, spec section 7).
+// kolm code - the confidence-cascade coding agent CLI (owner E, spec section 7).
 //
 //   kolm code run "fix the flaky retry in src/queue.js"
 //
@@ -1300,6 +1300,12 @@ async function cmdBands(parsed) {
     return EXIT.OK;
   }
 
+  // The confirmation is an argument, so a missing one is refused before the
+  // stored runs are read: `bands --suggest` shows the proposal without writing.
+  if (flags.apply && flags.yes !== true) {
+    throw new LadderError('bad-args', 'bands --apply rewrites your bands file; add --yes to confirm');
+  }
+
   const store = openStoreFor(config);
   try {
     const proposal = await api('suggestBands')({
@@ -1325,9 +1331,6 @@ async function cmdBands(parsed) {
     }
 
     if (!flags.apply) return EXIT.OK;
-    if (flags.yes !== true) {
-      throw new LadderError('bad-args', 'bands --apply rewrites your bands file; add --yes to confirm');
-    }
 
     const bundled = path.resolve(ladder.BUNDLED_BANDS_PATH);
     let target = config.bandsPath ? path.resolve(config.bandsPath) : path.join(config.codeDir, 'bands.json');
@@ -1380,6 +1383,11 @@ async function cmdBench(parsed) {
     }
   }
 
+  // Likewise the task selection: an unknown id is refused before the store is
+  // opened, so the message is the same on every Node version.
+  const taskIds = flags.tasks === undefined || flags.tasks === true ? null : String(flags.tasks);
+  await api('listBenchTasks')({ tasks: taskIds });
+
   const store = openStoreFor(config);
   const driver = api('createDriver')(config.driver, config);
   const createProvider = api('createProvider');
@@ -1401,7 +1409,7 @@ async function cmdBench(parsed) {
 
   try {
     const result = await api('runBench')({
-      tasks: flags.tasks === undefined || flags.tasks === true ? null : String(flags.tasks),
+      tasks: taskIds,
       concurrency,
       config,
       store,

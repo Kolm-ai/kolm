@@ -25,6 +25,10 @@ import { loadRubric } from '../src/ladder/rubric.js';
 const BANDS = loadBands();
 const RUBRIC = loadRubric();
 
+// Key-shaped fixtures are assembled at runtime so public Git never stores a
+// scanner-shaped literal (same convention as tests/sensitive-data.test.js).
+const fakeKey = (...parts) => parts.join('');
+
 /** A signer that lives only in this process: no ~/.kolm side effects. */
 function testSigner() {
   const { publicKey, privateKey } = generateKeyPair();
@@ -266,19 +270,19 @@ test('credential-shaped text never survives into a receipt', () => {
     { candidate_id: 'c0a0', stage: 'l0-meta', version: 1, verdict: {
       decision: 'bad',
       reasons: [
-        'patch adds a key sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAA',
-        'a github token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345 appeared',
-        'aws id AKIAIOSFODNN7EXAMPLE in config',
-        'header was Bearer eyJhbGciOiJIUzI1NiJ9.payload',
-        'slack token xoxb-1234567890-abcdefghij',
+        `patch adds a key ${fakeKey('sk-ant-', 'api03-', 'A'.repeat(24))}`,
+        `a github token ${fakeKey('ghp_', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ012345')} appeared`,
+        `aws id ${fakeKey('AKIA', 'IOSFODNN7EXAMPLE')} in config`,
+        `header was Bearer ${fakeKey('eyJ', 'hbGciOiJIUzI1NiJ9')}.payload`,
+        `slack token ${fakeKey('xoxb-', '1234567890-abcdefghij')}`,
       ],
-      metrics: { note: 'context: sk-ant-api03-BBBBBBBBBBBBBBBBBBBBBBBB', secrets: 5 },
+      metrics: { note: `context: ${fakeKey('sk-ant-', 'api03-', 'B'.repeat(24))}`, secrets: 5 },
     } },
   ];
   const receipt = buildReceipt({
-    run: { id: 'run_leaky', task: { title: 'token sk-ant-api03-CCCCCCCCCCCCCCCCCCCCCCCC', text: 'secret body' } },
+    run: { id: 'run_leaky', task: { title: `token ${fakeKey('sk-ant-', 'api03-', 'C'.repeat(24))}`, text: 'secret body' } },
     results: leaky,
-    judgments: [{ candidate_id: 'c0a0', kind: 'unsure', verdict: { decision: 'bad', rationale: 'ghp_ZZZZZZZZZZZZZZZZZZZZZZZZ' } }],
+    judgments: [{ candidate_id: 'c0a0', kind: 'unsure', verdict: { decision: 'bad', rationale: fakeKey('ghp_', 'Z'.repeat(24)) } }],
     cost: COST,
     bands: BANDS,
     rubric: RUBRIC,
@@ -296,10 +300,11 @@ test('credential-shaped text never survives into a receipt', () => {
 });
 
 test('scrubSecrets redacts each known credential shape', () => {
-  const cleaned = scrubSecrets('a sk-ant-api03-QQQQQQQQQQQQQQQQ and ghp_AAAAAAAAAAAAAAAAAAAA and AKIAIOSFODNN7EXAMPLE');
+  const awsId = fakeKey('AKIA', 'IOSFODNN7EXAMPLE');
+  const cleaned = scrubSecrets(`a ${fakeKey('sk-ant-', 'api03-', 'Q'.repeat(16))} and ${fakeKey('ghp_', 'A'.repeat(20))} and ${awsId}`);
   assert.ok(!cleaned.includes('sk-ant-'));
   assert.ok(!cleaned.includes('ghp_'));
-  assert.ok(!cleaned.includes('AKIAIOSFODNN7EXAMPLE'));
+  assert.ok(!cleaned.includes(awsId));
   assert.equal(scrubSecrets(null), '');
 });
 

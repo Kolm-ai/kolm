@@ -827,10 +827,13 @@ test('D7: the CLI rejects a bad repo before it writes a run row, once', gitOptio
   const message = 'is not a directory';
   assert.equal(res.all.split(message).length - 1, 1, `printed more than once:\n${res.all}`);
 
-  // No run row: the failure cost nothing.
-  const listed = runCli(['status', '--json'], { home });
-  assert.equal(listed.status, EXIT.OK, listed.all.slice(-400));
-  assert.deepEqual(JSON.parse(listed.stdout).runs, []);
+  // No run row: the failure cost nothing. Reading the rows needs the store,
+  // which a Node without node:sqlite cannot open; the rejection above does not.
+  if (HAS_SQLITE) {
+    const listed = runCli(['status', '--json'], { home });
+    assert.equal(listed.status, EXIT.OK, listed.all.slice(-400));
+    assert.deepEqual(JSON.parse(listed.stdout).runs, []);
+  }
 
   const plain = tempDir('d7-plain');
   const notGit = runCli(['run', 'do a thing', '--repo', plain], { home });
