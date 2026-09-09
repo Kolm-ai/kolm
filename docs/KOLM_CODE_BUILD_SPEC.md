@@ -34,7 +34,8 @@ unsure residue. Every run ends with a signed evidence receipt.
   ink `#F7F8F8` / `#D0D6E0` / `#8A8F98`, accent `#3FE5A0` for VERIFIED
   only, hairlines `rgba(255,255,255,.07)`, squared radii <= 3px, paper CTA
   `#F4F2EC` with dark ink). No glows, no gradients, no chartreuse.
-* Never use the words "honest"/"honesty" anywhere (code, docs, UI, tests).
+* The banned word family (see `docs/reference/testing-policy.md`) never appears anywhere
+  (code, docs, UI, tests); say "Caveats", "Constraints" or "Limitations" instead.
 * Tests use `node:test` + `node:assert/strict`, file names
   `tests/ladder-<area>.test.js`, run by `node --test --test-concurrency=1 tests/ladder-*.test.js`.
   Every module ships with tests that exercise it end to end through its
@@ -567,8 +568,8 @@ repo: `@cloudflare/sandbox` 0.12.9, wrangler 4.128+, `containers` +
   `sqliteAvailable()` from `src/ladder/store.js` for that.
 * Testing policy (`docs/reference/testing-policy.md`): no new npm dependencies at all;
   tests must never touch the network (only `127.0.0.1` servers you spawn yourself); test
-  labels are descriptive sentences (>= 6 chars) or `test_<topic>_<aspect>`; the word
-  "honest*" is grepped for and forbidden; three sequential runs must produce identical
+  labels are descriptive sentences (>= 6 chars) or `test_<topic>_<aspect>`; the banned
+  word family is grepped for and forbidden; three sequential runs must produce identical
   pass/fail/skip counts (deterministic, no timing-based assertions).
 * `KOLM_TEST_MOCK_PROVIDER=1` is the house switch for short-circuiting provider adapters.
   `createProvider()` must honor it: when set, return a deterministic fake provider
