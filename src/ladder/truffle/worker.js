@@ -238,8 +238,11 @@ export async function runWorker({
           title: request.text ? request.text.slice(0, 200) : null,
         })
         : typeof result === 'string'
-          ? clampMessage(result)
-          : formatSettlementMessage({ runId: request.taskId, ...(result && typeof result === 'object' ? result : {}) });
+          ? clampMessage(result, request.maxOutputBytes)
+          : clampMessage(
+            formatSettlementMessage({ runId: request.taskId, ...(result && typeof result === 'object' ? result : {}) }),
+            request.maxOutputBytes,
+          );
 
       try {
         await client.settle({

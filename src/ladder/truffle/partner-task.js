@@ -431,6 +431,22 @@ export function formatSettlementMessage({
  * @param {object} claimed
  * @returns {{taskId: string|null, text: string, repoUrl: string|null, baseRef: string|null, channel: string|null, threadId: string|null, requestedBy: string|null, raw: object}}
  */
+/**
+ * The byte budget for this step's thread message. Truffle's settlement
+ * function dead-letters a run whose message exceeds the step's
+ * `output.maxBytes` (0118 settle_channel_workflow_partner_step), which is
+ * usually far below the 32 000-byte protocol ceiling, so the worker clamps to
+ * the step budget and only falls back to the ceiling when the task carries none.
+ * @param {object|null|undefined} task the claim's `task` (or the claim itself)
+ * @returns {number} 1..MAX_OUTPUT_BYTES
+ */
+export function stepOutputBudget(task) {
+  const source = task && typeof task === 'object' ? (task.task ?? task) : null;
+  const declared = source?.output?.maxBytes;
+  if (Number.isSafeInteger(declared) && declared >= 1 && declared <= MAX_OUTPUT_BYTES) return declared;
+  return MAX_OUTPUT_BYTES;
+}
+
 export function taskToKolmRequest(claimed) {
   const claim = claimed && typeof claimed === 'object' ? claimed : {};
   const task = claim.task && typeof claim.task === 'object' ? claim.task : claim;
@@ -447,13 +463,13 @@ export function taskToKolmRequest(claimed) {
     text,
     instructions,
     repoUrl: repoMatch ? repoMatch[0].replace(/[.,)]+$/, '') : null,
-    baseRef: baseMatch ? baseMatch[1] : null,
+    baseRef: baseMatch ? baseMatch[1].replace(/[.,)]+$/, '') || null : null,
     channel: task.delivery?.rootMessageId ?? claim.threadRootId ?? null,
     threadId: claim.threadRootId ?? task.output?.rootMessageId ?? null,
     requestedBy: task.role ?? null,
     idempotencyKey: claim.idempotencyKey ?? null,
     stepId: task.stepId ?? null,
-    maxOutputBytes: task.output?.maxBytes ?? MAX_OUTPUT_BYTES,
+    maxOutputBytes: stepOutputBudget(task),
     raw: claimed,
   };
 }
@@ -768,7 +784,7 @@ export function createTruffleClient({
         const detail = errorText(error).replace(/\s+/g, ' ').trim();
         if (detail && !text.includes(detail)) text = `${text}\n- error: ${detail}`;
       }
-      text = clampMessage(text);
+      text = clampMessage(text, stepOutputBudget(claim));
 
       const body = JSON.stringify({
         schema: PARTNER_SETTLEMENT_SCHEMA,

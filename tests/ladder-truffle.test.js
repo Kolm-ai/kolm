@@ -17,6 +17,7 @@ import {
   formatSettlementMessage,
   readinessDocument,
   signedRequestHeaders,
+  stepOutputBudget,
   taskToKolmRequest,
   verifyProcessorSignature,
 } from '../src/ladder/truffle/partner-task.js';
@@ -458,6 +459,68 @@ test('a claimed task maps onto the kolm code request shape', () => {
   const bare = taskToKolmRequest({ task: { instructions: 'no links here' } });
   assert.equal(bare.repoUrl, null);
   assert.equal(bare.baseRef, null);
+
+  // People write in sentences: the period after "base:main." is not part of the ref.
+  const prose = taskToKolmRequest({
+    task: { instructions: 'Implement it in https://github.com/kolm-ai/kolm. Branch from base:main.' },
+  });
+  assert.equal(prose.repoUrl, 'https://github.com/kolm-ai/kolm');
+  assert.equal(prose.baseRef, 'main');
+  assert.equal(taskToKolmRequest({ task: { instructions: 'base:release/1.2)' } }).baseRef, 'release/1.2');
+});
+
+test('the thread message is clamped to the step budget, not only the protocol ceiling', async () => {
+  // Truffle dead-letters a settlement whose text exceeds the step's output.maxBytes
+  // (0118 settle_channel_workflow_partner_step), so the budget is the step's.
+  const claim = sampleClaim('budget');
+  claim.task.output.maxBytes = 8_000;
+  assert.equal(stepOutputBudget(claim), 8_000);
+  assert.equal(stepOutputBudget(claim.task), 8_000);
+  assert.equal(stepOutputBudget({ task: { output: { maxBytes: 0 } } }), MAX_OUTPUT_BYTES);
+  assert.equal(stepOutputBudget({ task: { output: { maxBytes: MAX_OUTPUT_BYTES + 1 } } }), MAX_OUTPUT_BYTES);
+  assert.equal(stepOutputBudget(null), MAX_OUTPUT_BYTES);
+  assert.equal(taskToKolmRequest(claim).maxOutputBytes, 8_000);
+
+  const settled = [];
+  let claims = 0;
+  const client = {
+    claim: async () => {
+      claims += 1;
+      return claims === 1 ? { task: claim } : { task: null };
+    },
+    settle: async (args) => {
+      settled.push(args);
+      return { status: 'succeeded' };
+    },
+  };
+  const long = ['kolm code: PASS -- long report', ...Array(400).fill('- changed: src/a/very/long/path/to/a/file.js')].join('\n');
+  assert.ok(Buffer.byteLength(long, 'utf8') > 8_000);
+  const result = await runWorker({ client, handler: () => long, logger: QUIET, maxTasks: 1, pollMs: 5 });
+  assert.deepEqual(result, { processed: 1, failed: 0, stoppedBy: 'maxTasks' });
+  assert.ok(Buffer.byteLength(settled[0].message, 'utf8') <= 8_000);
+  assert.ok(settled[0].message.endsWith(' [truncated]'));
+
+  // The client clamps again on the way out, so a caller-supplied message is bounded too.
+  let body = null;
+  const direct = createTruffleClient({
+    apiUrl: 'https://truffle.test',
+    serviceToken: 'a'.repeat(43),
+    workspaceId: '11111111-1111-4111-8111-111111111111',
+    keyId: 'key-1',
+    signingSecret: 's'.repeat(43),
+    fetchImpl: async (_url, init) => {
+      body = JSON.parse(init.body);
+      return new Response(JSON.stringify({
+        schema: 'truffle.partner-work-settlement-result.v1',
+        runId: claim.runId,
+        status: 'succeeded',
+        messageId: 'm1',
+        replayed: false,
+      }), { status: 200 });
+    },
+  });
+  await direct.settle({ task: claim, status: 'completed', message: long });
+  assert.ok(Buffer.byteLength(body.output.text, 'utf8') <= 8_000);
 });
 
 test('the readiness attestation carries exactly the contract keys', () => {
