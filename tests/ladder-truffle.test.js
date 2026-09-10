@@ -299,6 +299,10 @@ test('a failing handler settles the task with a clean error message', async (t) 
   assert.ok(text.includes('sandbox exploded'));
   assert.ok(!text.includes('\n    at '));
   assert.ok(!text.includes('Error: Error'));
+  // the worker's own credentials never reach a channel, whatever the sandbox printed
+  assert.ok(!text.includes(SERVICE_TOKEN), 'service token redacted from the settlement');
+  assert.ok(!text.includes(SIGNING_SECRET), 'signing secret redacted from the settlement');
+  assert.ok(text.includes('[redacted]'));
 });
 
 /* ------------------------------------------------------------------ *

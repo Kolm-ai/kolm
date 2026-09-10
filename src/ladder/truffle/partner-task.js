@@ -573,6 +573,13 @@ export function createTruffleClient({
   const attempts = Math.max(1, Number(retries) || 1);
   const backoff = Array.isArray(backoffMs) && backoffMs.length > 0 ? backoffMs : DEFAULT_BACKOFF_MS;
 
+  const credentialTexts = [String(serviceToken), String(signingSecret)].filter((value) => value.length >= 16);
+  function redactCredentials(text) {
+    let out = String(text ?? '');
+    for (const credential of credentialTexts) out = out.split(credential).join('[redacted]');
+    return out;
+  }
+
   function freshIdempotencyKey() {
     return createHash('sha256').update(String(randomUUID()), 'utf8').digest('hex');
   }
@@ -784,7 +791,10 @@ export function createTruffleClient({
         const detail = errorText(error).replace(/\s+/g, ' ').trim();
         if (detail && !text.includes(detail)) text = `${text}\n- error: ${detail}`;
       }
-      text = clampMessage(text, stepOutputBudget(claim));
+      // A thread message is read by every member of the channel. Whatever the
+      // handler or its sandbox put in an error (an env dump, a curl trace), the
+      // worker's own credentials never leave this process in a settlement.
+      text = clampMessage(redactCredentials(text), stepOutputBudget(claim));
 
       const body = JSON.stringify({
         schema: PARTNER_SETTLEMENT_SCHEMA,
