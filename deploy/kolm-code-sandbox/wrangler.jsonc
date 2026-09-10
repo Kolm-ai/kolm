@@ -4,7 +4,10 @@
   "main": "src/worker.mjs",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": false,
+  // kolm.ai DNS is not on Cloudflare, so the worker is reached on the account
+  // workers.dev subdomain (kolm-code-sandbox.<subdomain>.workers.dev); every
+  // route still requires the bearer token.
+  "workers_dev": true,
   "preview_urls": false,
   "observability": { "enabled": true },
   "vars": {
