@@ -8,27 +8,36 @@ source, file, crop box, seed, the parameter vector (p_*) and the metric vector (
 configuration skips them. Chunks run in a process pool; every draw is deterministic in its seed, so the
 output does not depend on the pool size or on the order chunks finish. An item its decoder rejects (a float
 TIFF, a truncated file) is recorded on its chunk's ledger entry under `unreadable` and skipped; a chunk that
-fails outright is logged, counted in the summary and left for the next run. Neither stops the pass."""
+fails outright is logged, counted in the summary and left for the next run. Neither stops the pass.
+A source's manifest `clean` block says how it is read as a clean source: `scale` box-downsamples each image
+in linear light after decoding (a 50 MP JPEG at 2, a demosaiced raw at 4) and every row records the factor
+used; `exclude` lists files that are not pictures (lens-shading maps). Splits key on the scene (scene_of), so
+two resolution tiers of one HDRI never straddle train and validation."""
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import math
 import os
+import re
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 
 from . import data_root
 from .degrade import PARAM_NAMES, DegradeParams, Distributions, degrade, prepare_tile, sample_params
+from .manifest import load_manifest
 from .tilemetrics import tile_metrics
 from ..colorspace import srgb_to_linear
 from ..metrics import STILL_METRICS
+from ..scene import box_downsample
 
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
 RAW_EXT = {".dng", ".nef", ".cr2", ".cr3", ".arw", ".raf", ".orf", ".rw2", ".pef", ".srw"}
@@ -37,6 +46,12 @@ PARQUET_SOURCES = {"hf-kadid10k-images": ("image", "kadid"), "hf-tid2013": ("ref
 SEED_MASK = (1 << 63) - 1
 LEDGER = "ledger.jsonl"
 CONFIG_KEYS = ("tile", "per_tile", "crops", "ss", "fmt")
+FAST_EXT = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}  # 8-bit LDR formats decoded through the sRGB table
+LOW_QUALITY_JPEG = 90    # a JPEG whose quantisation tables put it below this IJG quality takes low_quality_scale
+_LUMA_TABLE_SUM = 3688   # sum of the ITU T.81 K.1 luminance table, what the IJG quality scale factor multiplies
+_RES_DIR = re.compile("^[0-9]+k$", re.IGNORECASE)      # Poly Haven's resolution tiers: 1k/<name>.hdr, 2k/<name>.hdr
+_RES_SUFFIX = re.compile("_[0-9]+k$", re.IGNORECASE)
+_SRGB_LUT = srgb_to_linear(np.arange(256) / 255.0)
 
 
 @dataclass(frozen=True)
@@ -52,6 +67,29 @@ class Item:
 def _seed(*parts) -> int:
     h = hashlib.sha256("|".join(str(p) for p in parts).encode("utf-8")).digest()
     return int.from_bytes(h[:8], "big") & SEED_MASK
+
+
+def scene_of(item: Item) -> str:
+    """The scene an item depicts, the key of the train/validation split: its path with resolution directories
+    (`1k/`, `2k/`) and resolution stem suffixes (`_4k`) removed, so every resolution tier of one Poly Haven HDRI is
+    one scene. Any other path is its own scene."""
+    parts = item.file.split("/")
+    stem, ext = os.path.splitext(parts[-1])
+    kept = [d for d in parts[:-1] if not _RES_DIR.match(d)]
+    return "/".join(kept + [_RES_SUFFIX.sub("", stem) + ext])
+
+
+@lru_cache(maxsize=None)
+def _manifest_clean() -> dict[str, dict]:
+    return {s.id: dict(s.clean) for s in load_manifest() if s.clean}
+
+
+def clean_settings(source: str) -> dict:
+    """The manifest's `clean` block for a source, empty for one it does not know (a test fixture): `scale`, the
+    box-downsampling factor applied in linear light after decoding; `low_quality_scale`, the factor for a JPEG
+    whose quantisation tables put it below LOW_QUALITY_JPEG; `exclude`, fnmatch patterns (case-insensitive, on
+    the posix path relative to the source) of files that are not pictures."""
+    return _manifest_clean().get(source, {})
 
 
 def list_items(source: str, root: Path | None = None) -> list[Item]:
@@ -78,8 +116,11 @@ def list_items(source: str, root: Path | None = None) -> list[Item]:
         rel = "|".join(f.relative_to(base).as_posix() for f in files)
         return [Item(source, rel, r, column) for r in rows]
     items = []
+    excluded = [pat.lower() for pat in clean_settings(source).get("exclude", [])]
     for f in sorted(base.rglob("*")):
         ext = f.suffix.lower()
+        if any(fnmatch.fnmatchcase(f.relative_to(base).as_posix().lower(), pat) for pat in excluded):
+            continue
         if ext in HDR_EXT:
             items.append(Item(source, f.relative_to(base).as_posix(), is_hdr=True))
         elif ext in IMAGE_EXT:
@@ -111,11 +152,52 @@ def _record(errors: dict[Item, str] | None, it: Item, e: Exception) -> None:
     errors[it] = f"{type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}".rstrip(": ")
 
 
-def load_items(items: list[Item], root: Path | None = None,
-               errors: dict[Item, str] | None = None) -> dict[Item, np.ndarray]:
-    """Linear RGB float64 (H, W, 3) per item; parquet rows of one shard set are read in a single pass. With
-    `errors` given, an item its decoder rejects is left out of the result and recorded there as
-    "ExceptionName: message" instead of raising."""
+def _load_8bit(it: Item, p: Path) -> np.ndarray | None:
+    """8-bit LDR files through a 256-entry sRGB table: _load_file's values to the bit (the same float64 transfer
+    curve of the same 256 inputs) in a quarter of its time on a 50 MP JPEG, where that curve over 160 M values was
+    the cost. None for any other file, a 16-bit PNG included, which keeps the general decoder."""
+    if it.is_hdr or not it.file.lower().endswith(tuple(FAST_EXT)):
+        return None
+    from PIL import Image
+    with Image.open(p) as im:
+        if im.mode not in ("1", "L", "LA", "P", "PA", "RGB", "RGBA", "RGBX", "CMYK", "YCbCr"):
+            return None
+        a = np.asarray(im.convert("RGB"))
+    return _SRGB_LUT[a]
+
+
+def jpeg_quality(p: Path) -> int | None:
+    """IJG quality estimated from a JPEG's luminance quantisation table, which the encoder scaled from the standard
+    table by (200 - 2q) % at q >= 50 and 5000 / q % below; None for a file that is not a JPEG."""
+    from PIL import Image
+    with Image.open(p) as im:
+        tables = getattr(im, "quantization", None)
+        if im.format != "JPEG" or not tables:
+            return None
+        table = tables.get(0) or next(iter(tables.values()))
+    s = 100.0 * sum(table) / _LUMA_TABLE_SUM
+    return int(round((200.0 - s) / 2.0 if s <= 100.0 else 5000.0 / s))
+
+
+def clean_scale(it: Item, p: Path) -> int:
+    """The downsampling factor the manifest asks of this item: its source's `scale`, or the `low_quality_scale` for
+    a JPEG below LOW_QUALITY_JPEG (at 4 the 8 x 8 blocking of a quality-85 web JPEG is below one pixel)."""
+    c = clean_settings(it.source)
+    scale = int(c.get("scale", 1) or 1)
+    low = int(c.get("low_quality_scale", 0) or 0)
+    if low > scale and it.file.lower().endswith((".jpg", ".jpeg")):
+        q = jpeg_quality(p)
+        if q is not None and q < LOW_QUALITY_JPEG:
+            scale = low
+    return max(scale, 1)
+
+
+def load_items(items: list[Item], root: Path | None = None, errors: dict[Item, str] | None = None,
+               scales: dict[Item, int] | None = None) -> dict[Item, np.ndarray]:
+    """Linear RGB float64 (H, W, 3) per item, box-downsampled by its clean scale (clean_scale; the factor used
+    goes to `scales` when given); parquet rows of one shard set are read in a single pass. With `errors` given,
+    an item its decoder rejects is left out of the result and recorded there as "ExceptionName: message"
+    instead of raising."""
     root = Path(root) if root else data_root()
     out: dict[Item, np.ndarray] = {}
     by_parquet: dict[tuple[str, str, str], list[Item]] = {}
@@ -124,7 +206,14 @@ def load_items(items: list[Item], root: Path | None = None,
             by_parquet.setdefault((it.source, it.file, it.column), []).append(it)
             continue
         try:
-            out[it] = _load_file(it, root / "raw" / it.source / it.file)
+            p = root / "raw" / it.source / it.file
+            img = _load_8bit(it, p)
+            if img is None:
+                img = _load_file(it, p)
+            k = clean_scale(it, p)
+            out[it] = box_downsample(img, k) if k > 1 else img
+            if scales is not None:
+                scales[it] = k
         except Exception as e:
             _record(errors, it, e)
     for (source, files, column), its in by_parquet.items():
@@ -134,6 +223,8 @@ def load_items(items: list[Item], root: Path | None = None,
         for g, blob in iter_parquet_rows(paths, set(want), column):
             try:
                 out[want[g]] = decode_image(blob["bytes"] if isinstance(blob, dict) else blob)
+                if scales is not None:
+                    scales[want[g]] = 1
             except Exception as e:
                 _record(errors, want[g], e)
     return out
@@ -158,7 +249,8 @@ def label_tile(tile_img: np.ndarray, params: DegradeParams, seed: int, ss: int, 
 
 
 def label_item(item: Item, img: np.ndarray, dists: Distributions, tile: int, crops: int, per_tile: int,
-               ss: int) -> list[dict]:
+               ss: int, scale: int = 1) -> list[dict]:
+    """Rows of one item; `scale` is the clean scale its image was read at (rows without the column are scale 1)."""
     rows = []
     for y0, x0 in crop_boxes(item, img.shape[0], img.shape[1], tile, crops):
         t = np.ascontiguousarray(img[y0:y0 + tile, x0:x0 + tile])
@@ -168,7 +260,7 @@ def label_item(item: Item, img: np.ndarray, dists: Distributions, tile: int, cro
             t0 = time.perf_counter()
             m = label_tile(t, params, seed, ss, item.is_hdr)
             row = {"source": item.source, "file": item.file, "row": item.row, "y0": y0, "x0": x0, "size": tile,
-                   "draw": k, "seed": seed, "is_hdr": item.is_hdr, "ss": ss}
+                   "draw": k, "seed": seed, "is_hdr": item.is_hdr, "ss": ss, "scale": scale}
             row.update({f"p_{n}": v for n, v in params.to_dict().items()})
             row.update({f"m_{n}": float(m[n]) for n in STILL_METRICS})
             row["ms"] = (time.perf_counter() - t0) * 1000.0
@@ -220,11 +312,13 @@ def run_chunk(job: dict) -> dict:
     items = [Item(**d) for d in job["items"]]
     dists = _dists(job["derived_root"])
     errors: dict[Item, str] = {}
-    imgs = load_items(items, job["root"], errors)
+    scales: dict[Item, int] = {}
+    imgs = load_items(items, job["root"], errors, scales)
     rows = []
     for it in items:
         if it in imgs:
-            rows.extend(label_item(it, imgs[it], dists, job["tile"], job["crops"], job["per_tile"], job["ss"]))
+            rows.extend(label_item(it, imgs[it], dists, job["tile"], job["crops"], job["per_tile"], job["ss"],
+                                   scales.get(it, 1)))
         else:
             errors.setdefault(it, "not in its shard")
     unreadable = [{"file": it.file, "row": it.row, "error": errors[it]} for it in items if it in errors]

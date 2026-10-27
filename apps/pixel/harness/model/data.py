@@ -23,7 +23,7 @@ import numpy as np
 
 from ..data import data_root
 from ..data.degrade import DegradeParams, Distributions, degrade, prepare_tile, sample_params, tile_shading
-from ..data.label import PARQUET_SOURCES, Item, list_items, load_items
+from ..data.label import PARQUET_SOURCES, Item, list_items, load_items, scene_of
 from ..data.tilemetrics import tile_metrics
 from ..metrics import STILL_METRICS
 from ..io import save_png
@@ -36,8 +36,12 @@ MAX_REDRAWS = 32
 LOG_GAIN = 4096.0        # one 12-bit LSB below the clip: the log domain's floor, see the module docstring
 P_RESTORE_CAPTURE = 0.7  # restore pairs drawn with the sampler's raw "capture" profile (no IQA-ladder halos or
                          # posterise); the rest keep the "iqa" profile so phone JPEG inputs are still covered
-HOLDOUT_MOD = 16          # items whose identity hash is 0 mod this are the validation split
-TILES_PER_IMAGE = 1       # tiles per decoded image in the stream; 4 measured no faster (212 vs 220 ms per HDR sample), the sampler itself is the cost
+HOLDOUT_MOD = 16          # scenes (scene_of) whose identity hash is 0 mod this are the validation split
+TILES_PER_IMAGE = 16      # cap on consecutive draws from one decoded image in the stream, see TileSource.draws_on
+TILE_AREAS_PER_DRAW = 8   # one draw per this many tile areas the image holds: a 13 MP picture gives the cap, a 2k HDRI 4,
+                          # a KADID reference 1; at 4 draws on a 2k HDRI the stream measured no faster (212 vs 220 ms per
+                          # sample, the sampler is the cost there), on a 4 s decode of a 50 MP JPEG the cap is what feeds the GPU
+CACHE_BYTES = 1.5e9       # decoded images kept per loader worker: the 64 2k HDRIs of before, or ten 13 MP pictures
 METRIC_COND_DIM = 2 * len(STILL_METRICS)
 CAPTURE_DIM = 7
 COND_DIM = METRIC_COND_DIM + CAPTURE_DIM
@@ -159,7 +163,8 @@ def _h(*parts) -> int:
 
 
 def split_of(item: Item) -> str:
-    return "val" if _h("split", item.source, item.file, item.row) % HOLDOUT_MOD == 0 else "train"
+    """Hashed on the scene, not the file: the 1k and 2k copies of one Poly Haven HDRI land on the same side."""
+    return "val" if _h("split", item.source, scene_of(item), item.row) % HOLDOUT_MOD == 0 else "train"
 
 
 def export_clean_refs(sources: list[str], root: Path | None = None, log=print) -> None:
@@ -180,9 +185,10 @@ def export_clean_refs(sources: list[str], root: Path | None = None, log=print) -
 
 
 class TileSource:
-    """Clean tiles of one split: items listed once, images cached per process (LRU for HDR)."""
-    def __init__(self, sources: list[str], split: str, tile: int, root: Path | None = None, cache: int = 64,
-                 tiles_per_image: int = 1):
+    """Clean tiles of one split: items listed once, decoded images cached per process (LRU under a byte budget,
+    since a 2k HDRI is 25 MB and a 50 MP picture at clean scale 2 is 160 MB)."""
+    def __init__(self, sources: list[str], split: str, tile: int, root: Path | None = None,
+                 cache_bytes: float = CACHE_BYTES, tiles_per_image: int = 1):
         self.root = Path(root) if root else data_root()
         self.tile, self.split, self.tiles_per_image = tile, split, tiles_per_image
         self._cur: Item | None = None
@@ -191,7 +197,7 @@ class TileSource:
         if not self.items:
             raise ValueError(f"no items for split {split!r} in {sources}")
         self._cache: OrderedDict[Item, np.ndarray] = OrderedDict()
-        self._max = cache
+        self._max_bytes, self._bytes = float(cache_bytes), 0
 
     def image(self, it: Item) -> np.ndarray:
         if it in self._cache:
@@ -208,9 +214,16 @@ class TileSource:
             img = load_items([it], self.root)[it]
         img = img.astype(np.float32)
         self._cache[it] = img
-        while len(self._cache) > self._max:
-            self._cache.popitem(last=False)
+        self._bytes += img.nbytes
+        while self._bytes > self._max_bytes and len(self._cache) > 1:
+            self._bytes -= self._cache.popitem(last=False)[1].nbytes
         return img
+
+    def draws_on(self, img: np.ndarray) -> int:
+        """Consecutive draws kept on one decoded image: one per TILE_AREAS_PER_DRAW tile areas it holds, at most
+        tiles_per_image. Small references give one draw, a big picture amortises its decode over many."""
+        h, w = img.shape[:2]
+        return max(1, min(self.tiles_per_image, (h * w) // (self.tile * self.tile * TILE_AREAS_PER_DRAW)))
 
     def random_tile(self, rng: np.random.Generator) -> tuple[np.ndarray, Item, int, int]:
         """A random tile; with tiles_per_image > 1 consecutive draws stay on one decoded image (the stream's
@@ -219,10 +232,11 @@ class TileSource:
             if self._left > 0 and self._cur is not None:
                 it = self._cur
                 self._left -= 1
+                img = self.image(it)
             else:
                 it = self.items[int(rng.integers(len(self.items)))]
-                self._cur, self._left = it, self.tiles_per_image - 1
-            img = self.image(it)
+                img = self.image(it)
+                self._cur, self._left = it, self.draws_on(img) - 1
             h, w = img.shape[:2]
             if h >= self.tile and w >= self.tile:
                 y0, x0 = int(rng.integers(0, h - self.tile + 1)), int(rng.integers(0, w - self.tile + 1))

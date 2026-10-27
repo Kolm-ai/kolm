@@ -1919,6 +1919,11 @@
     "bucket": "hdrplusdata",
     "prefix": "20171106_subset/"
    },
+   "clean": {
+    "exclude": [
+     "*lens_shading_map_*.tiff"
+    ]
+   },
    "deriver": "capture_stats",
    "notes": "catalog:hdr-plus-burst. Public bucket listed anonymously through the storage JSON API with size and MD5 per object, no gsutil (checked 2026-10-27: 4,056 objects in 5 pages, 3.7 s). Pulls used: --param pattern='bursts/0006_' for one burst; --param 'pattern=(payload|lens_shading_map)_N000[.](dng|tiff)$' --max-bytes 4e9 for the first frame and shading map of all 153 bursts (3.3 GB, feeds capture_stats)."
   },
@@ -1948,11 +1953,17 @@
    "license": "CC0",
    "size_bytes": 25100000000.0,
    "gives": "one CC0 sample raw per camera model (926 make/model pairs, 1,874 CC0 files in all; 146 CC BY-NC-SA excluded by default)",
-   "harness_use": "one CC0 sample raw per camera model (~900 cameras): pixel pitch / bit depth / black level cross-check for sensors.csv",
+   "harness_use": "one CC0 sample raw per camera model (~900 cameras): pixel pitch / bit depth / black level cross-check for sensors.csv; held-out real-capture evaluation of the recovered layer (python -m harness model eval-raw) at clean scale 4, never a training source",
    "expander": "rpu_index",
    "params": {
     "pattern": ".*",
     "limit": 0
+   },
+   "clean": {
+    "scale": 4,
+    "exclude": [
+     "*.tif"
+    ]
    },
    "notes": "catalog:raw-pixls-us. Index first (repository.json), then one sha256-verified raw per make/model; --param limit=N for a sample, --param one_per_model=0 for every variant (55.8 GB), license=all adds the BY-NC-SA rows."
   },
@@ -2072,6 +2083,10 @@
     "min_pixels": 4000000,
     "max_bytes_each": 40000000,
     "page_size": 50
+   },
+   "clean": {
+    "scale": 2,
+    "low_quality_scale": 4
    },
    "notes": "Listing walked through the public action API (generator=categorymembers + imageinfo/extmetadata), one request per 50 files, the collector's per-host throttle applies. Bound with --max-bytes and --param limit=N; --param 'licences=^cc0' for a CC0-only pull. Budgeted in DEGRADATION_PLAN.md section 3.",
    "kind": "dataset",

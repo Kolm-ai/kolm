@@ -192,11 +192,17 @@ shadows. Its step 9000 checkpoint (54.7 min on the RTX 5090; its validation loss
 
 The eighth run (`recovered_v8`) keeps the seventh's domain and pair recipe and fixes the pair bug the seventh exposed: the target now carries the input's uncorrected lens shading unchanged (`input_shading` in `harness/model/data.py`, shading treated as scene), so the model no longer learns to darken bright patches to pay for a second shading map. Its step 9000 checkpoint (58.1 min on the RTX 5090, validation loss 0.1845 against the seventh's 0.1978 in the same domain) cuts the still's highlight loss from 0.429 to 0.010 known and from 0.325 to 0.009 blind, lowers the colour error to delta E 0.60 known and 0.42 blind (max 1.69 and 1.28), extends the resolution lead (mtf50 0.559 known and 0.530 blind against the camera's 0.220, texture 0.587 and 0.480 against 0.223, landmark error 0.25 against 0.45 px) and brings the shading RMSE (0.011 known, 0.009 blind) to a tie with the camera. It still fails tone_color because that gate is highlight loss <= 0, the shadow SNR stayed at 22.5 dB known and 24.7 dB blind against the camera's 26.2, and the bright-side edge overshoot grew to 0.207 known (0.126 blind). The video fails provenance at 2.2 % known and 2.3 % blind against the 1 % gate (3.6 % on the seventh run); its flow and trajectory errors beat the camera, its flicker does not. The ninth run adds the local-range term (`RANGE_WEIGHT` in `harness/model/train.py`): every output value above the target's 3 by 3 maximum or below its minimum is charged once more, so a thin halo is no longer cheap.
 
+The ninth run (`recovered_v9`) adds that term and stopped at step 6743 when the 75-minute budget ran out (the loader fell to about 12 images per second late in the run; its validation loss, 0.2825, includes the range term and is not comparable to the eighth's 0.1845). The term does what it was added for and costs what the halo prior was buying: on the still the edge overshoot falls from 0.207 to 0.098 known and from 0.126 to 0.044 blind, the highlight loss goes to 0, and the shadow SNR ties the camera known (25.6 against 26.2 dB) and beats it blind (27.9 dB); about half of the resolution lead is gone (mtf50 0.384 known and 0.284 blind against the camera's 0.220, texture 0.306 and 0.261 against 0.223, landmark error 0.29 against 0.45 px known), the banding rises to 0.0063 known against the camera's 0.0035 (0.0040 blind, a tie) and the colour error's maximum to 1.99 known (delta E 0.58 known, 0.43 blind). The still now fails at artifacts (the overshoot gate is 0.01) instead of tone_color; the video fails provenance at 1.68 % known and 2.47 % blind.
+
+`eval-raw` is the held-out real-capture evaluation (`harness/model/heldout.py`): 64 tiles of 256 px cut at clean scale 4 from `raw-pixls-us`, one CC0 raw per camera model (777 usable files) that no run trains on, rendered through the demo claim's `best_case_earth` camera with the sampler's exposure policy, restored known and blind, and scored with the twelve still metrics against the clean tile, input and model alike, with a per-tile verdict at each gate's tie margin. The set is a function of source, seed, count and tile size and is cached under `derived/heldout/`, so every checkpoint sees the same tiles; the report goes to `heldout_known/` or `heldout_blind/` beside the checkpoint. The references carry each camera's own noise and demosaic (scale 4 averages most of it away), which bounds the score. On it the eighth run sharpens (mtf50 0.254 to 0.365, texture 0.237 to 0.585, beating the capture on 47 of 64 tiles) but adds noise in the shadows (shadow SNR 14.8 to 12.9 dB, losing on 19 tiles), puts a halo on edges that had none (overshoot 0 to 0.029, losing on 45 tiles) and drops a dynamic-range step on 28 tiles; colour, banding, periodicity, landmark and shading tie: 3 beats, 5 ties, 4 losses on the medians. The ninth run's range term removes exactly those three: overshoot 0.0003 known and 0 blind, shadow SNR 14.6 known and 14.9 blind (ties), the dynamic-range step kept, at about half the sharpening gain (mtf50 0.307 known and 0.284 blind, texture 0.358 and 0.302): 3 beats, 8 ties, 1 loss (banding, 0.0095 to 0.013) known and 2, 8, 2 blind (banding and the colour maximum). Known and blind differ by less than the tie margins on every metric for both runs: on real captures the capture descriptor is carrying almost nothing.
+
 ```bash
-python -m harness model train --out data/models/recovered_v7 --steps 9000 --minutes 75 --batch 16 --tile 256 --workers 12
-python -m harness model eval-demo --ckpt data/models/recovered_v7/best.pt --out demo_out_model
-python -m harness model eval-demo --ckpt data/models/recovered_v7/best.pt --out demo_out_model_blind --blind
-python -m harness model apply --ckpt data/models/recovered_v7/best.pt --input frames.npy --out restored --white-level 1.0 --capture capture.json
+python -m harness model train --out data/models/recovered_v9 --steps 9000 --minutes 75 --batch 16 --tile 256 --workers 12
+python -m harness model eval-demo --ckpt data/models/recovered_v9/best.pt --out demo_out_model
+python -m harness model eval-demo --ckpt data/models/recovered_v9/best.pt --out demo_out_model_blind --blind
+python -m harness model eval-raw --ckpt data/models/recovered_v9/best.pt            # held-out real raws, capture known
+python -m harness model eval-raw --ckpt data/models/recovered_v9/best.pt --blind    # the same tiles, capture withheld
+python -m harness model apply --ckpt data/models/recovered_v9/best.pt --input frames.npy --out restored --white-level 1.0 --capture capture.json
 ```
 
 The model commands take explicit paths: with `HARNESS_DATA_ROOT` set, put the checkpoint directory under that
@@ -208,7 +214,7 @@ judges the result through the gates like any candidate, so the report says on wh
 best-case camera and whether it stays under the provenance limit. `train` resumes from `last.pt`, logs to
 `train_log.jsonl` (loss, images per second, per-metric medians of input and output against the clean target on
 the held-out restore set every checkpoint), and keeps `best.pt` by validation loss. Held-out items are a hash
-split of the clean sources (one in sixteen).
+split of the clean sources by scene (one in sixteen), and `eval-raw` scores real raws no run trains on.
 
 ## Data: no invented constants
 
@@ -218,7 +224,7 @@ the ppd threshold, the ΔE / banding gates, viewing distance) now comes from a s
 - `harness/data/reference/*.csv` — hand-verified rows (sensors, lenses, displays, vision
   thresholds). **No source, no row**: every row carries a `source_url` and a `quote`; the
   reader refuses a row without one.
-- `harness/data/sources.json` — the manifest: 122 sources (spec PDFs, vendor pages, Zenodo
+- `harness/data/sources.json` — the manifest: 124 sources (spec PDFs, vendor pages, Zenodo
   records, Hugging Face datasets, CC0 asset libraries) with licence, size tier
   (S < 50 MB, M < 2 GB, L < 50 GB, XL), access kind and what each feeds.
 - `harness/data/catalog/datasets.json` — 122 human-rated image/video datasets, with which
@@ -288,6 +294,9 @@ python -m harness data derive --ids hdri_stats polyhaven_index   # scene range f
 python -m harness data collect --ids hf-sidd-dng-mirror --param 'pattern=data/train/(0028|0068|0032|0030|0088|0134)_DNG' --max-bytes 2e10   # iPhone 7 bursts, 14.1 GB
 python -m harness data collect --ids hdr-plus-burst --param 'pattern=(payload|lens_shading_map)_N000[.](dng|tiff)$' --max-bytes 4e9   # HDR+ first frames, 3.3 GB
 python -m harness data derive --ids capture_stats    # real capture constraints from the HDR+ first frames (about 20 s, no rawpy)
+python -m harness data collect --ids wikimedia-featured-pictures --param limit=5000 --max-bytes 40e9 --jobs 4   # 4,027 clean originals, licence per file, 38 GB
+python -m harness data collect --ids raw-pixls-us --max-bytes 30e9                # one raw per camera model, 25 GB, held out for eval-raw
+python -m harness data label --sources polyhaven-hdris hdr-plus-burst wikimedia-featured-pictures hf-kadid10k-images hf-tid2013 --n 2000000 --jobs 16   # offline metric labels, resumable per chunk
 python -m harness data plan --out DATA_PLAN.md       # refresh the plan table
 ```
 
@@ -297,6 +306,16 @@ host that refused it. Set `HARNESS_DATA_ROOT` to put the large tiers on a real d
 Hugging Face sets read `HF_TOKEN`. `claims/example_sourced.json` is a claim whose camera,
 display and gates all resolve to derived tables. [DATA_PLAN.md](DATA_PLAN.md) lists every
 source, its status and the remaining gaps.
+
+The recovered layer's clean sources (`DEFAULT_SOURCES` in `harness/model/train.py`) are the KADID-10k and TID2013
+references, the Poly Haven HDRIs and the Wikimedia featured pictures: 4,027 expert-reviewed camera originals
+(38 GB; the API walk listed 5,000 and skipped 672 for licence, type or size), the licence read per file and kept
+as the first path component. Each source's `clean` block in `sources.json` says how the labeller and the sampler
+read it: `scale` (the featured pictures at 2, and at `low_quality_scale` 4 when the JPEG quality is low;
+raw.pixls.us at 4) and `exclude` (the `*.tif` scan containers of raw.pixls.us, the HDR+ lens-shading maps).
+raw.pixls.us (777 raws, 25 GB, one per camera model) is held out for `eval-raw` and never trained on; the
+held-out split of the training sources is by scene, so a Poly Haven HDRI's resolutions and a burst's frames fall
+on one side of the hash.
 
 ## Scope boundary
 
@@ -326,7 +345,7 @@ harness/cli.py          demo | run | render | preference | data | model
 harness/data/           manifest, parallel resumable collector, expanders (HF, Zenodo, Wikimedia Commons, ...), derivers, gate fitting, labeller
 harness/data/reference/ sourced CSVs: sensors, lenses, displays, vision thresholds
 harness/data/catalog/   122 human-rated image/video datasets and what each can calibrate
-harness/model/          the recovered layer: on-the-fly pairs from the sampler, conditioned UNet, trainer, inference
-$HARNESS_DATA_ROOT/     raw/<source>/..., ledger.jsonl, derived/*.json, labels/, models/<run>/ (outside the repo)
+harness/model/          the recovered layer: on-the-fly pairs from the sampler, conditioned UNet, trainer, inference, held-out raw evaluation
+$HARNESS_DATA_ROOT/     raw/<source>/..., ledger.jsonl, derived/*.json, derived/heldout/, labels/, models/<run>/ (outside the repo)
 tests/                  physics sanity, metric sensitivity, pipeline
 ```

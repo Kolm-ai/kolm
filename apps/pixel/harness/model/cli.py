@@ -1,4 +1,4 @@
-"""python -m harness model {train | apply | eval-demo}"""
+"""python -m harness model {train | apply | eval-demo | eval-raw}"""
 from __future__ import annotations
 
 import json
@@ -68,13 +68,28 @@ def cmd_eval_demo(args) -> int:
     return 0 if all(v == "PASS" for v in codes.values()) else 1
 
 
+def cmd_eval_raw(args) -> int:
+    """Real raws no run trains on, through the demo camera: the held-out real-capture evaluation (heldout.py)."""
+    from .heldout import evaluate, to_markdown
+    out = Path(args.out) if args.out else Path(args.ckpt).resolve().parent / f"heldout_{'blind' if args.blind else 'known'}"
+    rep = evaluate(args.ckpt, blind=args.blind, source=args.source, n=args.n, tile=args.tile, seed=args.seed,
+                   ss=args.ss, device=args.device, out=out, save_tiles=args.save_tiles)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "heldout.json").write_text(json.dumps(rep, indent=1), encoding="utf-8")
+    md = to_markdown(rep)
+    (out / "heldout.md").write_text(md, encoding="utf-8")
+    print(md, end="")
+    print(f"  report: {out / 'heldout.md'}")
+    return 0
+
+
 def add_parser(sub) -> None:
     m = sub.add_parser("model", help="the recovered layer: train, apply, judge on the demo worlds")
     ms = m.add_subparsers(dest="mcmd", required=True)
 
     t = ms.add_parser("train", help="train on pairs the degradation sampler renders on the fly")
     t.add_argument("--out", required=True, help="checkpoint directory (resumes from last.pt)")
-    t.add_argument("--sources", help="comma-separated clean sources (default: kadid10k, tid2013, polyhaven HDRIs)")
+    t.add_argument("--sources", help="comma-separated clean sources (default: kadid10k, tid2013, polyhaven HDRIs, Wikimedia featured pictures)")
     t.add_argument("--steps", type=int, default=20000)
     t.add_argument("--batch", type=int, default=16)
     t.add_argument("--tile", type=int, default=256)
@@ -108,3 +123,16 @@ def add_parser(sub) -> None:
     e.add_argument("--quick", action="store_true")
     e.add_argument("--device")
     e.set_defaults(func=cmd_eval_demo)
+
+    r = ms.add_parser("eval-raw", help="restore real raws no run trains on, through the demo camera, and score them")
+    r.add_argument("--ckpt", required=True)
+    r.add_argument("--out", help="report directory (default: heldout_known or heldout_blind beside the checkpoint)")
+    r.add_argument("--blind", action="store_true", help="withhold the capture descriptor")
+    r.add_argument("--source", default="raw-pixls-us", help="a clean source no run trains on")
+    r.add_argument("--n", type=int, default=64, help="tiles in the set (the set is a function of source, seed, n, tile)")
+    r.add_argument("--tile", type=int, default=256)
+    r.add_argument("--seed", type=int, default=0)
+    r.add_argument("--ss", type=int, default=1, help="optics supersampling of the capture render")
+    r.add_argument("--save-tiles", type=int, default=8, help="write the first tiles as input/model/target PNG stacks")
+    r.add_argument("--device")
+    r.set_defaults(func=cmd_eval_raw)

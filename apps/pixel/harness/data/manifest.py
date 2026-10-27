@@ -57,6 +57,8 @@ class Source:
     deriver: str | None = None
     requires: list[str] = field(default_factory=list)
     notes: str = ""
+    clean: dict = field(default_factory=dict)  # how the labeller and trainer read it as a clean source:
+    #   scale (box-downsample factor), low_quality_scale (for JPEGs below quality 90), exclude (fnmatch patterns)
 
     @property
     def tier(self) -> str:

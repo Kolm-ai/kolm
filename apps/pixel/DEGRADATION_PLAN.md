@@ -87,9 +87,9 @@ sources with `python -m harness data collect` into that root. D: has 1908 GB fre
 | hf-tid2013 | 1.5 GB, 25 refs | keep | ISP distortion statistics; clean LDR tiles |
 | hf-sidd-dng-mirror | 21.5 GB | keep | noise calibration only, not a clean source |
 | RawNIND | none | 120 GB | raw clean/noisy pairs: a real noise direction to check the synthetic one against |
-| raw.pixls.us | 4 samples | 25 GB | one raw per camera model: camera-model coverage and real sensor data |
-| wikimedia-featured-pictures | none | about 40 GB (limit 5000, at most 40 MB each) | expert-reviewed camera originals; licence read per file by the API walk and kept as the first path component (CC0, public domain, CC BY, CC BY-SA; NC and ND skipped): the first large LDR photo corpus |
-| wikimedia-quality-images | none | 100 GB by `--max-bytes` | the same review pipeline, 450 k files deep: the clean corpus now scales with the byte budget, not with a new source |
+| raw.pixls.us | 24.9 GB, 926 files (777 raws; the rest `*.tif` scan containers, excluded) | done | one raw per camera model: the held-out real-capture evaluation (`eval-raw`), never a training source |
+| wikimedia-featured-pictures | 38 GB, 4,027 files (5,000 listed; 672 skipped for licence, type or size) | done | expert-reviewed camera originals; licence read per file by the API walk and kept as the first path component (CC0, public domain, CC BY, CC BY-SA; NC and ND skipped): the first large LDR photo corpus |
+| wikimedia-quality-images | 6.7 GB, 914 files and collecting (20,000 listed, 2,475 skipped) | 100 GB by `--max-bytes` | the same review pipeline, 450 k files deep: the clean corpus now scales with the byte budget, not with a new source |
 | MIT-Adobe FiveK | none | 51 GB, evaluation only | research-only non-commercial licence (DATA_PLAN principle 5): a real edit direction to evaluate against, never a training source |
 | HDR+ full | subset above | stream, 3.7 TB | larger than D: (1.9 TB); fetch bursts on demand, never mirror |
 | Hypersim | none | skip, 1.9 TB | would fill D: alone and is rendered without a sensor; stream frames only if a synthetic-scene prior is wanted later |
@@ -119,6 +119,9 @@ with `--crops 32 --per-tile 32` a thousand HDRIs give 1 M rows, and the full pla
 RawNIND, pixls, about 1100 HDRIs, the HDR+ bursts) gives 10 M at about 1 k rows per image. Scene diversity is
 bounded by the corpus; the label count is not, and more draws per tile mostly add parameter coverage, which
 is exactly what the pair construction of section 1 consumes.
+Since the eighth run the sampler draws 16 tile areas per decoded image, each source is read at its own clean
+scale with its `clean.exclude` patterns left out (section 3 rows), and the held-out split is by scene, so a
+Poly Haven HDRI's resolutions and a burst's frames fall on one side of the hash.
 
 ## 5. Throughput
 
@@ -243,6 +246,28 @@ What a tile can and cannot identify (learned from the first three model runs, 20
   seventh run the domain is `log1p(4096 x)`: one 12-bit LSB is where the log turns linear, the clip encodes to
   8.3 with slope 1.0 there (0.9 before), and the floor at 0.001 of the clip is 100x finer. Measured on the seventh run (2026-10-28, step 9000 checkpoint): the control held, a flat mid-grey field comes back with std 0.0019 at step 1000 and 0.0038 at step 9000, so the finer domain did not make the mid-tones noisier; the deepest wedge patch at 0.001 of the clip comes back at 13.2 dB known and 15.0 dB blind against the camera's 20.8 (5.8 dB on the sixth run), and the still's shadow SNR rose from 13.5 to 22.8 dB known and 25.6 dB blind, which ties the camera's 26.2. The halo prior went with the ladder: a clean ramp comes back at 1.000 at mid-tones. The still still fails tone_color (known: mtf50 0.500 against 0.220, texture 0.472 against 0.223, landmark error 0.26 against 0.45 px, highlight loss 0.429, delta E 0.86, edge overshoot 0.178, banding 0.0067 against 0.0035; blind: mtf50 0.446, highlight loss 0.325, delta E 0.66, overshoot 0.130) and the video fails provenance (3.6 % known, 3.7 % blind): the brightest wedge patches come back 6 to 9 % dark and the mid and bright patches 10 to 20 dB noisier than the camera, the deconvolution amplifying noise where the camera has little. A clean ramp came back 5 % dark at every level at step 1000 and the shadows 13 % dark at step 2500; that darkening does not depend on the conditioning and the pairs' median target-to-input ratio is 1.0, and it was traced to a bug in how the pairs carried the input's lens shading into the target, the next bullet.
 
+- The halo's price. The eighth run's bright-side overshoot (0.207 known on the still, and 0.029 on 45 of 64 real
+  raw tiles whose input had none) is what L1 against a sharpened target buys: a thin overshoot costs one
+  pixel-width of small error and pays for a steeper edge everywhere. The ninth run charges every output value
+  above the target's 3 by 3 maximum or below its minimum once more (`RANGE_WEIGHT` in
+  `harness/model/train.py`; step 6743 when the 75-minute budget ran out). Measured: overshoot 0.098 known and
+  0.044 blind on the chart, 0.0003 and 0 on the real raws; the shadow SNR stops falling on the raws (14.6 dB
+  against the input's 14.8, where the eighth run fell to 12.9) and ties the camera on the chart (25.6 against
+  26.2 dB); the dynamic-range step the eighth run lost on the raws is kept; and about half of the eighth run's
+  resolution gain is gone (mtf50 0.384 against 0.559 on the chart, 0.307 against 0.365 on the raws, the inputs
+  at 0.220 and 0.254). A range clamp is not a model of an edge: the 0.098 that remains on the chart, against a
+  gate of 0.01, is where the halo is wider than the 3 by 3 window.
+- Synthetic to real, measured for the first time (`python -m harness model eval-raw`, `harness/model/heldout.py`,
+  2026-10-28): 64 tiles of 256 px from raw.pixls.us at clean scale 4, one raw per camera model and never a
+  training source, rendered through the demo claim's camera with the sampler's exposure policy and scored with
+  the twelve tile metrics against the clean tile, input and model alike. Three things the chart did not show at
+  this size: the eighth run adds noise in real shadows (shadow SNR 14.8 to 12.9 dB, losing on 19 tiles), puts a
+  halo on edges that had none, and drops a dynamic-range step on 28 tiles. And known and blind differ by less
+  than the tie margins on every metric for both runs, so the capture descriptor carries almost nothing on real
+  captures. The references bound the score: each carries its own camera's noise and demosaic (scale 4 averages
+  most of it away), so a model that removes real noise is charged for it. The real pairs of step 4 (RawNIND's
+  clean mates, HDR+ burst merges) are the instrument without this bound.
+
 So the real sources are the check, not decoration: label RawNIND's noisy raws and the HDR+ bursts against
 their clean mates with the same tile metrics and compare those distributions with the synthetic rows at
 matched ISO; FiveK's five retouches per raw are the real "state A to state B" direction. A model trained on
@@ -257,13 +282,18 @@ aliasing-sensitive metrics.
 1. Set `HARNESS_DATA_ROOT=D:\lens-harness-data` and move the data root there.
 2. Collect Poly Haven and ambientCG HDRIs at 2k, raw.pixls.us, RawNIND, Wikimedia featured pictures and
    quality images (licence per file), each under `--max-bytes`; FiveK separately and for evaluation only.
+   Status 2026-10-28: Poly Haven at 1k, raw.pixls.us (25 GB), the featured pictures (38 GB) and 40 GB of RawNIND
+   are on D:; the quality images are collecting.
 3. `python -m harness data label --sources <all clean ids> --n 10000000 --chunk 64 --crops 16 --per-tile 16`
    (36 to 50 h on this machine; resumable per item: the ledger's shards say which files are labelled under the
    current tile, draw and crop settings, so a re-run after the corpus grew labels only the new files, into new
-   chunks, and never rewrites a shard).
+   chunks, and never rewrites a shard). Status 2026-10-28: 42,048 rows in 351 shards at tile 256, 4 draws, 4 crops;
+   on this branch the pass stops after one chunk when a worker dies (`BrokenProcessPool`, a native decoder taking
+   a worker down), and the pool retry that survives it is on the `pixel-label-raw-exr` branch, not yet merged.
 4. Real-pair labels from RawNIND and HDR+ with the same tile metrics; compare distributions.
 5. Train with the metric vector as conditioning; evaluate on the chart metrics and the real pairs.
    Started 2026-10-27 in `harness/model/` (pairs rendered on the fly by the sampler, conditioned residual UNet,
-   `python -m harness model train|apply|eval-demo`); seven runs, six on 2026-10-27 and the seventh on 2026-10-28, each fixing one unidentifiable
+   `python -m harness model train|apply|eval-demo`); nine runs, six on 2026-10-27 and three on 2026-10-28, each fixing one unidentifiable
    variable found by the previous one (section 7); the measured demo-world verdicts per run are in README.md
-   and LANDSCAPE.md section 6. The real-pair evaluation waits on step 4.
+   and LANDSCAPE.md section 6. Since the ninth run `python -m harness model eval-raw` scores a checkpoint on real
+   raws no run trains on (raw.pixls.us through the demo camera, section 7); the real-pair evaluation waits on step 4.

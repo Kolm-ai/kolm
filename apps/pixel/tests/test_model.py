@@ -307,3 +307,36 @@ def test_range_loss_is_zero_at_the_target_and_charges_a_halo():
     assert float(range_excess(out, y).max()) == pytest.approx(0.2)
     assert float(range_excess(out, y)[..., :, 7].max()) == 0.0   # the dark side is inside its range
     assert float(pair_loss(out, y, x)) > float(pair_loss(y, y, x)) == 0.0
+
+
+def test_eval_raw_scores_a_checkpoint_on_held_out_tiles(tmp_path):
+    """heldout.evaluate: a tiny checkpoint on a two-file held-out source, known and blind, from one cached set."""
+    import json
+    from PIL import Image
+    from scipy.ndimage import gaussian_filter
+    from harness.model.heldout import evaluate, to_markdown
+    src = tmp_path / "raw" / "test-raws"
+    src.mkdir(parents=True)
+    rng = np.random.default_rng(3)
+    for i in range(2):
+        img = (np.clip(gaussian_filter(rng.random((80, 96, 3)), 2) * 2.5, 0, 1) * 255).astype(np.uint8)
+        Image.fromarray(img).save(src / f"r{i}.png")
+    torch.manual_seed(0)
+    net = CondUNet(base=8, mults=(1, 2), blocks=1)
+    norm = Normaliser(np.zeros(len(STILL_METRICS)), np.ones(len(STILL_METRICS)))
+    ck = tmp_path / "tiny.pt"
+    torch.save({"ema": net.state_dict(), "config": net.config, "normaliser": norm.state(),
+                "cond_restore": [0.0] * METRIC_COND_DIM, "step": 7}, ck)
+    out = tmp_path / "rep"
+    rep = evaluate(ck, blind=False, source="test-raws", n=2, tile=32, seed=0, root=tmp_path, device="cpu", out=out,
+                   save_tiles=2, log=None)
+    assert rep["n"] == 2 and rep["step"] == 7 and rep["scale"] == 1 and not rep["blind"] and rep["skipped"] == {}
+    assert set(rep["metrics"]) == set(STILL_METRICS) and len(rep["tiles"]) == 2 and len(rep["records"]) == 2
+    assert np.load(out / "tiles" / "model.npy").shape == (2, 32, 32, 3)
+    assert (out / "tiles" / "input.npy").exists() and (out / "tiles" / "target.npy").exists()
+    json.dumps(rep)
+    assert "step 7" in to_markdown(rep) and "known" in to_markdown(rep)
+    for m, s in rep["metrics"].items():  # the net is the identity at init: the output is the input, nothing moves
+        assert s["beats"] == 0 and s["loses"] == 0, (m, s)
+    blind = evaluate(ck, blind=True, source="test-raws", n=2, tile=32, seed=0, root=tmp_path, device="cpu", log=None)
+    assert blind["blind"] and blind["records"] == rep["records"] and "withheld" in to_markdown(blind)

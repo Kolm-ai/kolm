@@ -21,7 +21,9 @@ from ..metrics import STILL_METRICS
 from .data import Normaliser, PairStream, cond_vector, decode, encode, fixed_set
 from .net import CondUNet
 
-DEFAULT_SOURCES = ("hf-kadid10k-images", "hf-tid2013", "polyhaven-hdris")
+DEFAULT_SOURCES = ("hf-kadid10k-images", "hf-tid2013", "polyhaven-hdris", "wikimedia-featured-pictures")
+"""The clean sources a run trains on unless --sources says otherwise. raw-pixls-us is never among them: it is the
+held-out real-capture evaluation (harness.model.heldout)."""
 CLIP_WEIGHT = 0.25
 GRAD_WEIGHT = 0.5
 # Local-range term (ninth run): a restoration must not create luminance extrema beyond the target's own local
