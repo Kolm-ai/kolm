@@ -369,3 +369,46 @@ def test_wikimedia_category_keeps_the_licence_per_file_and_verifies_sha1():
     assert [s.path for s in wikimedia_category(Stub(), src)] == ["index/0000.json", "cc-by-sa-4.0/1_Sunset_over_Dubrovnik.jpg"]
     src.params = {"category": "Category:T", "licences": "^cc0"}
     assert [s.path for s in wikimedia_category(Stub(), src) if not s.path.startswith("index/")] == ["cc0/4_Tiny.jpg"]
+
+
+def test_listings_back_off_politely_and_honour_retry_after(tmp_path, monkeypatch):
+    """A 429 with Retry-After waits that long (never less than the exponential floor), a 503 without one backs off
+    exponentially, the walk then succeeds; hosts with an etiquette get their own interval; the agent names us."""
+    import requests
+    from harness.data import collect as C
+
+    class R:
+        def __init__(self, status, headers=None):
+            self.status_code, self.headers, self.url = status, headers or {}, "https://commons.wikimedia.org/w/api.php"
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise requests.HTTPError(str(self.status_code), response=self)
+
+        def json(self):
+            return {"ok": True}
+
+        text = "ok"
+
+    assert "github.com/Kolm-ai/kolm" in C.USER_AGENT and "python-requests" in C.USER_AGENT
+    assert C._HostThrottle(0.05).per_host["commons.wikimedia.org"] >= 1.0
+    assert C.retry_delay(0, R(429, {"Retry-After": "7"}), base=2.0) == 7.0
+    assert C.retry_delay(3, R(429, {"Retry-After": "1"}), base=2.0) == 16.0          # floor wins over a short hint
+    assert C.retry_delay(0, R(429, {"Retry-After": "9999"})) == C.MAX_BACKOFF_S      # cap
+    assert C.retry_delay(0, R(503, {"Retry-After": "Thu, 01 Jan 1970 00:00:00 GMT"})) == 1.5  # past date: floor
+    assert C.retry_delay(2, None) == 6.0
+
+    sleeps, calls = [], []
+    monkeypatch.setattr(C.time, "sleep", lambda s: sleeps.append(s))
+    c = C.Collector(root=tmp_path, jobs=1, dry_run=True, log=lambda *_: None)
+    assert c._session.headers["User-Agent"] == C.USER_AGENT
+    c._throttle = C._HostThrottle(0.0, {})
+    responses = [R(429, {"Retry-After": "7"}), R(503), R(200)]
+    c._session.get = lambda url, **kw: (calls.append((url, kw)), responses.pop(0))[1]
+    assert c.get_json("https://commons.wikimedia.org/w/api.php", params={"a": "1"}) == {"ok": True}
+    assert sleeps == [7.0, 4.0] and len(calls) == 3 and calls[0][1]["params"] == {"a": "1"}
+    responses[:] = [R(429)] * C.LISTING_RETRIES
+    sleeps.clear()
+    with pytest.raises(requests.HTTPError):
+        c.get_text("https://commons.wikimedia.org/w/api.php")
+    assert len(sleeps) == C.LISTING_RETRIES - 1 and sleeps == sorted(sleeps) and max(sleeps) <= C.MAX_BACKOFF_S

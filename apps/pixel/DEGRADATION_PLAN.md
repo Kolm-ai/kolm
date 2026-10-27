@@ -42,6 +42,14 @@ highlights), the peak fill that policy aims at, `PEAK_FILL = (0.5, 1.0)` of the 
 `EXPOSE_FOR_PEAK_STOPS = (-4, +1)` stops from mid-grey, the LDR stretch cap `MAX_STRETCH_GAMMA = 3`, and
 the tile geometry.
 
+The sampler has two profiles (`PROFILES` in `harness/data/degrade.py`, added 2026-10-28): the default `iqa`
+profile above, and a `capture` profile in which the camera stage is always on and only the measured ISP stages
+(tone affine, saturation, colour cast, JPEG) are coins, with no unsharp and no posterise, because
+isp_stats.json holds no measured real-ISP sharpening and the KADID-ladder unsharp levels taught the model a
+halo (section 7). The model's restore pairs draw the capture profile with `P_RESTORE_CAPTURE = 0.7`
+(`harness/model/data.py`); the labels and the edit pairs keep the default profile, so existing label shards
+and seeds map to the same vectors.
+
 The expose-for-the-peak policy (added 2026-10-27) exists because the measured exposure offsets are all near
 zero (q05/50/95 = 0/0/0.01 stops over the 153 HDR+ frames: BaselineExposure says nothing about the
 under-exposure HDR+ applies before it), so the first model run saw every dark input as a mean-shift defect
@@ -218,6 +226,22 @@ What a tile can and cannot identify (learned from the first three model runs, 20
   comes back at 0.96 to 0.98 of the input and a clean step edge shows no overshoot, while the demo wedge's
   deepest patch comes back 1.8x bright at 5.8 dB with the descriptor and at 2.2 dB blind: neither the halo
   nor the shadow floor is the conditioning's to fix.
+- What the pairs teach and where the output can resolve. With the target and the input's capture identified
+  (the fifth and sixth runs), two faults stayed at every checkpoint of both runs and no conditioning could
+  carry them away. First, a halo prior: the IQA ladder's unsharp stage was on in half of all inputs at the
+  KADID levels (gain q10/50/90 1.53/3.65/6.33 against an overshoot gate of 0.02 and a camera at 0.005), so the
+  median restore target of a small bright patch between darker separators is darker than the input (on the
+  sampler's own pairs the target-to-input ratio at 0.8 to 0.9 of the clip has median 1.0 but mean 0.914 and
+  q10 0.477), and the demo wedge's bright patches came back about 5 % dark while a clean ramp came back at
+  0.97 to 1.0: a prior, not a tone curve. From the seventh run the restore inputs are drawn with the sampler's
+  `capture` profile (section 2) with probability 0.7, and the edits keep the IQA profile so a declared halo
+  is still removed. Second, the output floor: the network's precision is absolute in the encoded domain (a
+  flat mid-grey field comes back with std 0.001 to 0.002 on the sixth run's checkpoints, 0.0024 on the fifth) and in `log1p(8 x)`
+  that floor was 20 to 50 % of the signal at 0.001 of the clip, where the deepest wedge patches sit (shadow
+  SNR 12 dB on the fifth run and 4 to 7 dB on the sixth against the camera's 26 dB). L1 gradients are
+  sign-based, so the domain decides where the output can resolve the signal, not a per-pixel weight. From the
+  seventh run the domain is `log1p(4096 x)`: one 12-bit LSB is where the log turns linear, the clip encodes to
+  8.3 with slope 1.0 there (0.9 before), and the floor at 0.001 of the clip is 100x finer. Measured on the seventh run (2026-10-28, step 9000 checkpoint): the control held, a flat mid-grey field comes back with std 0.0019 at step 1000 and 0.0038 at step 9000, so the finer domain did not make the mid-tones noisier; the deepest wedge patch at 0.001 of the clip comes back at 13.2 dB known and 15.0 dB blind against the camera's 20.8 (5.8 dB on the sixth run), and the still's shadow SNR rose from 13.5 to 22.8 dB known and 25.6 dB blind, which ties the camera's 26.2. The halo prior went with the ladder: a clean ramp comes back at 1.000 at mid-tones. The still still fails tone_color (known: mtf50 0.500 against 0.220, texture 0.472 against 0.223, landmark error 0.26 against 0.45 px, highlight loss 0.429, delta E 0.86, edge overshoot 0.178, banding 0.0067 against 0.0035; blind: mtf50 0.446, highlight loss 0.325, delta E 0.66, overshoot 0.130) and the video fails provenance (3.6 % known, 3.7 % blind): the brightest wedge patches come back 6 to 9 % dark and the mid and bright patches 10 to 20 dB noisier than the camera, the deconvolution amplifying noise where the camera has little. A clean ramp came back 5 % dark at every level at step 1000 and the shadows 13 % dark at step 2500; that darkening does not depend on the conditioning and the pairs' median target-to-input ratio is 1.0, and it was traced to a bug in how the pairs carried the input's lens shading into the target, the next bullet.
 
 So the real sources are the check, not decoration: label RawNIND's noisy raws and the HDR+ bursts against
 their clean mates with the same tile metrics and compare those distributions with the synthetic rows at
@@ -234,10 +258,12 @@ aliasing-sensitive metrics.
 2. Collect Poly Haven and ambientCG HDRIs at 2k, raw.pixls.us, RawNIND, Wikimedia featured pictures and
    quality images (licence per file), each under `--max-bytes`; FiveK separately and for evaluation only.
 3. `python -m harness data label --sources <all clean ids> --n 10000000 --chunk 64 --crops 16 --per-tile 16`
-   (36 to 50 h on this machine; resumable).
+   (36 to 50 h on this machine; resumable per item: the ledger's shards say which files are labelled under the
+   current tile, draw and crop settings, so a re-run after the corpus grew labels only the new files, into new
+   chunks, and never rewrites a shard).
 4. Real-pair labels from RawNIND and HDR+ with the same tile metrics; compare distributions.
 5. Train with the metric vector as conditioning; evaluate on the chart metrics and the real pairs.
    Started 2026-10-27 in `harness/model/` (pairs rendered on the fly by the sampler, conditioned residual UNet,
-   `python -m harness model train|apply|eval-demo`); six runs on 2026-10-27, each fixing one unidentifiable
+   `python -m harness model train|apply|eval-demo`); seven runs, six on 2026-10-27 and the seventh on 2026-10-28, each fixing one unidentifiable
    variable found by the previous one (section 7); the measured demo-world verdicts per run are in README.md
    and LANDSCAPE.md section 6. The real-pair evaluation waits on step 4.

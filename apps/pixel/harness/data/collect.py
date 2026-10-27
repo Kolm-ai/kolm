@@ -21,10 +21,18 @@ import requests
 from . import data_root
 from .manifest import FileSpec, Source
 
-USER_AGENT = "harness-data/0.1 (+verifiably-better-than-any-lens)"
+USER_AGENT = os.environ.get("HARNESS_USER_AGENT") or (
+    "kolm-pixel-collector/0.1 (https://github.com/Kolm-ai/kolm apps/pixel; manifest-driven research corpus; "
+    f"honours Retry-After) python-requests/{requests.__version__}")
 CHUNK = 1 << 20
 RETRIES = 4
+LISTING_RETRIES = 7          # API walks are cheap to retry and expensive to restart
+MAX_BACKOFF_S = 120.0
 MIN_INTERVAL_PER_HOST_S = 0.05
+# Hosts that publish an etiquette (Wikimedia: one request at a time, a descriptive agent, back off on 429/503):
+# one request per interval, applied to listings and downloads alike, whatever --jobs says.
+POLITE_HOSTS_S = {"commons.wikimedia.org": 1.0, "upload.wikimedia.org": 0.25}
+RETRY_STATUS = (429, 500, 502, 503, 504)
 
 
 @dataclass
@@ -40,16 +48,42 @@ class LedgerEntry:
 
 
 class _HostThrottle:
-    def __init__(self, interval: float):
+    def __init__(self, interval: float, per_host: dict[str, float] | None = None):
         self.interval, self._last, self._lock = interval, {}, threading.Lock()
+        self.per_host = dict(POLITE_HOSTS_S if per_host is None else per_host)
 
     def wait(self, host: str) -> None:
+        interval = self.per_host.get(host, self.interval)
         with self._lock:
             t = time.monotonic()
-            wait = self._last.get(host, 0.0) + self.interval - t
-            self._last[host] = max(t, self._last.get(host, 0.0) + self.interval)
+            wait = self._last.get(host, 0.0) + interval - t
+            self._last[host] = max(t, self._last.get(host, 0.0) + interval)
         if wait > 0:
             time.sleep(wait)
+
+
+def retry_delay(attempt: int, response=None, base: float = 1.5) -> float:
+    """Seconds to sleep before retry `attempt` (0-based): the server's Retry-After when it sends one (seconds or an
+    HTTP date), else exponential from `base`; never above MAX_BACKOFF_S, and never below the exponential floor, so a
+    short Retry-After cannot turn a 429 into a hammer."""
+    delay = base * 2 ** attempt
+    ra = (getattr(response, "headers", None) or {}).get("Retry-After") if response is not None else None
+    if ra:
+        try:
+            want = float(ra)
+        except ValueError:
+            from email.utils import parsedate_to_datetime
+            try:
+                want = parsedate_to_datetime(ra).timestamp() - time.time()
+            except (TypeError, ValueError):
+                want = 0.0
+        delay = max(delay, want)
+    return min(max(delay, 0.0), MAX_BACKOFF_S)
+
+
+class _RetryableStatus(requests.HTTPError):
+    def __init__(self, response):
+        super().__init__(f"{response.status_code} from {urlparse(response.url).netloc}", response=response)
 
 
 def fs(p: Path | str) -> str:
@@ -237,6 +271,8 @@ class Collector:
                 with self._session.get(url, headers=headers, stream=True, timeout=(15, 120)) as r:
                     if r.status_code == 416:  # range past the end: file was complete
                         break
+                    if r.status_code in RETRY_STATUS and attempt < RETRIES - 1:
+                        raise _RetryableStatus(r)
                     r.raise_for_status()
                     mode = "ab" if r.status_code == 206 else "wb"
                     with open(part, mode) as f:
@@ -246,36 +282,32 @@ class Collector:
             except (requests.RequestException, OSError) as ex:
                 if attempt == RETRIES - 1:
                     raise
-                time.sleep(1.5 * 2 ** attempt)
+                time.sleep(retry_delay(attempt, getattr(ex, "response", None)))
         os.replace(part, fs(dst))
 
     # ---- small helpers used by expanders -------------------------------------------
     def get_text(self, url: str, params: dict | None = None, headers: dict | None = None) -> str:
-        """HTML/text listing call (public folder views, directory indexes) with the same retry policy."""
-        for attempt in range(RETRIES):
-            self._throttle.wait(urlparse(url).netloc)
-            try:
-                r = self._session.get(url, params=params, headers=headers, timeout=(15, 60))
-                if r.status_code in (429, 500, 502, 503, 504) and attempt < RETRIES - 1:
-                    raise requests.HTTPError(f"{r.status_code} from {urlparse(url).netloc}")
-                r.raise_for_status()
-                return r.text
-            except (requests.RequestException, OSError):
-                if attempt == RETRIES - 1:
-                    raise
-                time.sleep(1.5 * 2 ** attempt)
+        """HTML/text listing call (public folder views, directory indexes) with the listing retry policy."""
+        return self._get_listing(url, params, headers).text
 
     def get_json(self, url: str, params: dict | None = None, headers: dict | None = None):
-        """Listing call with the same retry/backoff as downloads (APIs drop connections under bursts)."""
-        for attempt in range(RETRIES):
+        """API listing call; APIs drop connections under bursts and rate-limit walks, so: LISTING_RETRIES attempts,
+        the per-host interval (POLITE_HOSTS_S for hosts with an etiquette), Retry-After honoured on 429/503."""
+        return self._get_listing(url, params, headers).json()
+
+    def _get_listing(self, url: str, params: dict | None, headers: dict | None):
+        for attempt in range(LISTING_RETRIES):
             self._throttle.wait(urlparse(url).netloc)
             try:
                 r = self._session.get(url, params=params, headers=headers, timeout=(15, 60))
-                if r.status_code in (429, 500, 502, 503, 504) and attempt < RETRIES - 1:
-                    raise requests.HTTPError(f"{r.status_code} from {urlparse(url).netloc}")
+                if r.status_code in RETRY_STATUS and attempt < LISTING_RETRIES - 1:
+                    raise _RetryableStatus(r)
                 r.raise_for_status()
-                return r.json()
-            except (requests.RequestException, OSError, ValueError):
-                if attempt == RETRIES - 1:
+                return r
+            except (requests.RequestException, OSError) as ex:
+                if attempt == LISTING_RETRIES - 1:
                     raise
-                time.sleep(1.5 * 2 ** attempt)
+                delay = retry_delay(attempt, getattr(ex, "response", None), base=2.0)
+                self.log(f"  {urlparse(url).netloc}: {ex.__class__.__name__} ({ex}); retry {attempt + 1}/"
+                         f"{LISTING_RETRIES - 1} in {delay:.0f} s")
+                time.sleep(delay)

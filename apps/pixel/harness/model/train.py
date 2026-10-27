@@ -24,6 +24,14 @@ from .net import CondUNet
 DEFAULT_SOURCES = ("hf-kadid10k-images", "hf-tid2013", "polyhaven-hdris")
 CLIP_WEIGHT = 0.25
 GRAD_WEIGHT = 0.5
+# Local-range term (ninth run): a restoration must not create luminance extrema beyond the target's own local
+# range. The seventh and eighth runs rang on edges (a 1 px bright-side halo of 5 to 18 % of the step on the demo's
+# slanted edge, up to 55 % at 0.002 to 0.05 of the clip, and on already sharp edges, where no deconvolution is
+# due): the L1 and edge L1 pay for a halo only in proportion to its area, so a thin ring is cheap. Here every
+# output value above the target's RANGE_K x RANGE_K maximum or below its minimum is charged once more, in the
+# encoded domain; a perfect restoration has zero excess, so the optimum is unchanged.
+RANGE_WEIGHT = 1.0
+RANGE_K = 3
 WARMUP = 500
 EMA_DECAY = 0.999
 CLIP_LOG = float(encode(np.array([0.995]))[0])
@@ -37,12 +45,20 @@ class StreamDataset(IterableDataset):
         return iter(self.stream)
 
 
+def range_excess(pred: torch.Tensor, y: torch.Tensor, k: int = RANGE_K) -> torch.Tensor:
+    """How far each output value lies outside the target's k x k local range (zero inside it)."""
+    hi = torch.nn.functional.max_pool2d(y, k, stride=1, padding=k // 2)
+    lo = -torch.nn.functional.max_pool2d(-y, k, stride=1, padding=k // 2)
+    return torch.relu(pred - hi) + torch.relu(lo - pred)
+
+
 def pair_loss(pred: torch.Tensor, y: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     w = torch.where((x >= CLIP_LOG).any(dim=1, keepdim=True), CLIP_WEIGHT, 1.0)
     l1 = (w * (pred - y).abs()).mean()
     gx = (pred[..., :, 1:] - pred[..., :, :-1]) - (y[..., :, 1:] - y[..., :, :-1])
     gy = (pred[..., 1:, :] - pred[..., :-1, :]) - (y[..., 1:, :] - y[..., :-1, :])
-    return l1 + GRAD_WEIGHT * 0.5 * (gx.abs().mean() + gy.abs().mean())
+    rng = (w * range_excess(pred, y)).mean()
+    return l1 + GRAD_WEIGHT * 0.5 * (gx.abs().mean() + gy.abs().mean()) + RANGE_WEIGHT * rng
 
 
 def lr_at(step: int, steps: int, lr: float) -> float:

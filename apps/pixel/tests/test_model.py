@@ -291,3 +291,18 @@ def test_restore_inputs_mostly_come_from_the_capture_profile():
     assert any(a.unsharp_gain > 0 for a in restore)                         # the IQA share is still there
     edits = [(a, b) for a, b, r in pairs if not r]
     assert any(a.unsharp_gain > 0 or a.posterise_bits > 0 for a, b in edits)
+
+
+def test_range_loss_is_zero_at_the_target_and_charges_a_halo():
+    import pytest
+    import torch
+    from harness.model.train import pair_loss, range_excess
+    y = torch.zeros(1, 3, 8, 16)
+    y[..., 8:] = 1.0                      # a vertical step
+    x = y.clone()
+    assert float(range_excess(y, y).sum()) == 0.0
+    out = y.clone()
+    out[..., 8] = 1.2                     # a one-pixel bright halo on the bright side
+    assert float(range_excess(out, y).max()) == pytest.approx(0.2)
+    assert float(range_excess(out, y)[..., :, 7].max()) == 0.0   # the dark side is inside its range
+    assert float(pair_loss(out, y, x)) > float(pair_loss(y, y, x)) == 0.0

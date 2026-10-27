@@ -155,10 +155,20 @@ def label_item(item: Item, img: np.ndarray, dists: Distributions, tile: int, cro
 
 # ---- chunks, ledger, pool -------------------------------------------------------------------------------
 
-def plan_items(sources: list[str], n: int, per_tile: int, crops: int, root: Path | None) -> dict[str, list[Item]]:
-    """Items per source for about n rows: spread over sources by availability, small sources first."""
-    avail = {s: list_items(s, root) for s in sources}
-    need = math.ceil(n / max(per_tile * crops, 1))
+def item_key(it: Item) -> tuple[str, str, int]:
+    return (it.source, it.file, it.row)
+
+
+def plan_items(sources: list[str], n: int, per_tile: int, crops: int, root: Path | None,
+               done: set[tuple[str, str, int]] | None = None) -> dict[str, list[Item]]:
+    """Unlabelled items per source for about n rows in total, the items already labelled (`done`, see
+    labelled_items) counting towards n: spread over sources by availability, small sources first. Re-running the
+    same command after the corpus grew, with a larger n, therefore labels only the new files."""
+    done = done or set()
+    listed = {s: list_items(s, root) for s in sources}
+    n_done = sum(item_key(it) in done for s in sources for it in listed[s])
+    avail = {s: [it for it in listed[s] if item_key(it) not in done] for s in sources}
+    need = max(math.ceil(n / max(per_tile * crops, 1)) - n_done, 0)
     chosen: dict[str, list[Item]] = {}
     order = sorted(sources, key=lambda s: len(avail[s]))
     for i, s in enumerate(order):
@@ -217,6 +227,29 @@ def read_ledger(out: Path) -> dict[str, dict]:
     return done
 
 
+def labelled_items(out: Path, config: dict, ledger: dict[str, dict] | None = None) -> set[tuple[str, str, int]]:
+    """(source, file, row) of every item whose rows are on disk under this config: the ledger entries whose config
+    matches and whose shard exists, read back by their source/file/row columns only (a deleted shard frees its
+    items; a shard labelled under another tile size or draw count does not count)."""
+    out = Path(out)
+    ledger = read_ledger(out) if ledger is None else ledger
+    keys: set[tuple[str, str, int]] = set()
+    for e in ledger.values():
+        p = out / e["file"]
+        if e.get("config") != config or not p.exists():
+            continue
+        if p.suffix == ".parquet":
+            import pyarrow.parquet as pq
+            t = pq.read_table(str(p), columns=["source", "file", "row"])
+            keys.update(zip(t.column("source").to_pylist(), t.column("file").to_pylist(), t.column("row").to_pylist()))
+        else:
+            for line in p.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    r = json.loads(line)
+                    keys.add((r["source"], r["file"], r["row"]))
+    return keys
+
+
 def read_labels(out: Path) -> list[dict]:
     """Every row of every shard under out, in shard then row order (NaN metrics read back as NaN)."""
     out = Path(out)
@@ -235,7 +268,8 @@ def read_labels(out: Path) -> list[dict]:
 def run_label(sources: list[str], n: int, out: Path | None = None, per_tile: int = 4, crops: int = 4,
               tile: int = 256, jobs: int | None = None, fmt: str = "parquet", chunk: int = 8, ss: int = 1,
               root: Path | None = None, derived_root: Path | None = None, log=print) -> dict:
-    """Label about n draws from the given sources into shards under out; resumable; returns a summary."""
+    """Label about n rows from the given sources into shards under out; resumable per item (a re-run after the
+    corpus grew labels only the new files, into new chunks); returns a summary."""
     root = Path(root) if root else data_root()
     out = Path(out) if out else root / "labels"
     out.mkdir(parents=True, exist_ok=True)
@@ -243,20 +277,21 @@ def run_label(sources: list[str], n: int, out: Path | None = None, per_tile: int
     config = dict(zip(CONFIG_KEYS, (tile, per_tile, crops, ss, fmt)))
     ext = ".parquet" if fmt == "parquet" else ".jsonl"
     done = read_ledger(out)
-    todo, skipped, rows_old = [], 0, 0
-    for source, items in plan_items(sources, n, per_tile, crops, root).items():
-        for i, part in enumerate(_chunks(items, chunk)):
+    have = labelled_items(out, config, done)
+    kept = [e for e in done.values() if e.get("config") == config and (out / e["file"]).exists()]
+    skipped, rows_old = len(kept), sum(e["n_rows"] for e in kept)
+    next_index: dict[str, int] = {}
+    for cid, e in done.items():  # chunk ids never repeat, whether or not their shard survived
+        next_index[e["source"]] = max(next_index.get(e["source"], 0), int(cid.rsplit("-", 1)[1]) + 1)
+    todo = []
+    for source, items in plan_items(sources, n, per_tile, crops, root, done=have).items():
+        for i, part in enumerate(_chunks(items, chunk), start=next_index.get(source, 0)):
             cid = f"{source}-{i:05d}"
-            path = out / f"labels-{cid}{ext}"
-            e = done.get(cid)
-            if e and e.get("config") == config and path.exists():
-                skipped += 1
-                rows_old += e["n_rows"]
-                continue
             todo.append({"chunk": cid, "source": source, "items": [asdict(it) for it in part], "tile": tile,
                          "crops": crops, "per_tile": per_tile, "ss": ss, "root": str(root),
                          "derived_root": str(derived_root) if derived_root else None})
-    log(f"label: {len(todo)} chunks to run, {skipped} already done ({rows_old} rows), jobs={jobs}")
+    log(f"label: {len(todo)} chunks to run, {skipped} shards already done ({rows_old} rows, {len(have)} items), "
+        f"jobs={jobs}")
     t0 = time.perf_counter()
     rows_new, ms_total, files = 0, 0.0, []
 
@@ -283,6 +318,7 @@ def run_label(sources: list[str], n: int, out: Path | None = None, per_tile: int
                 finish(res, job)
     seconds = time.perf_counter() - t0
     summary = {"rows": rows_old + rows_new, "rows_new": rows_new, "chunks": len(todo), "chunks_skipped": skipped,
+               "items_done_before": len(have),
                "seconds": round(seconds, 2), "rows_per_s_per_proc": (rows_new / (ms_total / 1000.0)) if ms_total else 0.0,
                "out": str(out), "files": files}
     log(f"label: {rows_new} new rows in {seconds:.1f} s, {summary['rows_per_s_per_proc']:.2f} rows/s per process")

@@ -146,11 +146,11 @@ CI (`.github/workflows/pixel-tests.yml`) runs the suite and the demo on every pu
 never stored: each worker draws a clean tile, draws a degradation state from the measured distributions
 (`harness/data/degrade.py`), renders input A and target B, and labels B with the twelve tile metrics. With
 probability 0.15 the input is the clean prepared tile itself (identity: a clean input must come out unchanged);
-otherwise with probability 0.7 the target is the clean prepared tile (restore), else a second drawn state (an
-edit), so the model learns to move an image to a stated metric vector, not only to "better". The metric vector is the
+otherwise with probability 0.7 the target is the clean prepared tile (restore; its input is drawn with the sampler's
+raw `capture` profile 70 % of the time, DEGRADATION_PLAN.md section 2), else a second drawn state (an edit), so the model learns to move an image to a stated metric vector, not only to "better". The metric vector is the
 conditioning and the judge, never the loss (the Goodhart rule in DEGRADATION_PLAN.md section 6). The network is a
-conditioned residual UNet (8.2 M parameters, identity at initialisation) on log-encoded linear RGB; the loss is a
-weighted L1 plus an edge L1 in that domain.
+conditioned residual UNet (8.2 M parameters, identity at initialisation) on log-encoded linear RGB (`log1p(4096 x)`: one 12-bit LSB is where the log turns linear, so above that floor an
+L1 error is a relative error); the loss is a weighted L1 plus an edge L1 in that domain.
 
 The first run (`recovered_v1`) brightened every frame of the demo's best-case camera by 2.2x and failed the
 provenance gate, because the sampler's measured exposure offsets are all near zero while that camera exposes
@@ -183,12 +183,23 @@ tone_color on the still (highlight loss 0.250, shadow SNR 13.5 against 26.2 dB, 
 provenance on the video (7.5 %); blind, it fails the same two gates more gently (mtf50 0.392, highlight loss
 0.031, overshoot 0.058, video invention 3.0 %).
 
+The seventh run (`recovered_v7`) changes what the pairs teach and where the output can resolve, the two faults the
+sixth run's conditioning could not carry away (DEGRADATION_PLAN.md section 7): restore inputs come from the
+sampler's raw `capture` profile 70 % of the time (camera on, measured ISP stages only, no unsharp ladder, whose
+halos had taught the model to darken small bright patches), and the domain is `log1p(4096 x)` instead of
+`log1p(8 x)`, so the network's absolute output floor (std 0.001 to 0.002 at mid-grey) no longer swamps the deepest
+shadows. Its step 9000 checkpoint (54.7 min on the RTX 5090; its validation loss, 0.1978, is in the new domain and not comparable to the sixth run's 0.0667) raises the still's shadow SNR from 13.5 to 22.8 dB known and 25.6 dB blind, which ties the camera's 26.2, keeps resolution and texture ahead (mtf50 0.500 against 0.220, texture 0.472 against 0.223, landmark error 0.26 against 0.45 px) and lowers the colour error to delta E 0.86 known and 0.66 blind, but still fails tone_color on the still because the brightest wedge patches come back 6 to 9 % dark (highlight loss 0.429 known, 0.325 blind) and the edge overshoot grew to 0.178 known and 0.130 blind; the video fails provenance at 3.6 % known and 3.7 % blind. A clean ramp came back 5 % dark at step 1000 of this run; the cause was a bug in how the pairs carried the input's lens shading into the target, fixed in the eighth run.
+
 ```bash
-python -m harness model train --out data/models/recovered_v6 --steps 9000 --minutes 75 --batch 16 --tile 256 --workers 12
-python -m harness model eval-demo --ckpt data/models/recovered_v6/best.pt --out demo_out_model
-python -m harness model eval-demo --ckpt data/models/recovered_v6/best.pt --out demo_out_model_blind --blind
-python -m harness model apply --ckpt data/models/recovered_v6/best.pt --input frames.npy --out restored --white-level 1.0 --capture capture.json
+python -m harness model train --out data/models/recovered_v7 --steps 9000 --minutes 75 --batch 16 --tile 256 --workers 12
+python -m harness model eval-demo --ckpt data/models/recovered_v7/best.pt --out demo_out_model
+python -m harness model eval-demo --ckpt data/models/recovered_v7/best.pt --out demo_out_model_blind --blind
+python -m harness model apply --ckpt data/models/recovered_v7/best.pt --input frames.npy --out restored --white-level 1.0 --capture capture.json
 ```
+
+The model commands take explicit paths: with `HARNESS_DATA_ROOT` set, put the checkpoint directory under that
+root (`D:\lens-harness-data\models\recovered_v7` on the GPU box) so checkpoints live beside the data they were
+trained on and not in the repo.
 
 `eval-demo` builds the demo worlds, runs the camera-sim frames through the model at the camera's clip level and
 judges the result through the gates like any candidate, so the report says on which gates the model beats the

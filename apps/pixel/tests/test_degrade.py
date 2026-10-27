@@ -126,8 +126,8 @@ def tiny_root(tmp_path):
     return tmp_path
 
 
-def _run(root, out, jobs=1, log=lambda *_: None):
-    return run_label(["test-tiles"], 16, out=out, per_tile=2, crops=2, tile=64, jobs=jobs, chunk=1,
+def _run(root, out, jobs=1, n=16, log=lambda *_: None):
+    return run_label(["test-tiles"], n, out=out, per_tile=2, crops=2, tile=64, jobs=jobs, chunk=1,
                      root=root, derived_root=DERIVED.resolve().parent, log=log)
 
 
@@ -160,8 +160,26 @@ def test_labeller_is_resumable_and_deterministic(tiny_root):
     victim = sorted(out.glob("labels-*.parquet"))[1]
     victim.unlink()
     s3 = _run(tiny_root, out)
-    assert s3["chunks"] == 1 and s3["chunks_skipped"] == 3
+    assert s3["chunks"] == 1 and s3["chunks_skipped"] == 3 and s3["items_done_before"] == 3
     _same(rows1, read_labels(out))
+    assert sorted(p.name for p in out.glob("labels-*.parquet"))[-1] == "labels-test-tiles-00004.parquet"
+    # the corpus grows: with the target met nothing runs; with a larger target only the new file is labelled,
+    # into a new chunk, the old shards untouched and no row duplicated
+    from PIL import Image
+    rng = np.random.default_rng(5)
+    img = (np.clip(gaussian_filter(rng.random((300, 300, 3)), 2) * 2.5, 0, 1) * 255).astype(np.uint8)
+    Image.fromarray(img).save(tiny_root / "raw" / "test-tiles" / "t4.png")
+    before = {p.name: p.stat().st_mtime_ns for p in out.glob("labels-*.parquet")}
+    s4 = _run(tiny_root, out)
+    assert s4["chunks"] == 0 and s4["rows"] == 16 and s4["items_done_before"] == 4
+    s5 = _run(tiny_root, out, n=20)
+    assert s5["chunks"] == 1 and s5["rows_new"] == 4 and s5["chunks_skipped"] == 4 and s5["rows"] == 20
+    assert {p.name: p.stat().st_mtime_ns for p in out.glob("labels-*.parquet") if p.name in before} == before
+    assert sorted(p.name for p in out.glob("labels-*.parquet"))[-1] == "labels-test-tiles-00005.parquet"
+    rows5 = read_labels(out)
+    assert len(rows5) == 20 and len({_key(r) for r in rows5}) == 20
+    assert {r["file"] for r in rows5} == {f"t{i}.png" for i in range(5)}
+    _same(rows1, [r for r in rows5 if r["file"] != "t4.png"])
     out2 = tiny_root / "labels2"
     _run(tiny_root, out2, jobs=2)
     _same(rows1, read_labels(out2))
