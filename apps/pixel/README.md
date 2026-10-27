@@ -19,8 +19,9 @@ pip install -e ".[data,model,dev]"
 
 Python ≥ 3.10; numpy, scipy and Pillow are the core. Extras: `data` (requests, pyarrow: the collector and
 parquet labels), `model` (torch: the recovered layer), `measure` (rawpy, optiland: `noise_check` and
-`lens_traces`), `video` (imageio + imageio-ffmpeg: mp4 in or out; `.npy` masters and PNG frame folders work
-without them), `dev` (pytest). The data root (ledgered sources, labels, checkpoints: tens of GB) lives outside
+`lens_traces`), `decode` (rawpy, OpenEXR: the labeller's camera-raw and EXR inputs, plain or inside zips;
+without them those items are recorded as skipped with a reason, never a crash), `video` (imageio +
+imageio-ffmpeg: mp4 in or out; `.npy` masters and PNG frame folders work without them), `dev` (pytest). The data root (ledgered sources, labels, checkpoints: tens of GB) lives outside
 the repo: `HARNESS_DATA_ROOT=D:\lens-harness-data` on the GPU box; unset, it is `./data`, which git ignores.
 
 ## Self-test

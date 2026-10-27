@@ -11,9 +11,21 @@ against its clean tile), [harness/data/label.py](harness/data/label.py) and the 
 One clean image on disk is cropped at `--crops` random positions (fixed by a hash of the item's identity) into
 tiles of `--tile` px. Per tile, `--per-tile` parameter vectors are drawn from the measured distributions, each
 rendered by the camera model plus ISP stages, and scored against the prepared clean tile. One row per draw:
-`source, file, row, y0, x0, size, draw, seed, is_hdr, ss`, the parameter vector `p_*` (31 fields) and the
-metric vector `m_*` (12 fields). No image is stored: the row reproduces the pair bit for bit, so storage is a
-few hundred bytes per sample whatever the tile size.
+`source, file, row, y0, x0, size, draw, seed, is_hdr, domain, ss`, the parameter vector `p_*` (31 fields) and
+the metric vector `m_*` (12 fields). No image is stored: the row reproduces the pair bit for bit, so storage is
+a few hundred bytes per sample whatever the tile size.
+
+Every input reaches the sampler as linear RGB, whatever the file held, so the metrics of a JPEG row and a raw
+row read the same way; `domain` records the input class and `is_hdr` how the clean tile's range is prepared
+(the table is the docstring of `harness/data/label.py`): `srgb8` (8-bit sRGB files and parquet blobs, sRGB
+transfer inverted), `srgb16` (16-bit integer PNG/TIFF, same), `linear16` (camera raws through LibRaw: camera
+white balance, sRGB primaries, linear output, no auto-brightening or sharpening, 1.0 = sensor white level;
+`is_hdr`), `linear_float_hdr` (Radiance `.hdr` and OpenEXR `.exr`, plain or inside a zip: relative radiance as
+stored; `is_hdr`). LDR domains get the drawn peak-over-median stretch, HDR domains keep their range, and every
+draw re-exposes the tile median (`expose=1`), so a domain's absolute scale never reaches the metrics. A zip
+member is an item of its own (`file` is `<zip>::<member>`), and a file no decoder can read is recorded in the
+ledger entry of its chunk as `skipped` with a reason (`no_decoder:<package>`, `decode_error:<exception>`,
+`too_small:HxW`); permanent reasons count as done until `--retry-skipped`, a missing decoder is retried.
 
 Any two rows of the same tile are a training pair, state A to state B, with both metric vectors known. The
 degraded-to-clean pair is the special case where B is the identity parameter vector, which
@@ -137,7 +149,12 @@ chunks on 16 workers, so its tail ran with idle workers; a long run approaches 1
 
 `--ss 2` roughly quadruples the camera stage; keep `--ss 1` for labels. Resume is a rerun of the same command:
 shards whose ledger entry matches the configuration are skipped, a deleted shard is recomputed to identical
-rows, and the rows do not depend on `--jobs` (all three tested).
+rows, and the rows do not depend on `--jobs` (all three tested). A worker process that dies takes the whole
+pool down (`BrokenProcessPool`; on this Windows box a freshly spawned worker now and then starts with an
+invalid queue handle, WinError 6, and dies on its first job): the chunks that had not finished are resubmitted
+to a fresh pool, and a run gives up only after five pools in a row that finish nothing, so a finished chunk is
+written once and no chunk is labelled twice. A chunk whose worker raises anything else (exhausted memory, a
+bug) is logged as FAILED, counted in the summary and left for the next run, which plans its items again.
 
 ## 6. The metric vector: conditioning and evaluation, never the loss
 

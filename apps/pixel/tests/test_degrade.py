@@ -13,8 +13,8 @@ from harness.colorspace import luminance
 from harness.data.degrade import (EXPOSE_FOR_PEAK_STOPS, MID_GREY_FILL, PEAK_FILL, PEAK_PERCENTILE, DegradeParams,
                                   Distributions, PARAM_NAMES, degrade, expose_for_peak_stops, prepare_tile,
                                   sample_params)
-from harness.data.label import (CONFIG_KEYS, Item, crop_boxes, label_tile, labelled_items, load_items, read_labels,
-                                read_ledger, run_label)
+from harness.data.label import (CONFIG_KEYS, Item, crop_boxes, label_tile, labelled_items, ledger_items,
+                                load_items, read_labels, read_ledger, run_label)
 from harness.data.tilemetrics import tile_metrics
 from harness.metrics import STILL_METRICS
 
@@ -192,20 +192,24 @@ def test_labeller_skips_unreadable_files_and_leaves_failed_chunks_for_the_next_r
     (src / "t9.tiff").write_bytes(b"II*\x00" + bytes(64))              # a header and nothing behind it
     out = tiny_root / "labels"
     s = _run(tiny_root, out, n=24)                                       # 6 items listed, 2 of them unreadable
-    assert s["chunks"] == 6 and s["rows_new"] == 16 and s["items_unreadable"] == 2 and s["chunks_failed"] == 0
+    assert s["chunks"] == 6 and s["rows_new"] == 16 and len(s["items_skipped"]) == 2 and s["chunks_failed"] == 0
+    assert s["skipped"] == {"decode_error:UnidentifiedImageError": 2}
     ledger = read_ledger(out)
-    bad = {e["unreadable"][0]["file"]: e for e in ledger.values() if e["unreadable"]}
+    bad = {e["skipped"][0]["file"]: e for e in ledger.values() if e.get("skipped")}
     assert set(bad) == {"t8.png", "t9.tiff"}
     for e in bad.values():
-        assert e["n_rows"] == 0 and e["file"] == "" and e["unreadable"][0]["error"].startswith("UnidentifiedImageError")
+        assert e["n_rows"] == 0 and e["file"] == ""                        # no shard for a chunk without rows
+        assert e["skipped"][0]["reason"].startswith("decode_error:UnidentifiedImageError")
     assert len(list(out.glob("labels-*.parquet"))) == 4 and len(read_labels(out)) == 16
     config = dict(zip(CONFIG_KEYS, (64, 2, 2, 1, "parquet")))
-    assert {("test-tiles", "t8.png", -1), ("test-tiles", "t9.tiff", -1)} <= labelled_items(out, config)
+    have, skipped = ledger_items(out, config)
+    assert len(have) == 4 and labelled_items(out, config) == have
+    assert set(skipped) == {("test-tiles", "t8.png", -1), ("test-tiles", "t9.tiff", -1)}
     s2 = _run(tiny_root, out, n=24)                                      # nothing is retried
     assert s2["chunks"] == 0 and s2["chunks_skipped"] == 6 and s2["rows"] == 16
     out2 = tiny_root / "labels2"                                        # the same through the process pool
     s3 = _run(tiny_root, out2, jobs=2, n=24)
-    assert s3["rows_new"] == 16 and s3["items_unreadable"] == 2 and s3["chunks_failed"] == 0
+    assert s3["rows_new"] == 16 and len(s3["items_skipped"]) == 2 and s3["chunks_failed"] == 0
     _same(read_labels(out), read_labels(out2))
     # a chunk that fails outright is logged and counted, its items stay unlabelled and the next run takes them
     import harness.data.label as label_mod
