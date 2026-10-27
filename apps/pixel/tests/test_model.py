@@ -7,7 +7,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import torch
+
+torch = pytest.importorskip("torch")  # the model extra is optional; CI installs only [data,dev]
 
 from harness.data.degrade import DegradeParams, Distributions, degrade, prepare_tile
 from harness.metrics import STILL_METRICS

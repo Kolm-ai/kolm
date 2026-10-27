@@ -26,6 +26,6 @@ jobs:
           cache-dependency-path: apps/pixel/pyproject.toml
       - run: python -m pip install -e ".[data,dev]"
       - name: pytest (CPU; the model and measurement extras are exercised locally on the GPU box)
-        run: python -m pytest -q -p no:cacheprovider --basetemp=.tmp/pt
+        run: mkdir -p .tmp && python -m pytest -q -p no:cacheprovider --basetemp=.tmp/pt
       - name: demo
         run: python -m harness demo --out demo_out

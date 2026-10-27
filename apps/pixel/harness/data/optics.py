@@ -293,6 +293,8 @@ def trace_file(job: tuple[str, str]) -> dict:
     out = {"name": name, "source": kind, "path": str(path), "ok": False}
     try:
         warnings.simplefilter("ignore")
+        if kind in ("claff", "deeplens") and not Path(path).is_file():
+            raise FileNotFoundError(path)  # a missing file is a missing file, whether or not optiland is installed
         if kind == "claff":
             o, info = load_claff(Path(path))
             try:
