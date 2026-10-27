@@ -224,3 +224,8 @@ remotion/node_modules/
 remotion/out/
 remotion/.remotion/
 tmp-distill
+
+# kolm pixel: regenerable outputs
+apps/pixel/demo_out/
+apps/pixel/runs/
+apps/pixel/*.egg-info/

@@ -1,0 +1,61 @@
+{
+  "$comment": "Public image sources. License is checked per item at collect time; the entry license is only a default for kinds whose host does not publish one per file. Add entries, never hand-curate items.",
+  "sources": [
+    {
+      "id": "kodak-photocd",
+      "kind": "http",
+      "url_template": "https://r0k.us/graphics/kodak/kodak/kodim{i:02d}.png",
+      "range": [1, 24],
+      "license": "Kodak (unrestricted use)",
+      "notes": "24 classic test images, 768x512 lossless. Smoke source: tiny and stable."
+    },
+    {
+      "id": "polyhaven-hdris-4k",
+      "kind": "polyhaven_hdris",
+      "resolution": "4k",
+      "format": "hdr",
+      "license": "CC0",
+      "notes": "Real scene radiance with real highlight range. The only kind of source that teaches highlight recovery; the floor camera's clipping is physical there."
+    },
+    {
+      "id": "ambientcg-hdri",
+      "kind": "ambientcg",
+      "type": "HDRI",
+      "variant": "4K",
+      "license": "CC0",
+      "notes": "Second CC0 HDRI library; zip downloads, unpack in the shard step."
+    },
+    {
+      "id": "wikimedia-featured-pictures",
+      "kind": "wikimedia_category",
+      "category": "Category:Featured pictures on Wikimedia Commons",
+      "mime": "^image/(jpeg|png|tiff)$",
+      "notes": "Curated high-resolution photographs. License read per file from extmetadata; anything outside CC0/CC BY/CC BY-SA/PD is skipped."
+    },
+    {
+      "id": "wikimedia-quality-images",
+      "kind": "wikimedia_category",
+      "category": "Category:Quality images",
+      "mime": "^image/(jpeg|png|tiff)$",
+      "notes": "Larger pool, same per-file license check. Expect hundreds of thousands of files; use --max-bytes."
+    },
+    {
+      "id": "hf-example",
+      "kind": "hf_tree",
+      "enabled": false,
+      "repo": "ORG/DATASET",
+      "revision": "main",
+      "path": "data",
+      "pattern": ".*\\.parquet$",
+      "license": "CC BY 4.0",
+      "notes": "Template for any Hugging Face dataset repo. The tree API publishes the LFS sha256 per file, so every shard is verified. Set repo, confirm the dataset card license, flip enabled."
+    },
+    {
+      "id": "zenodo-example",
+      "kind": "zenodo",
+      "enabled": false,
+      "record": "0000000",
+      "notes": "Template for a Zenodo record. The API publishes md5 per file and the license id in metadata."
+    }
+  ]
+}
