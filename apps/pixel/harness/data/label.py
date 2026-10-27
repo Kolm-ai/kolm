@@ -38,21 +38,32 @@ optional imports: `pip install -e .[decode]` brings rawpy (LibRaw) and OpenEXR. 
 under `failed` and left for the next run, which plans its items again; a worker process that dies takes its
 pool down and the unfinished chunks go to a fresh one (_run_pool). Neither stops the pass.
 
+Clean sources. A source's manifest `clean` block says how it is read as a clean source (clean_settings):
+`scale` box-downsamples every decoded image in linear light (a 50 MP JPEG at 2, a demosaiced raw at 4, so the
+camera's own demosaic, noise and blur sit below the tile's pixel) and each row records the factor used in its
+`scale` column; `low_quality_scale` is the factor for a JPEG whose quantisation tables put it below quality
+LOW_QUALITY_JPEG; `exclude` lists fnmatch patterns (case-insensitive, on Item.file) of files that are not
+pictures (lens-shading maps, scan containers), which list_items leaves out. Splits key on the scene
+(scene_of), so two resolution tiers of one HDRI never straddle train and validation.
+
 Memory: a chunk decodes one image at a time, so a worker holds one full image as float64 (a 50 Mpx raw is
 about 1.2 GB); --jobs times that is the peak."""
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import io
 import json
 import math
 import os
+import re
 import time
 import zipfile
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import NamedTuple
 
@@ -60,9 +71,11 @@ import numpy as np
 
 from . import data_root
 from .degrade import DegradeParams, Distributions, degrade, prepare_tile, sample_params
+from .manifest import load_manifest
 from .tilemetrics import tile_metrics
 from ..colorspace import srgb_to_linear
 from ..metrics import STILL_METRICS
+from ..scene import box_downsample
 
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
 TIFF_EXT = {".tif", ".tiff"}
@@ -81,6 +94,11 @@ SEED_MASK = (1 << 63) - 1
 LEDGER = "ledger.jsonl"
 CONFIG_KEYS = ("tile", "per_tile", "crops", "ss", "fmt")
 _PIL_16BIT = {"I;16", "I;16B", "I;16L", "I;16N", "I"}
+LOW_QUALITY_JPEG = 90    # a JPEG whose quantisation tables put it below this IJG quality takes low_quality_scale
+_LUMA_TABLE_SUM = 3688   # sum of the ITU T.81 K.1 luminance table, what the IJG quality scale factor multiplies
+_RES_DIR = re.compile("^[0-9]+k$", re.IGNORECASE)      # Poly Haven's resolution tiers: 1k/<name>.hdr, 2k/<name>.hdr
+_RES_SUFFIX = re.compile("_[0-9]+k$", re.IGNORECASE)
+_SRGB_LUT = srgb_to_linear(np.arange(256) / 255.0)     # the transfer curve of the 256 8-bit values, once
 
 
 @dataclass(frozen=True)
@@ -95,15 +113,41 @@ class Item:
 
 
 class Decoded(NamedTuple):
-    """What a decoder returns: linear RGB float64 (H, W, 3), the input domain (module docstring), the range flag."""
+    """What a decoder returns: linear RGB float64 (H, W, 3), the input domain (module docstring), the range flag
+    and the clean scale the image was box-downsampled by (clean_scale; 1 for the file's own pixels)."""
     img: np.ndarray
     domain: str
     is_hdr: bool
+    scale: int = 1
 
 
 def _seed(*parts) -> int:
     h = hashlib.sha256("|".join(str(p) for p in parts).encode("utf-8")).digest()
     return int.from_bytes(h[:8], "big") & SEED_MASK
+
+
+def scene_of(item: Item) -> str:
+    """The scene an item depicts, the key of the train/validation split: its path with resolution directories
+    (`1k/`, `2k/`) and resolution stem suffixes (`_4k`) removed, so every resolution tier of one Poly Haven HDRI is
+    one scene. Any other path is its own scene."""
+    parts = item.file.split("/")
+    stem, ext = os.path.splitext(parts[-1])
+    kept = [d for d in parts[:-1] if not _RES_DIR.match(d)]
+    return "/".join(kept + [_RES_SUFFIX.sub("", stem) + ext])
+
+
+@lru_cache(maxsize=None)
+def _manifest_clean() -> dict[str, dict]:
+    return {s.id: dict(s.clean) for s in load_manifest() if s.clean}
+
+
+def clean_settings(source: str) -> dict:
+    """The manifest's `clean` block for a source, empty for one it does not know (a test fixture): `scale`, the
+    box-downsampling factor applied in linear light after decoding; `low_quality_scale`, the factor for a JPEG
+    whose quantisation tables put it below LOW_QUALITY_JPEG; `exclude`, fnmatch patterns (case-insensitive, on
+    the posix path relative to the source, "<zip>::<member>" for an archive member) of files that are not
+    pictures."""
+    return _manifest_clean().get(source, {})
 
 
 def split_member(file: str) -> tuple[str, str | None]:
@@ -127,7 +171,8 @@ def _zip_members(path: Path) -> list[str] | None:
 
 def list_items(source: str, root: Path | None = None) -> list[Item]:
     """Every clean image of a source on disk, in a fixed order: plain image, raw and HDR files, the decodable
-    members of every zip (an unreadable zip is listed as one item so the run records why it was skipped)."""
+    members of every zip (an unreadable zip is listed as one item so the run records why it was skipped); files
+    matching the source's `clean.exclude` patterns are left out."""
     root = Path(root) if root else data_root()
     base = root / "raw" / source
     if not base.is_dir():
@@ -149,6 +194,11 @@ def list_items(source: str, root: Path | None = None) -> list[Item]:
                     g += 1
         rel = "|".join(f.relative_to(base).as_posix() for f in files)
         return [Item(source, rel, r, column) for r in rows]
+    excluded = [pat.lower() for pat in clean_settings(source).get("exclude", [])]
+
+    def keep(file: str) -> bool:
+        return not any(fnmatch.fnmatchcase(file.lower(), pat) for pat in excluded)
+
     items = []
     for f in sorted(base.rglob("*")):
         if not f.is_file():
@@ -160,12 +210,13 @@ def list_items(source: str, root: Path | None = None) -> list[Item]:
             if members is None:
                 items.append(Item(source, rel))
             else:
-                items += [Item(source, f"{rel}{ZIP_SEP}{m}", is_hdr=True) for m in members]
+                items += [Item(source, f"{rel}{ZIP_SEP}{m}", is_hdr=True)
+                          for m in members if keep(f"{rel}{ZIP_SEP}{m}")]
         elif ext in HDR_EXT or ext in EXR_EXT or ext in RAW_EXT:
             items.append(Item(source, rel, is_hdr=True))
         elif ext in IMAGE_EXT:
             items.append(Item(source, rel))
-    return items
+    return [it for it in items if keep(it.file)]
 
 
 # ---- decoders (optional packages; an ImportError means "no decoder", anything else "decode error") -----------
@@ -198,7 +249,9 @@ def _decode_raw(src: str | io.BytesIO) -> np.ndarray:
 
 
 def _decode_pil(src) -> Decoded:
-    """8-bit (srgb8) or 16-bit integer (srgb16) image through Pillow; float images have no transfer function."""
+    """8-bit (srgb8) or 16-bit integer (srgb16) image through Pillow; float images have no transfer function.
+    The 8-bit path goes through the 256-entry table _SRGB_LUT: the same curve of the same 256 inputs to the bit,
+    in a quarter of the time on a 50 MP JPEG, where the curve over 160 M values was the cost."""
     from PIL import Image
     with Image.open(src) as im:
         if im.mode in _PIL_16BIT:
@@ -206,15 +259,58 @@ def _decode_pil(src) -> Decoded:
             return Decoded(srgb_to_linear(np.repeat(a[..., None], 3, axis=-1)), "srgb16", False)
         if im.mode == "F":
             raise ValueError("32-bit float image has no defined transfer function")
-        return Decoded(srgb_to_linear(np.asarray(im.convert("RGB"), dtype=np.float64) / 255.0), "srgb8", False)
+        return Decoded(_SRGB_LUT[np.asarray(im.convert("RGB"))], "srgb8", False)
+
+
+def jpeg_quality(src) -> int | None:
+    """IJG quality estimated from a JPEG's luminance quantisation table, which the encoder scaled from the standard
+    table by (200 - 2q) % at q >= 50 and 5000 / q % below; None for a file that is not a JPEG."""
+    from PIL import Image
+    with Image.open(src) as im:
+        tables = getattr(im, "quantization", None)
+        if im.format != "JPEG" or not tables:
+            return None
+        table = tables.get(0) or next(iter(tables.values()))
+    s = 100.0 * sum(table) / _LUMA_TABLE_SUM
+    return int(round((200.0 - s) / 2.0 if s <= 100.0 else 5000.0 / s))
+
+
+def clean_scale(it: Item, src) -> int:
+    """The downsampling factor the manifest asks of this item: its source's `scale`, or the `low_quality_scale` for
+    a JPEG below LOW_QUALITY_JPEG (at 4 the 8 x 8 blocking of a quality-85 web JPEG is below one pixel)."""
+    c = clean_settings(it.source)
+    scale = int(c.get("scale", 1) or 1)
+    low = int(c.get("low_quality_scale", 0) or 0)
+    if low > scale and it.file.lower().endswith((".jpg", ".jpeg")):
+        q = jpeg_quality(src)
+        if q is not None and q < LOW_QUALITY_JPEG:
+            scale = low
+    return max(scale, 1)
 
 
 def decode_item(it: Item, root: Path | None = None, tile: int = 0) -> Decoded:
-    """Linear RGB of one plain-file item (parquet rows go through load_items). Raises ImportError when the
-    decoder package is missing, anything else when the file cannot be read. A TIFF is tried through Pillow
-    first; when that fails, or yields less than a tile (the first page of a TIFF-container raw is its
-    thumbnail), LibRaw gets it."""
+    """Linear RGB of one plain-file item (parquet rows go through load_items), box-downsampled by its source's
+    clean scale (clean_scale, recorded in Decoded.scale). Raises ImportError when the decoder package is
+    missing, anything else when the file cannot be read."""
     root = Path(root) if root else data_root()
+    dec = _decode_file(it, root, tile)
+    k = clean_scale(it, root / "raw" / it.source / split_member(it.file)[0])
+    return dec if k == 1 else Decoded(box_downsample(dec.img, k), dec.domain, dec.is_hdr, k)
+
+
+def skip_reason(ex: BaseException) -> str:
+    """Why an item has no image, as the ledger records it: no_decoder:<package> for a missing optional import
+    (never counts as done), decode_error:<Exception>: <message> for a file the decoder rejects."""
+    if isinstance(ex, ImportError):
+        return f"{NO_DECODER}{ex.name or ex}"
+    message = " ".join(str(ex).split())[:160]
+    return f"decode_error:{type(ex).__name__}: {message}"
+
+
+def _decode_file(it: Item, root: Path, tile: int) -> Decoded:
+    """decode_item before the clean scale: the file's own pixels. A TIFF is tried through Pillow first; when
+    that fails, or yields less than a tile (the first page of a TIFF-container raw is its thumbnail), LibRaw
+    gets it."""
     disk, member = split_member(it.file)
     p = root / "raw" / it.source / disk
     ext = Path(member if member is not None else disk).suffix.lower()
@@ -255,23 +351,49 @@ def decode_item(it: Item, root: Path | None = None, tile: int = 0) -> Decoded:
     return dec
 
 
-def load_items(items: list[Item], root: Path | None = None) -> dict[Item, np.ndarray]:
-    """Linear RGB float64 (H, W, 3) per item; parquet rows of one shard set are read in a single pass. Raises
-    on a file it cannot decode (run_chunk catches that per item and records the reason)."""
+def load_items(items: list[Item], root: Path | None = None, errors: dict[Item, str] | None = None,
+               scales: dict[Item, int] | None = None) -> dict[Item, np.ndarray]:
+    """Linear RGB float64 (H, W, 3) per item, box-downsampled by its clean scale (decode_item; the factor used
+    goes to `scales` when given); parquet rows of one shard set are read in a single pass. With `errors` given,
+    an item its decoder rejects is left out of the result and recorded there with its skip_reason instead of
+    raising."""
     root = Path(root) if root else data_root()
     out: dict[Item, np.ndarray] = {}
     by_parquet: dict[tuple[str, str, str], list[Item]] = {}
+
+    def record(it: Item, e: Exception) -> None:
+        if errors is None:
+            raise e
+        errors[it] = skip_reason(e)
+
     for it in items:
         if it.row >= 0:
             by_parquet.setdefault((it.source, it.file, it.column), []).append(it)
-        else:
-            out[it] = decode_item(it, root).img
+            continue
+        try:
+            dec = decode_item(it, root)
+        except MemoryError:
+            raise               # never a property of the file
+        except Exception as e:  # noqa: BLE001 - recorded, or re-raised, by `record`
+            record(it, e)
+            continue
+        out[it] = dec.img
+        if scales is not None:
+            scales[it] = dec.scale
     for (source, files, column), its in by_parquet.items():
         from .fit import decode_image, iter_parquet_rows
         paths = [root / "raw" / source / f for f in files.split("|")]
         want = {it.row: it for it in its}
         for g, blob in iter_parquet_rows(paths, set(want), column):
-            out[want[g]] = decode_image(blob["bytes"] if isinstance(blob, dict) else blob)
+            try:
+                out[want[g]] = decode_image(blob["bytes"] if isinstance(blob, dict) else blob)
+            except MemoryError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                record(want[g], e)
+                continue
+            if scales is not None:
+                scales[want[g]] = 1
     return out
 
 
@@ -294,8 +416,9 @@ def label_tile(tile_img: np.ndarray, params: DegradeParams, seed: int, ss: int, 
 
 
 def label_item(item: Item, img: np.ndarray, dists: Distributions, tile: int, crops: int, per_tile: int,
-               ss: int, domain: str = "srgb8", is_hdr: bool | None = None) -> list[dict]:
-    """Rows of one decoded image; `domain` and `is_hdr` are what the decoder reported (Decoded)."""
+               ss: int, domain: str = "srgb8", is_hdr: bool | None = None, scale: int = 1) -> list[dict]:
+    """Rows of one decoded image; `domain`, `is_hdr` and `scale` (the clean scale it was read at; rows without
+    the column are scale 1) are what the decoder reported (Decoded)."""
     is_hdr = item.is_hdr if is_hdr is None else is_hdr
     rows = []
     for y0, x0 in crop_boxes(item, img.shape[0], img.shape[1], tile, crops):
@@ -306,7 +429,7 @@ def label_item(item: Item, img: np.ndarray, dists: Distributions, tile: int, cro
             t0 = time.perf_counter()
             m = label_tile(t, params, seed, ss, is_hdr)
             row = {"source": item.source, "file": item.file, "row": item.row, "y0": y0, "x0": x0, "size": tile,
-                   "draw": k, "seed": seed, "is_hdr": is_hdr, "domain": domain, "ss": ss}
+                   "draw": k, "seed": seed, "is_hdr": is_hdr, "domain": domain, "scale": scale, "ss": ss}
             row.update({f"p_{n}": v for n, v in params.to_dict().items()})
             row.update({f"m_{n}": float(m[n]) for n in STILL_METRICS})
             row["ms"] = (time.perf_counter() - t0) * 1000.0
@@ -370,26 +493,30 @@ def run_chunk(job: dict) -> dict:
     items = [Item(**d) for d in job["items"]]
     root, tile = Path(job["root"]), job["tile"]
     parquet = [it for it in items if it.row >= 0]
-    imgs = load_items(parquet, root) if parquet else {}
+    errors: dict[Item, str] = {}
+    imgs = load_items(parquet, root, errors) if parquet else {}
     rows, skipped = [], []
     for it in items:
-        try:
-            dec = Decoded(imgs[it], "srgb8", False) if it.row >= 0 else decode_item(it, root, tile)
-        except ImportError as ex:
-            skipped.append({"file": it.file, "row": it.row, "reason": f"{NO_DECODER}{ex.name or ex}"})
-            continue
-        except MemoryError:
-            raise               # never a property of the file: the chunk fails and the next run takes it again
-        except Exception as ex:  # noqa: BLE001 - one unreadable file must not end the chunk
-            msg = str(ex).replace("\n", " ")[:160]
-            skipped.append({"file": it.file, "row": it.row, "reason": f"decode_error:{type(ex).__name__}: {msg}"})
-            continue
+        if it.row >= 0:
+            if it not in imgs:
+                reason = errors.get(it, f"decode_error:LookupError: row {it.row} is not in its shard")
+                skipped.append({"file": it.file, "row": it.row, "reason": reason})
+                continue
+            dec = Decoded(imgs[it], "srgb8", False)
+        else:
+            try:
+                dec = decode_item(it, root, tile)
+            except MemoryError:
+                raise           # never a property of the file: the chunk fails and the next run takes it again
+            except Exception as ex:  # noqa: BLE001 - one unreadable file must not end the chunk
+                skipped.append({"file": it.file, "row": it.row, "reason": skip_reason(ex)})
+                continue
         h, w = dec.img.shape[:2]
         if h < tile or w < tile:
             skipped.append({"file": it.file, "row": it.row, "reason": f"too_small:{h}x{w}"})
             continue
         rows.extend(label_item(it, dec.img, _dists(job["derived_root"]), tile, job["crops"], job["per_tile"],
-                               job["ss"], domain=dec.domain, is_hdr=dec.is_hdr))
+                               job["ss"], domain=dec.domain, is_hdr=dec.is_hdr, scale=dec.scale))
     return {"chunk": job["chunk"], "rows": rows, "skipped": skipped, "seconds": time.perf_counter() - t0}
 
 

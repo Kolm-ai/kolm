@@ -13,8 +13,10 @@ import pytest
 
 from harness.colorspace import srgb_to_linear
 from harness.data import data_root
-from harness.data.label import (CONFIG_KEYS, Item, decode_item, item_key, labelled_items, ledger_items, list_items,
-                                load_items, read_labels, read_ledger, run_label, skip_class, split_member)
+from harness.data import label as L
+from harness.data.label import (CONFIG_KEYS, Item, clean_scale, clean_settings, decode_item, item_key, jpeg_quality,
+                                labelled_items, ledger_items, list_items, load_items, read_labels, read_ledger,
+                                run_label, scene_of, skip_class, split_member)
 
 DERIVED = data_root() / "derived"
 needs_dists = pytest.mark.skipif(not (DERIVED / "camera_presets.json").exists(), reason="derived stats not built")
@@ -177,6 +179,66 @@ def test_sixteen_bit_png_is_srgb16_and_tiff_falls_back_to_libraw_only_when_small
     assert abs(dec.img[1, 30, 1] - srgb_to_linear(np.float64(32768 / 65535))) < 1e-12
     dec = decode_item(Item("src", "small.tif"), tmp_path, tile=64)   # LibRaw rejects an RGB TIFF: Pillow's stands
     assert dec.domain == "srgb8" and dec.img.shape == (20, 30, 3)
+
+
+# ---- clean sources: the manifest's scale and exclusions, the scene key, errors without raising -------------------
+
+def test_clean_scale_exclusions_and_scene_key_follow_the_manifest(tmp_path, monkeypatch):
+    from PIL import Image, UnidentifiedImageError
+    monkeypatch.setattr(L, "_manifest_clean", lambda: {
+        "src": {"scale": 2, "low_quality_scale": 4, "exclude": ["*.tif", "*lens_shading_map_*"]}})
+    assert clean_settings("src")["scale"] == 2 and clean_settings("other") == {}
+    assert scene_of(Item("src", "1k/a.hdr")) == "a.hdr" and scene_of(Item("src", "b_4k.exr")) == "b.exr"
+    assert scene_of(Item("src", "x/y/c.jpg")) == "x/y/c.jpg" and scene_of(Item("src", "k1/d.png")) == "k1/d.png"
+    d = _source(tmp_path, "src")
+    rng = np.random.default_rng(3)
+    big = rng.integers(0, 256, (40, 60, 3), dtype=np.uint8)
+    Image.fromarray(big).save(d / "photo.png")
+    Image.fromarray(big).save(d / "fine.jpg", quality=95)
+    Image.fromarray(big).save(d / "coarse.jpg", quality=50)
+    Image.fromarray(big).save(d / "listed.tif")                    # excluded by pattern
+    (d / "broken.png").write_bytes(b"junk")
+    with zipfile.ZipFile(d / "pack.zip", "w") as z:
+        z.writestr("frames/a.dng", b"x")
+        z.writestr("frames/lens_shading_map_N000.dng", b"x")       # excluded as a member too
+    items = list_items("src", tmp_path)
+    assert [it.file for it in items] == ["broken.png", "coarse.jpg", "fine.jpg", "pack.zip::frames/a.dng",
+                                         "photo.png"]
+    broken, coarse, fine, member, photo = items
+    assert abs(jpeg_quality(d / "fine.jpg") - 95) <= 1 and abs(jpeg_quality(d / "coarse.jpg") - 50) <= 1
+    assert jpeg_quality(d / "photo.png") is None
+    assert clean_scale(fine, d / "fine.jpg") == 2 and clean_scale(coarse, d / "coarse.jpg") == 4
+    assert clean_scale(photo, d / "photo.png") == 2 and clean_scale(Item("other", "x.jpg"), d / "coarse.jpg") == 1
+    dec = decode_item(photo, tmp_path)
+    assert dec.scale == 2 and dec.domain == "srgb8" and dec.img.shape == (20, 30, 3)
+    assert np.allclose(dec.img, L.box_downsample(srgb_to_linear(big / 255.0), 2))
+    assert decode_item(coarse, tmp_path).scale == 4 and decode_item(coarse, tmp_path).img.shape == (10, 15, 3)
+    errors, scales = {}, {}
+    imgs = load_items(items, tmp_path, errors, scales)
+    assert set(imgs) == {coarse, fine, photo} and scales == {coarse: 4, fine: 2, photo: 2}
+    assert imgs[coarse].shape == (10, 15, 3) and np.array_equal(imgs[photo], dec.img)
+    assert errors[broken].startswith("decode_error:UnidentifiedImageError")
+    assert errors[member].startswith(("no_decoder:rawpy", "decode_error:"))
+    with pytest.raises(UnidentifiedImageError):                    # without `errors` the exception still propagates
+        load_items([broken], tmp_path)
+
+
+@needs_dists
+def test_rows_record_the_clean_scale_they_were_measured_at(tmp_path, monkeypatch):
+    from PIL import Image
+    monkeypatch.setattr(L, "_manifest_clean", lambda: {"src": {"scale": 2}})
+    rng = np.random.default_rng(5)
+    y, x = np.mgrid[0:192, 0:256] / 128.0
+    scene = 128 + 100 * np.sin(5 * x) * np.cos(3 * y) + rng.normal(0, 4, (192, 256))
+    img = np.repeat(np.clip(scene, 0, 255).astype(np.uint8)[..., None], 3, axis=-1)
+    d = _source(tmp_path, "src")
+    Image.fromarray(img).save(d / "photo.png")
+    out = tmp_path / "labels"
+    s = _run(tmp_path, ["src"], 4, out)
+    assert s["rows"] == 4 and s["skipped"] == {}
+    rows = read_labels(out)
+    assert all(r["scale"] == 2 and r["domain"] == "srgb8" and not r["is_hdr"] for r in rows)
+    assert all(r["y0"] + r["size"] <= 96 and r["x0"] + r["size"] <= 128 for r in rows)   # boxes in the halved image
 
 
 # ---- skips: missing decoder, unreadable file, too small; the ledger and the planner --------------------------------

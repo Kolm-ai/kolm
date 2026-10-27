@@ -11,7 +11,7 @@ against its clean tile), [harness/data/label.py](harness/data/label.py) and the 
 One clean image on disk is cropped at `--crops` random positions (fixed by a hash of the item's identity) into
 tiles of `--tile` px. Per tile, `--per-tile` parameter vectors are drawn from the measured distributions, each
 rendered by the camera model plus ISP stages, and scored against the prepared clean tile. One row per draw:
-`source, file, row, y0, x0, size, draw, seed, is_hdr, domain, ss`, the parameter vector `p_*` (31 fields) and
+`source, file, row, y0, x0, size, draw, seed, is_hdr, domain, scale, ss`, the parameter vector `p_*` (31 fields) and
 the metric vector `m_*` (12 fields). No image is stored: the row reproduces the pair bit for bit, so storage is
 a few hundred bytes per sample whatever the tile size.
 
