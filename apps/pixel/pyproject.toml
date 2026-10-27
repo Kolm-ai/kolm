@@ -14,6 +14,9 @@ dependencies = [
 data = ["requests>=2.31", "pyarrow>=14"]
 # measured distributions that need raw decoding / ray tracing (noise_check, lens_traces)
 measure = ["rawpy>=0.19", "optiland>=0.3"]
+# labeller decoders: camera raws through LibRaw and OpenEXR (plain or zipped); both ship cp312 wheels for
+# Windows and manylinux_2_28. Without them the labeller records such items as skipped with a reason.
+decode = ["rawpy>=0.19", "OpenEXR>=3.2"]
 # `python -m harness model train|apply`: the recovered layer
 model = ["torch>=2.3"]
 # video candidates and the h264 delivery check

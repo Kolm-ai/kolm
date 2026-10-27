@@ -157,9 +157,16 @@ def cmd_label(args) -> int:
     """Synthetic-degradation labels: one row (params, metrics) per draw, no images stored."""
     from .label import run_label
     s = run_label(args.sources, args.n, out=args.out, per_tile=args.per_tile, crops=args.crops, tile=args.tile,
-                  jobs=args.jobs, fmt=args.format, chunk=args.chunk, ss=args.ss)
+                  jobs=args.jobs, fmt=args.format, chunk=args.chunk, ss=args.ss, retry_skipped=args.retry_skipped)
     print(f"{s['rows']} rows in {s['out']} ({s['rows_new']} new, {s['chunks_skipped']} chunks skipped), "
           f"{s['rows_per_s_per_proc']:.2f} rows/s per process")
+    if s["items_skipped"]:
+        print(f"{len(s['items_skipped'])} items skipped (reason x count, recorded in the ledger): "
+              + ", ".join(f"{k} x{v}" for k, v in s["skipped"].items()))
+    if s["chunks_failed"]:
+        print(f"{s['chunks_failed']} chunk(s) FAILED and left for the next run: "
+              + "; ".join(f"{f['chunk']} ({f['n_items']} items): {f['error'][:80]}" for f in s["failed"]))
+        return 1
     return 0
 
 
@@ -206,4 +213,6 @@ def add_parser(sub) -> None:
     lb.add_argument("--format", choices=("parquet", "jsonl"), default="parquet")
     lb.add_argument("--chunk", type=int, default=8, help="clean images per shard")
     lb.add_argument("--ss", type=int, default=1, help="camera-model supersampling factor")
+    lb.add_argument("--retry-skipped", action="store_true",
+                    help="label again the items the ledger records as skipped (unreadable or too small)")
     lb.set_defaults(func=cmd_label)

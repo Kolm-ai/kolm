@@ -41,7 +41,11 @@ def read_rgbe(path: str | os.PathLike) -> np.ndarray:
     """Decode a Radiance .hdr file into float32 linear RGB (H, W, 3). Supports the flat 4-byte-per-pixel
     layout and the new-style run-length scanlines (2, 2, hi, lo header, four planes RLE). Standard
     orientation -Y H +X W only (what Poly Haven and most tools write)."""
-    data = Path(path).read_bytes()
+    return decode_rgbe(Path(path).read_bytes(), str(path))
+
+
+def decode_rgbe(data: bytes, path: str = "<bytes>") -> np.ndarray:
+    """read_rgbe on the file's bytes (a zip member, say); `path` only names the source in errors."""
     if not data.startswith(b"#?"):
         raise ValueError(f"{path}: not a Radiance file")
     pos = 0
