@@ -1,4 +1,6 @@
 name: pixel-tests
+permissions:
+  contents: read
 on:
   pull_request:
     paths:
