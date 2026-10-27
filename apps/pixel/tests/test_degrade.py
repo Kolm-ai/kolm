@@ -13,7 +13,8 @@ from harness.colorspace import luminance
 from harness.data.degrade import (EXPOSE_FOR_PEAK_STOPS, MID_GREY_FILL, PEAK_FILL, PEAK_PERCENTILE, DegradeParams,
                                   Distributions, PARAM_NAMES, degrade, expose_for_peak_stops, prepare_tile,
                                   sample_params)
-from harness.data.label import Item, crop_boxes, label_tile, load_items, read_labels, read_ledger, run_label
+from harness.data.label import (CONFIG_KEYS, Item, crop_boxes, label_tile, labelled_items, load_items, read_labels,
+                                read_ledger, run_label)
 from harness.data.tilemetrics import tile_metrics
 from harness.metrics import STILL_METRICS
 
@@ -183,6 +184,47 @@ def test_labeller_is_resumable_and_deterministic(tiny_root):
     out2 = tiny_root / "labels2"
     _run(tiny_root, out2, jobs=2)
     _same(rows1, read_labels(out2))
+
+
+def test_labeller_skips_unreadable_files_and_leaves_failed_chunks_for_the_next_run(tiny_root, monkeypatch):
+    src = tiny_root / "raw" / "test-tiles"
+    (src / "t8.png").write_bytes(b"")                                   # empty
+    (src / "t9.tiff").write_bytes(b"II*\x00" + bytes(64))              # a header and nothing behind it
+    out = tiny_root / "labels"
+    s = _run(tiny_root, out, n=24)                                       # 6 items listed, 2 of them unreadable
+    assert s["chunks"] == 6 and s["rows_new"] == 16 and s["items_unreadable"] == 2 and s["chunks_failed"] == 0
+    ledger = read_ledger(out)
+    bad = {e["unreadable"][0]["file"]: e for e in ledger.values() if e["unreadable"]}
+    assert set(bad) == {"t8.png", "t9.tiff"}
+    for e in bad.values():
+        assert e["n_rows"] == 0 and e["file"] == "" and e["unreadable"][0]["error"].startswith("UnidentifiedImageError")
+    assert len(list(out.glob("labels-*.parquet"))) == 4 and len(read_labels(out)) == 16
+    config = dict(zip(CONFIG_KEYS, (64, 2, 2, 1, "parquet")))
+    assert {("test-tiles", "t8.png", -1), ("test-tiles", "t9.tiff", -1)} <= labelled_items(out, config)
+    s2 = _run(tiny_root, out, n=24)                                      # nothing is retried
+    assert s2["chunks"] == 0 and s2["chunks_skipped"] == 6 and s2["rows"] == 16
+    out2 = tiny_root / "labels2"                                        # the same through the process pool
+    s3 = _run(tiny_root, out2, jobs=2, n=24)
+    assert s3["rows_new"] == 16 and s3["items_unreadable"] == 2 and s3["chunks_failed"] == 0
+    _same(read_labels(out), read_labels(out2))
+    # a chunk that fails outright is logged and counted, its items stay unlabelled and the next run takes them
+    import harness.data.label as label_mod
+    real = label_mod.run_chunk
+
+    def flaky(job):
+        if job["chunk"].endswith("-00001"):
+            raise RuntimeError("simulated worker failure")
+        return real(job)
+    monkeypatch.setattr(label_mod, "run_chunk", flaky)
+    out3 = tiny_root / "labels3"
+    lines = []
+    s4 = _run(tiny_root, out3, n=24, log=lines.append)
+    assert s4["chunks_failed"] == 1 and s4["failed"][0]["error"] == "RuntimeError: simulated worker failure"
+    assert s4["rows_new"] == 12 and len(read_ledger(out3)) == 5 and any("FAILED RuntimeError" in ln for ln in lines)
+    monkeypatch.setattr(label_mod, "run_chunk", real)
+    s5 = _run(tiny_root, out3, n=24)
+    assert s5["chunks"] == 1 and s5["rows_new"] == 4 and s5["chunks_failed"] == 0 and s5["rows"] == 16
+    _same(read_labels(out), read_labels(out3))
 
 
 def test_stored_metric_vector_matches_recomputation(tiny_root):

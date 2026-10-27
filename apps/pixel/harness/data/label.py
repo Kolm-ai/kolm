@@ -6,7 +6,9 @@ source, file, crop box, seed, the parameter vector (p_*) and the metric vector (
 (source, file, row, crop box, seed) reproduce the pair bit for bit. Rows go to parquet or JSONL shards of
 `chunk` items each; the ledger (<out>/ledger.jsonl) records finished chunks so a re-run with the same
 configuration skips them. Chunks run in a process pool; every draw is deterministic in its seed, so the
-output does not depend on the pool size or on the order chunks finish."""
+output does not depend on the pool size or on the order chunks finish. An item its decoder rejects (a float
+TIFF, a truncated file) is recorded on its chunk's ledger entry under `unreadable` and skipped; a chunk that
+fails outright is logged, counted in the summary and left for the next run. Neither stops the pass."""
 from __future__ import annotations
 
 import hashlib
@@ -14,7 +16,8 @@ import json
 import math
 import os
 import time
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -86,33 +89,53 @@ def list_items(source: str, root: Path | None = None) -> list[Item]:
     return items
 
 
-def load_items(items: list[Item], root: Path | None = None) -> dict[Item, np.ndarray]:
-    """Linear RGB float64 (H, W, 3) per item; parquet rows of one shard set are read in a single pass."""
+def _load_file(it: Item, p: Path) -> np.ndarray:
+    if it.file.lower().endswith(tuple(HDR_EXT)):
+        from .hdri import read_rgbe
+        return read_rgbe(p).astype(np.float64)
+    if it.file.lower().endswith(tuple(RAW_EXT)):
+        import rawpy
+        with rawpy.imread(str(p)) as raw:
+            rgb = raw.postprocess(gamma=(1, 1), no_auto_bright=True, output_bps=16, use_camera_wb=True)
+        return np.asarray(rgb, dtype=np.float64) / 65535.0
+    from PIL import Image
+    with Image.open(p) as im:
+        return srgb_to_linear(np.asarray(im.convert("RGB"), dtype=np.float64) / 255.0)
+
+
+def _record(errors: dict[Item, str] | None, it: Item, e: Exception) -> None:
+    """Keep a decoder's rejection of one file as text, or re-raise when the caller wants exceptions. A missing
+    decoder module or exhausted memory is never a property of the file and always propagates."""
+    if errors is None or isinstance(e, (ImportError, MemoryError)):
+        raise e
+    errors[it] = f"{type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}".rstrip(": ")
+
+
+def load_items(items: list[Item], root: Path | None = None,
+               errors: dict[Item, str] | None = None) -> dict[Item, np.ndarray]:
+    """Linear RGB float64 (H, W, 3) per item; parquet rows of one shard set are read in a single pass. With
+    `errors` given, an item its decoder rejects is left out of the result and recorded there as
+    "ExceptionName: message" instead of raising."""
     root = Path(root) if root else data_root()
     out: dict[Item, np.ndarray] = {}
     by_parquet: dict[tuple[str, str, str], list[Item]] = {}
     for it in items:
-        p = root / "raw" / it.source / it.file
         if it.row >= 0:
             by_parquet.setdefault((it.source, it.file, it.column), []).append(it)
-        elif it.file.lower().endswith(tuple(HDR_EXT)):
-            from .hdri import read_rgbe
-            out[it] = read_rgbe(p).astype(np.float64)
-        elif it.file.lower().endswith(tuple(RAW_EXT)):
-            import rawpy
-            with rawpy.imread(str(p)) as raw:
-                rgb = raw.postprocess(gamma=(1, 1), no_auto_bright=True, output_bps=16, use_camera_wb=True)
-            out[it] = np.asarray(rgb, dtype=np.float64) / 65535.0
-        else:
-            from PIL import Image
-            with Image.open(p) as im:
-                out[it] = srgb_to_linear(np.asarray(im.convert("RGB"), dtype=np.float64) / 255.0)
+            continue
+        try:
+            out[it] = _load_file(it, root / "raw" / it.source / it.file)
+        except Exception as e:
+            _record(errors, it, e)
     for (source, files, column), its in by_parquet.items():
         from .fit import decode_image, iter_parquet_rows
         paths = [root / "raw" / source / f for f in files.split("|")]
         want = {it.row: it for it in its}
         for g, blob in iter_parquet_rows(paths, set(want), column):
-            out[want[g]] = decode_image(blob["bytes"] if isinstance(blob, dict) else blob)
+            try:
+                out[want[g]] = decode_image(blob["bytes"] if isinstance(blob, dict) else blob)
+            except Exception as e:
+                _record(errors, want[g], e)
     return out
 
 
@@ -196,11 +219,16 @@ def run_chunk(job: dict) -> dict:
     t0 = time.perf_counter()
     items = [Item(**d) for d in job["items"]]
     dists = _dists(job["derived_root"])
-    imgs = load_items(items, job["root"])
+    errors: dict[Item, str] = {}
+    imgs = load_items(items, job["root"], errors)
     rows = []
     for it in items:
-        rows.extend(label_item(it, imgs[it], dists, job["tile"], job["crops"], job["per_tile"], job["ss"]))
-    return {"chunk": job["chunk"], "rows": rows, "seconds": time.perf_counter() - t0}
+        if it in imgs:
+            rows.extend(label_item(it, imgs[it], dists, job["tile"], job["crops"], job["per_tile"], job["ss"]))
+        else:
+            errors.setdefault(it, "not in its shard")
+    unreadable = [{"file": it.file, "row": it.row, "error": errors[it]} for it in items if it in errors]
+    return {"chunk": job["chunk"], "rows": rows, "seconds": time.perf_counter() - t0, "unreadable": unreadable}
 
 
 def _write_shard(path: Path, rows: list[dict]) -> None:
@@ -230,13 +258,17 @@ def read_ledger(out: Path) -> dict[str, dict]:
 def labelled_items(out: Path, config: dict, ledger: dict[str, dict] | None = None) -> set[tuple[str, str, int]]:
     """(source, file, row) of every item whose rows are on disk under this config: the ledger entries whose config
     matches and whose shard exists, read back by their source/file/row columns only (a deleted shard frees its
-    items; a shard labelled under another tile size or draw count does not count)."""
+    items; a shard labelled under another tile size or draw count does not count). Items a matching entry lists
+    as `unreadable` count too: they are not retried until that entry is removed from the ledger."""
     out = Path(out)
     ledger = read_ledger(out) if ledger is None else ledger
     keys: set[tuple[str, str, int]] = set()
     for e in ledger.values():
-        p = out / e["file"]
-        if e.get("config") != config or not p.exists():
+        if e.get("config") != config:
+            continue
+        keys.update((e["source"], u["file"], u["row"]) for u in e.get("unreadable", ()))
+        p = out / e["file"] if e.get("file") else None
+        if p is None or not p.exists():
             continue
         if p.suffix == ".parquet":
             import pyarrow.parquet as pq
@@ -278,7 +310,8 @@ def run_label(sources: list[str], n: int, out: Path | None = None, per_tile: int
     ext = ".parquet" if fmt == "parquet" else ".jsonl"
     done = read_ledger(out)
     have = labelled_items(out, config, done)
-    kept = [e for e in done.values() if e.get("config") == config and (out / e["file"]).exists()]
+    kept = [e for e in done.values() if e.get("config") == config
+            and (not e.get("file") or (out / e["file"]).exists())]
     skipped, rows_old = len(kept), sum(e["n_rows"] for e in kept)
     next_index: dict[str, int] = {}
     for cid, e in done.items():  # chunk ids never repeat, whether or not their shard survived
@@ -293,33 +326,56 @@ def run_label(sources: list[str], n: int, out: Path | None = None, per_tile: int
     log(f"label: {len(todo)} chunks to run, {skipped} shards already done ({rows_old} rows, {len(have)} items), "
         f"jobs={jobs}")
     t0 = time.perf_counter()
-    rows_new, ms_total, files = 0, 0.0, []
+    rows_new, ms_total, files, unreadable, failed = 0, 0, [], 0, []
 
     def finish(res: dict, job: dict) -> None:
-        nonlocal rows_new, ms_total
+        nonlocal rows_new, ms_total, unreadable
         path = out / f"labels-{res['chunk']}{ext}"
-        _write_shard(path, res["rows"])
-        entry = {"chunk": res["chunk"], "source": job["source"], "file": path.name, "n_rows": len(res["rows"]),
-                 "n_items": len(job["items"]), "seconds": round(res["seconds"], 3),
-                 "done_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "config": config}
+        if res["rows"]:
+            _write_shard(path, res["rows"])
+            files.append(path.name)
+        bad = res.get("unreadable", [])
+        entry = {"chunk": res["chunk"], "source": job["source"], "file": path.name if res["rows"] else "",
+                 "n_rows": len(res["rows"]), "n_items": len(job["items"]), "seconds": round(res["seconds"], 3),
+                 "done_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "config": config,
+                 "unreadable": bad}
         with open(out / LEDGER, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
         rows_new += len(res["rows"])
         ms_total += sum(r["ms"] for r in res["rows"])
-        files.append(path.name)
-        log(f"  {res['chunk']}: {len(res['rows'])} rows in {res['seconds']:.1f} s")
+        unreadable += len(bad)
+        note = f", {len(bad)} unreadable ({bad[0]['file']}: {bad[0]['error']})" if bad else ""
+        log(f"  {res['chunk']}: {len(res['rows'])} rows in {res['seconds']:.1f} s{note}")
+
+    def fail(job: dict, e: BaseException) -> None:
+        failed.append({"chunk": job["chunk"], "source": job["source"], "n_items": len(job["items"]),
+                       "error": f"{type(e).__name__}: {e}"})
+        log(f"  {job['chunk']}: FAILED {failed[-1]['error']}")
 
     if jobs == 1 or len(todo) <= 1:
         for job in todo:
-            finish(run_chunk(job), job)
+            try:
+                finish(run_chunk(job), job)
+            except Exception as e:
+                fail(job, e)
     else:
         with ProcessPoolExecutor(max_workers=min(jobs, len(todo))) as ex:
-            for job, res in zip(todo, ex.map(run_chunk, todo)):
-                finish(res, job)
+            pending = {ex.submit(run_chunk, job): job for job in todo}
+            for fut in as_completed(pending):
+                try:
+                    finish(fut.result(), pending[fut])
+                except BrokenProcessPool as e:
+                    fail(pending[fut], e)
+                    log("label: worker pool broken, the remaining chunks wait for the next run")
+                    break
+                except Exception as e:
+                    fail(pending[fut], e)
     seconds = time.perf_counter() - t0
     summary = {"rows": rows_old + rows_new, "rows_new": rows_new, "chunks": len(todo), "chunks_skipped": skipped,
+               "chunks_failed": len(failed), "failed": failed, "items_unreadable": unreadable,
                "items_done_before": len(have),
                "seconds": round(seconds, 2), "rows_per_s_per_proc": (rows_new / (ms_total / 1000.0)) if ms_total else 0.0,
                "out": str(out), "files": files}
-    log(f"label: {rows_new} new rows in {seconds:.1f} s, {summary['rows_per_s_per_proc']:.2f} rows/s per process")
+    log(f"label: {rows_new} new rows in {seconds:.1f} s, {summary['rows_per_s_per_proc']:.2f} rows/s per process, "
+        f"{unreadable} unreadable items, {len(failed)} failed chunks")
     return summary
