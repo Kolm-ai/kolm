@@ -1,0 +1,39 @@
+[project]
+name = "kolm-pixel"
+version = "0.2.0"
+description = "Verifiably better than any lens: claim schema, physical camera floor, display ceiling, ordered gates, blinded preference study, a manifest-driven data collector, offline degradation labels and the recovered layer (python -m harness)."
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "scipy>=1.10",
+  "Pillow>=9.0",
+]
+
+[project.optional-dependencies]
+# `python -m harness data collect|derive|label`: the collector and parquet label shards
+data = ["requests>=2.31", "pyarrow>=14"]
+# measured distributions that need raw decoding / ray tracing (noise_check, lens_traces)
+measure = ["rawpy>=0.19", "optiland>=0.3"]
+# `python -m harness model train|apply`: the recovered layer
+model = ["torch>=2.3"]
+# video candidates and the h264 delivery check
+video = ["imageio>=2.31", "imageio-ffmpeg>=0.4"]
+dev = ["pytest>=7"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["harness*"]
+
+[tool.setuptools.package-data]
+harness = ["data/sources.json", "data/catalog/*.json", "data/reference/*.csv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"

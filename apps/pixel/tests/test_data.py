@@ -326,3 +326,46 @@ def test_expand_failures_are_ledgered_and_cleared(tmp_path):
     assert "x" not in c.status() and "x" not in Collector(root=root, log=lambda *_: None).status()
     Collector(root=root, dry_run=True, log=lambda *_: None).note_expand(src, RuntimeError("dry"))
     assert "x" not in Collector(root=root, log=lambda *_: None).status()
+
+def test_wikimedia_category_keeps_the_licence_per_file_and_verifies_sha1():
+    from harness.data.apis import wikimedia_category
+
+    def page(pageid, title, lic, mime="image/jpeg", w=4000, h=3000, size=5_000_000):
+        return {"pageid": pageid, "title": f"File:{title}", "imageinfo": [{"url": f"https://upload.wikimedia.org/{pageid}", "size": size,
+                "width": w, "height": h, "sha1": f"{pageid:040x}", "mime": mime,
+                "extmetadata": {"LicenseShortName": {"value": lic}, "Artist": {"value": "A"}}}]}
+
+    pages = [
+        {"query": {"pages": [page(1, "Sunset over Dubrovnik.jpg", "CC BY-SA 4.0"), page(2, "Nc shot.jpg", "CC BY-NC-SA 2.0"),
+                             page(3, "Map.svg", "CC0", mime="image/svg+xml"), page(4, "Tiny.jpg", "CC0", w=800, h=600),
+                             page(5, "Huge scan.tif", "Public domain", mime="image/tiff", size=90_000_000)]},
+         "continue": {"gcmcontinue": "page|2", "continue": "gcmcontinue||"}},
+        {"query": {"pages": [page(6, "Old print.jpg", "Public domain"), page(7, "No-derivs.jpg", "CC BY-ND 3.0"), page(8, "Shot.png", "CC BY 2.0", mime="image/png")]}},
+    ]
+
+    class Stub:
+        def __init__(self):
+            self.calls = []
+
+        def get_json(self, url, params=None, headers=None):
+            assert url.startswith("https://commons.wikimedia.org/") and params["gcmtitle"] == "Category:T"
+            self.calls.append(dict(params))
+            return pages[len(self.calls) - 1]
+
+        def log(self, msg):
+            pass
+
+    src = Source(id="wm", name="wm", kind="dataset", access="api", url="u", expander="wikimedia_category",
+                 params={"category": "Category:T", "min_pixels": 4e6, "max_bytes_each": 40e6})
+    stub = Stub()
+    specs = wikimedia_category(stub, src)
+    assert [s.path for s in specs] == ["index/0000.json", "cc-by-sa-4.0/1_Sunset_over_Dubrovnik.jpg", "index/0001.json",
+                                       "public-domain/6_Old_print.jpg", "cc-by-2.0/8_Shot.png"]
+    assert specs[1].sha1 == f"{1:040x}" and specs[1].size == 5_000_000 and specs[1].sha256 is None
+    assert stub.calls[1]["gcmcontinue"] == "page|2" and "gcmcontinue" not in stub.calls[0]
+    assert "gcmcontinue=page%7C2" in specs[2].url and specs[2].to_dict() == {"url": specs[2].url, "path": "index/0001.json"}
+    assert specs[1].to_dict()["sha1"] == specs[1].sha1
+    src.params = {"category": "Category:T", "limit": 1}
+    assert [s.path for s in wikimedia_category(Stub(), src)] == ["index/0000.json", "cc-by-sa-4.0/1_Sunset_over_Dubrovnik.jpg"]
+    src.params = {"category": "Category:T", "licences": "^cc0"}
+    assert [s.path for s in wikimedia_category(Stub(), src) if not s.path.startswith("index/")] == ["cc0/4_Tiny.jpg"]

@@ -22,6 +22,7 @@ class FileSpec:
     sha256: str | None = None
     size: int | None = None
     md5: str | None = None  # some hosts (Zenodo) publish md5 only
+    sha1: str | None = None  # Wikimedia Commons publishes sha1 only
     columns: list[str] | None = None  # hf:// parquet only: fetch these columns, skip the rest (image bytes)
 
     def to_dict(self) -> dict:
@@ -32,6 +33,8 @@ class FileSpec:
             d["sha256"] = self.sha256
         if self.md5:
             d["md5"] = self.md5
+        if self.sha1:
+            d["sha1"] = self.sha1
         if self.size is not None:
             d["size"] = self.size
         return d

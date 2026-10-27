@@ -15,7 +15,9 @@ from harness.model.data import (COND_DIM, METRIC_COND_DIM, Normaliser, decode, d
                                 split_of)
 from harness.model.net import CondUNet, pad_to
 
-DERIVED = Path("data/derived")
+from harness.data import data_root
+
+DERIVED = data_root() / "derived"
 needs_data = pytest.mark.skipif(not (DERIVED / "camera_presets.json").exists(), reason="derived stats not built")
 SOURCES = ["hf-kadid10k-images", "hf-tid2013"]
 needs_clean = pytest.mark.skipif(not all((Path("data/raw") / s).exists() for s in SOURCES), reason="clean sources absent")
@@ -118,6 +120,7 @@ def test_shading_target_sits_ahead_of_the_tone_affine():
     assert np.median(lum_old[mid] / lum_in[mid]) < 0.9
 
 
+@needs_data
 def test_identity_pairs_render_the_clean_tile_as_both_input_and_target():
     """A clean input must come out unchanged: a share of the pairs is (clean, clean) with the restore conditioning."""
     from harness.model.data import P_IDENTITY
@@ -136,6 +139,7 @@ def test_identity_pairs_render_the_clean_tile_as_both_input_and_target():
     assert m["delta_e_mean"] < 1e-6 and m["mtf50_cpp"] > 0
 
 
+@needs_data
 def test_restore_pair_target_is_the_prepared_tile():
     dists = Distributions.load()
     rng = np.random.default_rng(3)
@@ -153,6 +157,7 @@ def test_restore_pair_target_is_the_prepared_tile():
         assert np.allclose(xb, prepare_tile(tile, b, False))
 
 
+@needs_data
 def test_targets_keep_the_input_global_tone_and_colour():
     """Exposure, the sRGB tone affine, saturation and the colour cast are not identifiable from a tile and are
     not in the metric vector, so every target keeps the input's values and a restore label reads as clean."""
@@ -232,6 +237,7 @@ def test_tiled_inference_matches_whole_frame_on_identity(monkeypatch):
     assert np.allclose(tiled, frames, atol=1e-5)
 
 
+@needs_data
 def test_edit_pairs_keep_the_input_exposure_and_scene_range():
     """The target's brightness is not in the metric vector, so no pair may change it: every edit target
     carries the input's expose flag, exposure offset and scene range; only the other fields differ."""
@@ -269,6 +275,7 @@ def test_capture_descriptor_is_physical_and_optional():
     assert np.isfinite(capture_descriptor(0.3, 0.0, 1e9, 0.0, 16, False)).all()
 
 
+@needs_data
 def test_restore_inputs_mostly_come_from_the_capture_profile():
     """Restore pairs draw the sampler's raw capture profile with P_RESTORE_CAPTURE: camera on, no unsharp halo,
     no posterise. The rest keep the IQA profile, so halos and banding are still restored when present."""

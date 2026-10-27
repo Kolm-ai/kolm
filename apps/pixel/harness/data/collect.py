@@ -192,6 +192,9 @@ class Collector:
             if spec.md5 and (got := _digest(dst, "md5")) != spec.md5:
                 os.unlink(fs(dst))
                 raise RuntimeError(f"md5 mismatch: got {got[:12]} want {spec.md5[:12]}")
+            if spec.sha1 and (got := _digest(dst, "sha1")) != spec.sha1:
+                os.unlink(fs(dst))
+                raise RuntimeError(f"sha1 mismatch: got {got[:12]} want {spec.sha1[:12]}")
             e = LedgerEntry(source.id, spec.path, spec.url, os.stat(fs(dst)).st_size, digest, "done", now)
         except Exception as ex:  # noqa: BLE001 - every failure is data, not a crash
             e = LedgerEntry(source.id, spec.path, spec.url, 0, "", "failed", now, f"{type(ex).__name__}: {ex}")

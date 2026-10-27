@@ -1,7 +1,0 @@
-numpy>=1.24
-scipy>=1.10
-Pillow>=9.0
-pytest>=7
-# optional, only for reading/writing video files and the h264 delivery check:
-# imageio>=2.31
-# imageio-ffmpeg>=0.4

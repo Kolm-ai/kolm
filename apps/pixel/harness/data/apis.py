@@ -8,7 +8,7 @@ import html as _html
 import os
 import re
 from typing import Callable
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from .collect import Collector
 from .manifest import FileSpec, Source
@@ -25,6 +25,7 @@ GITHUB_API = "https://api.github.com"
 RPU = "https://raw.pixls.us"
 DATAVERSE_DEFAULT = "https://dataverse.harvard.edu"
 GCS = "https://storage.googleapis.com"
+COMMONS = "https://commons.wikimedia.org/w/api.php"
 
 
 def _limit(items, source: Source):
@@ -342,6 +343,71 @@ def gcs_bucket(c: Collector, source: Source) -> list[FileSpec]:
             return specs
 
 
+# ---- Wikimedia Commons: one category, the licence read per file ------------------------------------------
+# Commons mixes licences inside one category, so the allowlist is applied to each file's LicenseShortName:
+# CC0, public domain, CC BY and CC BY-SA at any version pass; NC, ND and GFDL-only files are skipped and
+# counted. The licence becomes the first path component (cc0/, cc-by-4.0/, public-domain/ ...), so a later
+# corpus filter is a directory choice, and every API page the listing walked is fetched as index/NNNN.json
+# (author, licence, dimensions, sha1 per file: the attribution record CC BY asks for).
+COMMONS_LICENCE_OK = re.compile(r"^(cc0|cc[ -]?by(?![ -]?n[cd])(?:[ -]?sa)?(?![ -]?n[cd])|public domain|pdm\b|pd\b)", re.I)
+
+
+def _licence_slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9.]+", "-", name.lower()).strip("-") or "unknown"
+
+
+def wikimedia_category(c: Collector, source: Source) -> list[FileSpec]:
+    """Every image file of `category` (a Category: title) whose per-file licence matches `licences` (regex,
+    default COMMONS_LICENCE_OK) and whose MIME matches `mime`; `min_pixels` drops small files, `max_bytes_each`
+    drops the giant scans, `limit` bounds the listing, `page_size` is the API page (50 keeps extmetadata
+    within one request). Paths: <licence slug>/<pageid>_<file name>; sha1 from the API verifies each download."""
+    p = source.params
+    allow = re.compile(str(p["licences"]), re.I) if p.get("licences") else COMMONS_LICENCE_OK
+    mime_ok = re.compile(str(p.get("mime", r"^image/(jpeg|png|tiff)$")), re.I)
+    min_pixels = float(p.get("min_pixels", 0) or 0)
+    max_each = float(p.get("max_bytes_each", 0) or 0)
+    limit = int(p.get("limit", 0) or 0)
+    safe = lambda s: re.sub(r"[^A-Za-z0-9_.-]+", "_", str(s or "")).strip("_")[:120]
+    params = {"action": "query", "format": "json", "formatversion": "2", "generator": "categorymembers",
+              "gcmtitle": str(p["category"]), "gcmtype": "file", "gcmlimit": str(int(p.get("page_size", 50))),
+              "prop": "imageinfo", "iiprop": "url|size|sha1|mime|extmetadata",
+              "iiextmetadatafilter": "LicenseShortName|License|Artist|Credit|ImageDescription"}
+    specs: list[FileSpec] = []
+    skipped = {"licence": 0, "mime": 0, "size": 0}
+    n_files = page_no = 0
+    while True:
+        data = c.get_json(COMMONS, params=dict(params))
+        specs.append(FileSpec(url=f"{COMMONS}?{urlencode(sorted(params.items()))}", path=f"index/{page_no:04d}.json"))
+        page_no += 1
+        for page in (data.get("query") or {}).get("pages", []):
+            for ii in page.get("imageinfo", []):
+                meta = ii.get("extmetadata") or {}
+                lic = str((meta.get("LicenseShortName") or {}).get("value", "")).strip()
+                if not allow.match(lic):
+                    skipped["licence"] += 1
+                    continue
+                if not mime_ok.match(str(ii.get("mime", ""))):
+                    skipped["mime"] += 1
+                    continue
+                size = int(ii.get("size") or 0)
+                pixels = int(ii.get("width") or 0) * int(ii.get("height") or 0)
+                if (min_pixels and pixels < min_pixels) or (max_each and size > max_each):
+                    skipped["size"] += 1
+                    continue
+                name = safe(str(page.get("title", "")).removeprefix("File:"))
+                specs.append(FileSpec(url=ii["url"], path=f"{_licence_slug(lic)}/{page.get('pageid')}_{name}",
+                                      size=size or None, sha1=ii.get("sha1")))
+                n_files += 1
+                if limit and n_files >= limit:
+                    c.log(f"  {source.id}: {n_files} files listed (limit); skipped {skipped}")
+                    return specs
+        cont = data.get("continue")
+        if not cont:
+            c.log(f"  {source.id}: {page_no} index pages, {n_files} files; skipped {skipped}")
+            return specs
+        params.update({k: str(v) for k, v in cont.items()})
+
+
 EXPANDERS: dict[str, Callable[[Collector, Source], list[FileSpec]]] = {
     "polyhaven_hdris": polyhaven_hdris,
     "polyhaven_textures": polyhaven_textures,
@@ -357,6 +423,7 @@ EXPANDERS: dict[str, Callable[[Collector, Source], list[FileSpec]]] = {
     "rpu_index": rpu_index,
     "dataverse_dataset": dataverse_dataset,
     "gcs_bucket": gcs_bucket,
+    "wikimedia_category": wikimedia_category,
 }
 
 

@@ -17,7 +17,9 @@ from harness.data.label import Item, crop_boxes, label_tile, load_items, read_la
 from harness.data.tilemetrics import tile_metrics
 from harness.metrics import STILL_METRICS
 
-DERIVED = Path("data/derived")
+from harness.data import data_root
+
+DERIVED = data_root() / "derived"
 pytestmark = pytest.mark.skipif(not (DERIVED / "camera_presets.json").exists(), reason="derived stats not built")
 
 
