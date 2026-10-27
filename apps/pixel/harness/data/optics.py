@@ -374,7 +374,7 @@ def _round(x, n: int):
 # batch
 
 
-def prescription_jobs(claff_dir: Path | None, deeplens_dir: Path | None) -> list[tuple[str, str]]:
+def design_jobs(claff_dir: Path | None, deeplens_dir: Path | None) -> list[tuple[str, str]]:
     jobs = []
     if claff_dir and claff_dir.exists():
         seen = set()

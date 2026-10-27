@@ -794,7 +794,7 @@ def derive_lens_traces() -> str:
     from . import optics as O
     log = (lambda m: print(m, flush=True)) if os.environ.get("HARNESS_VERBOSE") else None
     claff, deep = _raw("lens-designs-claff"), _raw("deeplens-lenses")
-    jobs = O.prescription_jobs(claff, deep)
+    jobs = O.design_jobs(claff, deep)
     limit = int(os.environ.get("HARNESS_LENS_LIMIT", "0") or 0)
     if limit:
         jobs = jobs[:limit]

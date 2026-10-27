@@ -110,11 +110,15 @@ def _row(name, source, image_height, residual, fno, edge=True):
             "focus": {"hit_scan_edge": edge}, "fields": [{"mtf50_t_lpmm": 60.0}, {"mtf50_t_lpmm": None}]}
 
 
-def test_trace_file_records_failures_and_summary_counts_them(tmp_path):
+def test_trace_file_records_failures(tmp_path):
     missing = O.trace_file(("claff", str(tmp_path / "missing.zmx")))
     assert missing["ok"] is False and missing["error"].startswith("FileNotFoundError")
     unknown = O.trace_file(("other", str(tmp_path / "x")))
     assert unknown["error"].startswith("ValueError: unknown prescription kind")
+
+
+def test_summary_counts_failures():
+    missing = {"name": "missing.zmx", "source": "claff", "ok": False, "error": "FileNotFoundError: missing.zmx"}
     rows = [_row("a", "claff", 21.6, 1.5, 2.0, edge=False), _row("b", "deeplens", 14.0, 1.0, 1.8, edge=False),
             _row("c", "claff", 21.6, 0.5, 4.0, edge=True), missing]
     s = O.summarise(rows)
@@ -137,6 +141,6 @@ def test_zemax_meta_and_jobs(tmp_path):
     (claff / "B.ZMX").write_text(text, encoding="latin-1")
     for p in (claff / "A.zmx", claff / "B.ZMX"):
         assert O.zemax_meta(O.read_text(p)) == {"ftyp": 3, "yfln": [0, 15.12, 21.6, 0, 0, 0], "name": "Example"}
-    jobs = O.prescription_jobs(claff, tmp_path / "nowhere")
+    jobs = O.design_jobs(claff, tmp_path / "nowhere")
     assert [k for k, _ in jobs] == ["claff", "claff"]
-    assert O.prescription_jobs(None, None) == []
+    assert O.design_jobs(None, None) == []
