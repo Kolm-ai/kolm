@@ -4,6 +4,7 @@ import threading
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import numpy as np
 import pytest
@@ -109,6 +110,8 @@ def test_shards_dedup_and_label(tmp_path, served):
 
 def test_expanders_parse_published_hashes(monkeypatch):
     class FakeSession:
+        """Routes by exact host and path prefix, parsed from the URL, never by substring."""
+
         def get(self, url, **kw):
             class R:
                 def __init__(self, payload):
@@ -120,14 +123,16 @@ def test_expanders_parse_published_hashes(monkeypatch):
                 def json(self):
                     return self.payload
 
-            if "huggingface.co/api" in url:
+            parts = urlsplit(url)
+            host, path = parts.netloc, parts.path
+            if host == "huggingface.co" and path.startswith("/api/datasets/"):
                 return R([{"type": "file", "path": "data/a.parquet", "size": 10, "lfs": {"oid": "ab" * 32}}, {"type": "directory", "path": "x"}])
-            if "zenodo.org" in url:
+            if host == "zenodo.org" and path.startswith("/api/records/"):
                 return R({"doi": "10.5281/zenodo.1", "metadata": {"license": {"id": "cc-by-4.0"}},
                           "files": [{"key": "f.tif", "size": 5, "checksum": "md5:" + "cd" * 16, "links": {"self": "https://z/f.tif"}}]})
-            if "polyhaven.com/assets" in url:
+            if host == "api.polyhaven.com" and path == "/assets":
                 return R({"sky": {}})
-            if "polyhaven.com/files" in url:
+            if host == "api.polyhaven.com" and path.startswith("/files/"):
                 return R({"hdri": {"4k": {"hdr": {"url": "https://p/sky_4k.hdr", "size": 7, "md5": "ef" * 16}}}})
             raise AssertionError(url)
 
