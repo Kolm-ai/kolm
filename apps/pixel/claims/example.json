@@ -1,0 +1,183 @@
+{
+  "qualities": {
+    "resolution": [
+      "mtf50_cpp",
+      "texture_hf_fidelity"
+    ],
+    "shadows": [
+      "shadow_snr_db"
+    ],
+    "highlights": [
+      "highlight_loss_fraction",
+      "dr_steps"
+    ],
+    "color": [
+      "delta_e_mean",
+      "delta_e_max"
+    ],
+    "artifacts": [
+      "edge_overshoot",
+      "banding_score",
+      "periodicity"
+    ],
+    "geometry_lighting": [
+      "landmark_error_px",
+      "shading_rmse"
+    ],
+    "temporal": [
+      "flicker",
+      "flow_warped_excess",
+      "motion_region_error",
+      "trajectory_error_px"
+    ],
+    "provenance": [
+      "invented_detail_fraction",
+      "undeclared_invention_fraction",
+      "rendered_fraction"
+    ]
+  },
+  "scene": {
+    "width": 384,
+    "height": 216,
+    "supersample": 2,
+    "seed": 7,
+    "n_frames": 24,
+    "fps": 24.0,
+    "exposure_s": 0.0
+  },
+  "camera": {
+    "preset": "best_case_earth",
+    "exposure_s": 0.020833333333333332,
+    "seed": 1
+  },
+  "display": {
+    "diagonal_in": 31.5,
+    "width_px": 7680,
+    "height_px": 4320,
+    "distance_m": 0.6,
+    "delivery": {
+      "format": "jpeg",
+      "quality": 92
+    }
+  },
+  "rendered_map": {
+    "policy": "optional"
+  },
+  "gates": [
+    {
+      "name": "composition",
+      "checks": [
+        {
+          "metric": "pref_convincing_p_beats_camera_low",
+          "op": ">",
+          "value": 0.5
+        }
+      ]
+    },
+    {
+      "name": "provenance",
+      "checks": [
+        {
+          "metric": "undeclared_invention_fraction",
+          "op": "<=",
+          "value": 0.01
+        }
+      ]
+    },
+    {
+      "name": "lighting_materials",
+      "checks": [
+        {
+          "metric": "shading_rmse",
+          "op": "<=",
+          "value": 0.02
+        },
+        {
+          "metric": "landmark_error_px",
+          "op": "<=",
+          "value": 0.5
+        }
+      ]
+    },
+    {
+      "name": "tone_color",
+      "checks": [
+        {
+          "metric": "delta_e_mean",
+          "op": "<=",
+          "value": 2.0
+        },
+        {
+          "metric": "highlight_loss_fraction",
+          "op": "<=",
+          "value": 0.0
+        },
+        {
+          "metric": "dr_steps",
+          "op": "ties_or_beats_camera"
+        }
+      ]
+    },
+    {
+      "name": "artifacts",
+      "checks": [
+        {
+          "metric": "edge_overshoot",
+          "op": "<=",
+          "value": 0.02
+        },
+        {
+          "metric": "banding_score",
+          "op": "<=",
+          "value": 0.01
+        },
+        {
+          "metric": "periodicity",
+          "op": "<=",
+          "value": 0.3
+        }
+      ]
+    },
+    {
+      "name": "resolution",
+      "checks": [
+        {
+          "metric": "display_ppd",
+          "op": ">=",
+          "value": 94.0
+        },
+        {
+          "metric": "mtf50_cpp",
+          "op": "beats_camera"
+        }
+      ]
+    },
+    {
+      "name": "micro_detail",
+      "checks": [
+        {
+          "metric": "texture_hf_fidelity",
+          "op": "beats_camera"
+        }
+      ]
+    },
+    {
+      "name": "temporal",
+      "checks": [
+        {
+          "metric": "flicker",
+          "op": "beats_camera"
+        },
+        {
+          "metric": "flow_warped_excess",
+          "op": "<=",
+          "value": 0.005
+        },
+        {
+          "metric": "motion_region_error",
+          "op": "beats_camera"
+        }
+      ]
+    }
+  ]
+}

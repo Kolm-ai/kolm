@@ -225,7 +225,12 @@ remotion/out/
 remotion/.remotion/
 tmp-distill
 
-# kolm pixel: regenerable outputs
-apps/pixel/demo_out/
+# kolm pixel: the data root (33 GB+ of ledgered sources, labels, models) lives outside the repo
+# (HARNESS_DATA_ROOT); everything below is regenerable from `python -m harness`
+apps/pixel/data/
+apps/pixel/demo_out*/
+apps/pixel/study*/
 apps/pixel/runs/
+apps/pixel/.tmp/
 apps/pixel/*.egg-info/
+apps/pixel/.pytest_cache/

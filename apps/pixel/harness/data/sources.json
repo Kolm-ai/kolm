@@ -1,0 +1,2064 @@
+{
+  "sources": [
+    {
+      "id": "cie-colorimetry",
+      "name": "CIE data tables: CMFs, cone fundamentals, illuminants, V(lambda), CRI/CFI samples",
+      "kind": "reference",
+      "access": "api",
+      "url": "https://cie.co.at/data-tables",
+      "license": "CC BY-SA 4.0 (each table's _metadata.json carries its DOI and rights)",
+      "size_bytes": 5000000,
+      "gives": "spectral tables at 1 nm / 5 nm: x\u0304\u0233z\u0304 1931 2\u00b0, 1964 10\u00b0, 2006 LMS, D65/D50/A SPDs, V(\u03bb), 14 CRI + 99 CFI reflectances",
+      "harness_use": "spectral rendering of scene.colors and the camera's per-channel integration; exact Lab of any reflectance under any illuminant",
+      "expander": "cie_tables",
+      "params": {
+        "tables": [
+          "cie-1931-colour-matching-functions-2-degree-observer",
+          "cie-1964-colour-matching-functions-10-degree-observer",
+          "cie-2006-lms-cone-fundamentals-2-field-size-terms-energy",
+          "cie-standard-illuminant-d65",
+          "cie-standard-illuminant-d50",
+          "cie-standard-illuminant-1-nm",
+          "cie-spectral-luminous-efficiency-photopic-vision",
+          "cie-spectral-luminous-efficiency-scotopic-vision",
+          "spectral-radiance-factors-14-test-samples-cie-colour-rendering-index-calculation",
+          "spectral-radiance-factors-99-test-samples-cie-colour-fidelity-index-calculation-1nm",
+          "relative-spectral-power-distributions-illuminants-representing-typical-led-lamps-1nm",
+          "relative-spectral-power-distributions-illuminants-representing-typical-fluorescent-lamps"
+        ]
+      },
+      "deriver": "cie"
+    },
+    {
+      "id": "polyhaven-hdris",
+      "name": "Poly Haven HDRIs (997, CC0)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://polyhaven.com/hdris",
+      "license": "CC0",
+      "size_bytes": 1589000000.0,
+      "gives": "997 equirectangular HDR environment maps; 1k 1.4 MB, 2k 5.5 MB, 4k 21 MB, 8k 75 MB, 16k 262 MB each; categories, tags, EV range in index",
+      "harness_use": "environment lighting for rendered ground-truth worlds; relative (not absolute cd/m\u00b2) radiance",
+      "expander": "polyhaven_hdris",
+      "params": {
+        "resolution": "1k",
+        "format": "hdr",
+        "limit": 0
+      },
+      "deriver": "polyhaven_index",
+      "notes": "1k tier measured 2026-10-27: 997 maps, 1.59 GB on disk (1.6 MB each); 4k \u2248 21 GB, 8k \u2248 75 GB"
+    },
+    {
+      "id": "polyhaven-textures",
+      "name": "Poly Haven PBR textures (869, CC0)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://polyhaven.com/textures",
+      "license": "CC0",
+      "size_bytes": 4000000000,
+      "gives": "diffuse / normal / roughness (+ displacement, AO) maps up to 8k",
+      "harness_use": "aperiodic micro-texture and material ground truth for the texture-fidelity and periodicity metrics",
+      "expander": "polyhaven_textures",
+      "params": {
+        "resolution": "1k",
+        "format": "png",
+        "maps": "Diffuse,nor_gl,Rough",
+        "limit": 0
+      },
+      "deriver": "polyhaven_index"
+    },
+    {
+      "id": "polyhaven-models",
+      "name": "Poly Haven 3D models (521, CC0)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://polyhaven.com/models",
+      "license": "CC0",
+      "size_bytes": 10000000000,
+      "gives": "glTF models with PBR textures",
+      "harness_use": "known geometry (landmarks, occlusion, shading) in rendered worlds",
+      "expander": "polyhaven_models",
+      "params": {
+        "resolution": "1k",
+        "limit": 0
+      },
+      "deriver": "polyhaven_index"
+    },
+    {
+      "id": "hf-pickapic-v1",
+      "name": "Pick-a-Pic v1 (pairwise human preference over generated images)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/yuvalkirstain/pickapic_v1",
+      "license": "MIT (dataset card)",
+      "size_bytes": 1500000000,
+      "gives": "~580k pairwise choices with prompts and both images; rows API gives metadata + image URLs per page",
+      "harness_use": "validate the Bradley\u2013Terry preference fit and its bootstrap coverage on real pairwise data",
+      "expander": "hf_rows",
+      "params": {
+        "dataset": "yuvalkirstain/pickapic_v1",
+        "config": "default",
+        "split": "train",
+        "length": 100,
+        "pages": 0
+      },
+      "notes": "gated: set HF_TOKEN; size_bytes is the JSON row pages, not the images"
+    },
+    {
+      "id": "ambientcg-materials",
+      "name": "ambientCG PBR materials (2037, CC0)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://ambientcg.com/list?type=Material",
+      "license": "CC0 1.0 (docs.ambientcg.com/license)",
+      "size_bytes": 15684900000.0,
+      "gives": "2037 PBR material sets (color, normal, roughness, displacement, AO) as zips; 1K-JPG 7.7 MB, 2K-JPG 24 MB, 4K-JPG 80 MB, 8K-JPG 307 MB, 1K-PNG 18 MB, 8K-PNG 974 MB each",
+      "harness_use": "second CC0 material feed for texture-fidelity ground truth; variant chosen by params.variant",
+      "expander": "ambientcg",
+      "params": {
+        "type": "Material",
+        "variant": "1K-JPG",
+        "limit": 0
+      },
+      "notes": "size_bytes is the 1K-JPG tier (~15.7 GB); 2K-JPG ~49 GB, 4K-JPG ~163 GB. Single-maintainer site: keep jobs low"
+    },
+    {
+      "id": "ambientcg-hdris",
+      "name": "ambientCG HDRIs (434, CC0)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://ambientcg.com/list?type=HDRI",
+      "license": "CC0 1.0 (docs.ambientcg.com/license)",
+      "size_bytes": 2083200000.0,
+      "gives": "434 equirectangular HDR environments; variants 1K 4.8 MB, 2K 13.5 MB, 4K 47.5 MB, 8K 178 MB, 12K 380 MB, 16K 669 MB",
+      "harness_use": "environment lighting (relative radiance) for rendered ground-truth worlds",
+      "expander": "ambientcg",
+      "params": {
+        "type": "HDRI",
+        "variant": "1K",
+        "limit": 0
+      },
+      "notes": "size_bytes is the 1K tier (~2.1 GB); 4K ~21 GB"
+    },
+    {
+      "id": "zenodo-xrite-colorchecker",
+      "name": "X-Rite ColorChecker Classic / SG reference Lab (pre/post Nov 2014 CGATS)",
+      "kind": "reference",
+      "access": "api",
+      "url": "https://zenodo.org/records/3245895",
+      "license": "not specified on Zenodo (X-Rite published data; redistributed by colour-datasets)",
+      "size_bytes": 5895,
+      "gives": "CGATS text: nominal Lab (D50/2 deg) and sRGB of the 24 Classic patches and 140 SG patches, before and after the Nov 2014 formulation",
+      "harness_use": "known Lab of the colour-patch panel: the delta_e_mean gate is measured against these numbers",
+      "expander": "zenodo_record",
+      "params": {
+        "record": 3245895,
+        "limit": 0
+      },
+      "deriver": "colorchecker"
+    },
+    {
+      "id": "babelcolor-average",
+      "name": "BabelColor averaged ColorChecker spectra (30 charts, 380-730 nm)",
+      "kind": "reference",
+      "access": "direct",
+      "url": "https://www.babelcolor.com/colorchecker.htm",
+      "license": "copyright Danny Pascale; free use with attribution (no formal licence text)",
+      "size_bytes": 158760,
+      "gives": "XLS: averaged spectral reflectance of 30 ColorChecker Classic charts at 10 nm plus Lab/RGB",
+      "harness_use": "spectral reflectance of each patch, so patches can be rendered under any CIE illuminant and the Lab recomputed exactly",
+      "files": [
+        {
+          "url": "https://www.babelcolor.com/index_htm_files/ColorChecker_RGB_and_spectra.zip",
+          "path": "ColorChecker_RGB_and_spectra.zip",
+          "size": 158760
+        }
+      ]
+    },
+    {
+      "id": "zenodo-munsell-matt",
+      "name": "UEF Munsell matt chips, spectrophotometer measured (1269 chips, 380-800 nm)",
+      "kind": "reference",
+      "access": "api",
+      "url": "https://zenodo.org/records/3269912",
+      "license": "not specified on Zenodo (UEF spectral database, free for research use per site)",
+      "size_bytes": 2603586,
+      "gives": "1269 reflectance spectra in .mat/.asc with README",
+      "harness_use": "large known-spectra set for gamut coverage and metamerism tests of the tone_color gate",
+      "expander": "zenodo_record",
+      "params": {
+        "record": 3269912,
+        "pattern": "\\.asc\\.gz$|README",
+        "limit": 0
+      },
+      "deriver": "spectra"
+    },
+    {
+      "id": "zenodo-labsphere-srs99",
+      "name": "Labsphere SRS-99-020 white reference reflectance",
+      "kind": "reference",
+      "access": "api",
+      "url": "https://zenodo.org/records/3245875",
+      "license": "CC BY 4.0",
+      "size_bytes": 192124,
+      "gives": "certified spectral reflectance of a 99% Spectralon white standard with the calibration certificate",
+      "harness_use": "white_fill / highlight reference: what a perfect diffuse white reflects per wavelength",
+      "expander": "zenodo_record",
+      "params": {
+        "record": 3245875,
+        "pattern": "\\.txt$",
+        "limit": 0
+      },
+      "deriver": "spectra"
+    },
+    {
+      "id": "zenodo-camspec-jiang2013",
+      "name": "Camera spectral sensitivity database (Jiang et al. 2013, 28 cameras)",
+      "kind": "reference",
+      "access": "api",
+      "url": "https://zenodo.org/records/3245883",
+      "license": "CC BY-NC-SA 4.0 (non-commercial)",
+      "size_bytes": 25573,
+      "gives": "RGB spectral sensitivities of 28 consumer cameras, 400-720 nm at 10 nm",
+      "harness_use": "per-channel integration of the camera baseline instead of the three fixed wavelengths in CaptureConstraints.wavelengths_nm",
+      "expander": "zenodo_record",
+      "params": {
+        "record": 3245883,
+        "limit": 0
+      },
+      "deriver": "camspec"
+    },
+    {
+      "id": "zenodo-lfdd-flicker",
+      "name": "LFDD Flicker: subjective artifact visibility (light field display)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://zenodo.org/records/17278271",
+      "license": "CC BY 4.0",
+      "size_bytes": 30324,
+      "gives": "subjective visibility ratings of flicker artifacts, results.csv",
+      "harness_use": "sanity range for the flicker gate threshold (temporal gate)",
+      "expander": "zenodo_record",
+      "params": {
+        "record": 17278271,
+        "limit": 0
+      }
+    },
+    {
+      "id": "gen-infinigen",
+      "name": "Infinigen (procedural worlds with exact GT)",
+      "kind": "generator",
+      "access": "pip",
+      "url": "https://github.com/princeton-vl/infinigen",
+      "license": "BSD-3-Clause",
+      "gives": "procedural natural + indoor scenes; depth (2Hx2W float32 npy), normals, 3D flow, occlusion boundaries, instance/semantic seg, camera intrinsics/extrinsics",
+      "harness_use": "scalable replacement for the scene.py toy world: licence-clean realistic ground truth at any resolution",
+      "notes": "pip install infinigen==1.15.5 (bundles Blender); per-scene render cost must be measured locally"
+    },
+    {
+      "id": "gen-kubric",
+      "name": "Kubric (Blender + PyBullet, MOVi)",
+      "kind": "generator",
+      "access": "docker",
+      "url": "https://github.com/google-research/kubric",
+      "license": "Apache-2.0",
+      "gives": "rgba, forward/backward flow, depth, normal, object coordinates, segmentation as uint16 PNG + range json; MOVi-A..F at 256-512 px, 24 frames @ 12 fps",
+      "harness_use": "exact optical-flow ground truth for the temporal gate on physically simulated motion",
+      "notes": "docker kubricdockerhub/kubruntu (Blender 2.93); pip kubric 0.1.1 needs that image"
+    },
+    {
+      "id": "gen-mitsuba3",
+      "name": "Mitsuba 3 (spectral reference renderer)",
+      "kind": "generator",
+      "access": "pip",
+      "url": "https://mitsuba.readthedocs.io",
+      "license": "BSD-3-Clause",
+      "size_bytes": 100000000.0,
+      "gives": "spectral and polarized variants; AOV integrator (albedo, depth, position, uv, normals, prim index); measured .bsdf plugin",
+      "harness_use": "spectral radiance ground truth for the colour-patch and material panels using the CIE tables and measured reflectances above",
+      "notes": "pip install mitsuba==3.9.1"
+    },
+    {
+      "id": "pkg-colour-science",
+      "name": "colour-science 0.4.7 (offline CIE tables, ColorChecker Lab/spectra, camera sensitivities)",
+      "kind": "package",
+      "access": "pip",
+      "url": "https://pypi.org/project/colour-science/",
+      "license": "BSD-3-Clause",
+      "size_bytes": 9070000.0,
+      "gives": "CCS_COLOURCHECKERS['ColorChecker24 - After November 2014'], SDS_COLOURCHECKERS['BabelColor Average'], CIE CMFs/illuminants, delta E 2000",
+      "harness_use": "cross-check of derived/cie_tables.npz and derived/colorchecker.json; no network needed",
+      "notes": "pip install colour-science==0.4.7"
+    },
+    {
+      "id": "spring-flow",
+      "name": "Spring (Blender open movie, 4K super-resolved flow + disparity GT)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://spring-benchmark.org",
+      "license": "CC BY 4.0 (DaRUS doi:10.18419/darus-3376)",
+      "size_bytes": 288900000000.0,
+      "gives": "17 zips, 289 GB: 1920x1080 stereo frames, .flo5 flow, .dsp5 disparity, detail/rigid/sky maps, intrinsics/extrinsics; test_cam_data.zip (3.8 KB) is the free check",
+      "harness_use": "benchmark the harness's own flow GT and the flow_warp_error metric at sub-pixel accuracy",
+      "expander": "dataverse_dataset",
+      "params": {
+        "server": "https://darus.uni-stuttgart.de",
+        "doi": "doi:10.18419/darus-3376"
+      },
+      "notes": "DaRUS Dataverse API lists the 17 files with MD5 (checked 2026-10-27). --param pattern='test_cam_data' pulls the camera file alone; the flow zips are tens of GB each, so --max-bytes before anything else."
+    },
+    {
+      "id": "hypersim",
+      "name": "Hypersim (Apple): 74,619 V-Ray indoor renders with per-pixel GT",
+      "kind": "dataset",
+      "access": "manual",
+      "url": "https://github.com/apple/ml-hypersim",
+      "license": "CC BY-SA 3.0",
+      "size_bytes": 1900000000000.0,
+      "gives": "HDF5 per-pixel depth, normals, semantics, instances, camera; radiance factored into diffuse reflectance x illumination + residual",
+      "harness_use": "radiometric decomposition ground truth for lighting_materials; zip per scene 1-20 GB",
+      "notes": "download script in the repo; pick scenes, not the whole 1.9 TB"
+    },
+    {
+      "id": "hdrplus-bursts",
+      "name": "HDR+ burst photography dataset (Google)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://hdrplusdata.org",
+      "license": "CC BY-SA 4.0",
+      "size_bytes": 3700000000000.0,
+      "gives": "full set under 20171106/: 3,640 raw DNG bursts (28,461 frames) with HDR+ results; the 153-burst subset is hdr-plus-burst",
+      "harness_use": "real-camera raw noise / dynamic-range distribution to sanity-check the camera baseline's noise model",
+      "expander": "gcs_bucket",
+      "params": {
+        "bucket": "hdrplusdata",
+        "prefix": "20171106/"
+      },
+      "notes": "Same bucket as hdr-plus-burst, full prefix: the listing walks about 100 pages before any byte moves, so pass --param pattern=... and --max-bytes. Size is the page's statement, not a listing total."
+    },
+    {
+      "id": "mpi-sintel",
+      "name": "MPI Sintel optical flow",
+      "kind": "dataset",
+      "access": "manual",
+      "url": "http://sintel.is.tue.mpg.de/",
+      "license": "CC BY 3.0 (film); dataset terms on page",
+      "size_bytes": 5000000000.0,
+      "gives": "1041 training flow fields, clean + final passes, occlusion and invalid masks, depth add-on",
+      "harness_use": "second flow-GT benchmark for the temporal gate, with film-grade motion blur and atmospherics"
+    },
+    {
+      "id": "laval-photometric-hdr",
+      "name": "Laval photometric indoor HDR panoramas (absolute cd/m2)",
+      "kind": "dataset",
+      "access": "manual",
+      "url": "https://lvsn.github.io/PhotometricIndoorHDR/",
+      "license": "research licence, request form",
+      "gives": "360 HDR panoramas calibrated to absolute luminance with a chroma meter",
+      "harness_use": "the only absolute-luminance environment set found: needed if the highlight/DR gates are ever stated in cd/m2 rather than relative stops"
+    },
+    {
+      "id": "itu-bt2246-9",
+      "name": "Rep. ITU-R BT.2246-9: The present state of ultra-high definition television",
+      "kind": "spec",
+      "access": "direct",
+      "url": "https://www.itu.int/pub/R-REP-BT.2246",
+      "license": "ITU-R publication, free download, cite-only",
+      "size_bytes": 3066839,
+      "gives": "design viewing distance table (0.75 H / 1.5 H / 3.1 H), 10-bit colour error < 1 \u0394E, 1/50-1/100 contrast threshold, HFR flicker/blur limits",
+      "harness_use": "vision_thresholds.csv rows itu-design-distance-*, de-uhdtv-10bit, banding-contrast-ratio, hfr-*, motion-blur-*",
+      "files": [
+        {
+          "url": "https://www.itu.int/dms_pub/itu-r/opb/rep/R-REP-BT.2246-9-2025-PDF-E.pdf",
+          "path": "R-REP-BT.2246-9-2025-PDF-E.pdf",
+          "size": 3066839
+        }
+      ]
+    },
+    {
+      "id": "itu-bt500-15",
+      "name": "Rec. ITU-R BT.500-15: Methodologies for the subjective assessment of the quality of television images",
+      "kind": "spec",
+      "access": "direct",
+      "url": "https://www.itu.int/rec/R-REC-BT.500",
+      "license": "ITU-R publication, free download, cite-only",
+      "size_bytes": 3863066,
+      "gives": "subjective test protocols (DSIS, DSCQS, pair comparison), viewing conditions, observer screening, viewing distance table",
+      "harness_use": "preference.py protocol reference; vision_thresholds row bt500-distance-8k",
+      "files": [
+        {
+          "url": "https://www.itu.int/dms_pubrec/itu-r/rec/bt/R-REC-BT.500-15-202305-I!!PDF-E.pdf",
+          "path": "R-REC-BT.500-15-202305-I_PDF-E.pdf",
+          "size": 3863066
+        }
+      ]
+    },
+    {
+      "id": "itu-bt2390-12",
+      "name": "Rep. ITU-R BT.2390-12: High dynamic range television for production and international programme exchange",
+      "kind": "spec",
+      "access": "direct",
+      "url": "https://www.itu.int/pub/R-REP-BT.2390",
+      "license": "ITU-R publication, free download, cite-only",
+      "size_bytes": 3975153,
+      "gives": "PQ/HLG system descriptions, 12-bit banding-free statement, Barten contrast threshold curves",
+      "harness_use": "vision_thresholds row pq-12bit-no-banding; future HDR tone gate",
+      "files": [
+        {
+          "url": "https://www.itu.int/dms_pub/itu-r/opb/rep/R-REP-BT.2390-12-2025-PDF-E.pdf",
+          "path": "R-REP-BT.2390-12-2025-PDF-E.pdf",
+          "size": 3975153
+        }
+      ]
+    },
+    {
+      "id": "itu-bt1702-3",
+      "name": "Rec. ITU-R BT.1702-3: Guidance for the reduction of photosensitive epileptic seizures caused by television",
+      "kind": "spec",
+      "access": "direct",
+      "url": "https://www.itu.int/rec/R-REC-BT.1702",
+      "license": "ITU-R publication, free download, cite-only",
+      "size_bytes": 737512,
+      "gives": "harmful flash definition: 20 cd/m\u00b2 step, >3 flashes/s, >25% screen area",
+      "harness_use": "vision_thresholds rows harmful-flash-*; temporal.py flicker safety ceiling",
+      "files": [
+        {
+          "url": "https://www.itu.int/dms_pubrec/itu-r/rec/bt/R-REC-BT.1702-3-202311-I!!PDF-E.pdf",
+          "path": "R-REC-BT.1702-3-202311-I_PDF-E.pdf",
+          "size": 737512
+        }
+      ]
+    },
+    {
+      "id": "itu-bt2100-3",
+      "name": "Rec. ITU-R BT.2100-3: Image parameter values for high dynamic range television",
+      "kind": "spec",
+      "access": "direct",
+      "url": "https://www.itu.int/rec/R-REC-BT.2100",
+      "license": "ITU-R publication, free download, cite-only",
+      "size_bytes": 678999,
+      "gives": "PQ and HLG transfer functions, 2020 primaries, 10/12-bit signal ranges",
+      "harness_use": "future: HDR display delivery path in display.py",
+      "files": [
+        {
+          "url": "https://www.itu.int/dms_pubrec/itu-r/rec/bt/R-REC-BT.2100-3-202502-I!!PDF-E.pdf",
+          "path": "R-REC-BT.2100-3-202502-I_PDF-E.pdf",
+          "size": 678999
+        }
+      ]
+    },
+    {
+      "id": "itu-bt2020-2",
+      "name": "Rec. ITU-R BT.2020-2: Parameter values for ultra-high definition television systems",
+      "kind": "spec",
+      "access": "direct",
+      "url": "https://www.itu.int/rec/R-REC-BT.2020",
+      "license": "ITU-R publication, free download, cite-only",
+      "size_bytes": 551216,
+      "gives": "UHDTV colour primaries, frame rates up to 120 Hz, 10/12-bit quantization",
+      "harness_use": "colour conversion constants for tone/colour metrics",
+      "files": [
+        {
+          "url": "https://www.itu.int/dms_pubrec/itu-r/rec/bt/R-REC-BT.2020-2-201510-I!!PDF-E.pdf",
+          "path": "R-REC-BT.2020-2-201510-I_PDF-E.pdf",
+          "size": 551216
+        }
+      ]
+    },
+    {
+      "id": "ebu-tr050",
+      "name": "EBU Tech Report 050: Subjective evaluation of high frame rate (HFR) television",
+      "kind": "spec",
+      "access": "direct",
+      "url": "https://tech.ebu.ch/publications/tr050",
+      "license": "EBU technical report, free download, cite-only",
+      "size_bytes": 1277181,
+      "gives": "HFR subjective results (100 Hz vs 50 Hz gain up to 1.5 MOS points), 1.5 H viewing distance",
+      "harness_use": "vision_thresholds rows tv-distance-ratio, hfr-quality-gain",
+      "files": [
+        {
+          "url": "https://tech.ebu.ch/files/live/sites/tech/files/shared/techreports/tr050.pdf",
+          "path": "tr050.pdf",
+          "size": 1277181
+        }
+      ]
+    },
+    {
+      "id": "netflix-cambi-doc",
+      "name": "Netflix VMAF: CAMBI banding detector documentation",
+      "kind": "reference",
+      "access": "direct",
+      "url": "https://github.com/Netflix/vmaf/blob/master/resource/doc/cambi.md",
+      "license": "BSD-2-Clause-Patent (VMAF)",
+      "size_bytes": 8393,
+      "gives": "CAMBI parameters incl. tvi_threshold 0.019 (banding visibility), window sizes, pooling",
+      "harness_use": "vision_thresholds row cambi-tvi; artifacts.py banding metric calibration",
+      "files": [
+        {
+          "url": "https://raw.githubusercontent.com/Netflix/vmaf/master/resource/doc/cambi.md",
+          "path": "cambi.md",
+          "size": 8393
+        }
+      ]
+    },
+    {
+      "id": "arxiv-2410-06068",
+      "name": "Ashraf, Mantiuk et al.: Resolution limit of the eye (arXiv 2410.06068)",
+      "kind": "reference",
+      "access": "direct",
+      "url": "https://arxiv.org/abs/2410.06068",
+      "license": "arXiv (see paper licence)",
+      "size_bytes": 32921722,
+      "gives": "94 ppd achromatic / 89 red-green / 53 yellow-violet foveal resolution limits, eccentricity falloff",
+      "harness_use": "VISIBILITY_PPD lower bound (gate.display_ppd)",
+      "files": [
+        {
+          "url": "https://arxiv.org/pdf/2410.06068",
+          "path": "2410.06068.pdf",
+          "size": 32921722
+        }
+      ]
+    },
+    {
+      "id": "basler-emva-overview",
+      "name": "Basler EMVA 1288 data overview (all camera models)",
+      "kind": "reference",
+      "access": "direct",
+      "url": "https://www.baslerweb.com/",
+      "license": "vendor datasheet, cite-only",
+      "size_bytes": 1301692,
+      "gives": "read noise, saturation capacity, DR, QE per Basler camera model (EMVA 1288)",
+      "harness_use": "bulk industrial-sensor rows for sensors.csv (table extraction pending)",
+      "files": [
+        {
+          "url": "https://assets-ctf.baslerweb.com/dg51pdwahxgw/1hcLdj4BXRUzhnOL2gaNIm/faa0fa7fe5ea641aca3c3be7efe82c24/BAS2606_EMVA_Data_Overview_A4_EN_SAP0136_No_18.pdf",
+          "path": "basler_emva_overview.pdf",
+          "size": 1301692
+        }
+      ]
+    },
+    {
+      "id": "kinetix-datasheet",
+      "name": "Teledyne Photometrics Kinetix datasheet",
+      "kind": "reference",
+      "access": "direct",
+      "url": "https://www.photometrics.com/products/kinetix-family/kinetix",
+      "license": "vendor datasheet, cite-only",
+      "size_bytes": 632120,
+      "gives": "per-mode read noise (0.7-2.0 e-), full well (15 000 e-), 3200x3200 @ 6.5 \u00b5m, 16-bit",
+      "harness_use": "sensors.csv rows teledyne-kinetix-*",
+      "files": [
+        {
+          "url": "https://epfl.ch/research/facilities/ptbiop/wp-content/uploads/2024/12/Kinetix-Camera.pdf",
+          "path": "Kinetix-Camera.pdf",
+          "size": 632120
+        }
+      ]
+    },
+    {
+      "id": "qhy600-datasheet",
+      "name": "QHYCCD QHY600 (Sony IMX455) datasheet",
+      "kind": "reference",
+      "access": "direct",
+      "url": "https://www.qhyccd.com/",
+      "license": "vendor datasheet, cite-only",
+      "size_bytes": 3472530,
+      "gives": "IMX455: 3.76 \u00b5m, 9576x6388, >51 ke- full well, 1-3.7 e- read noise, 16-bit ADC",
+      "harness_use": "sensors.csv row sony-imx455-qhy600",
+      "files": [
+        {
+          "url": "https://www.ing.iac.es/Astronomy/instruments/pf-qhy/qhy600_scientific_cmos.pdf",
+          "path": "qhy600_scientific_cmos.pdf",
+          "size": 3472530
+        }
+      ]
+    },
+    {
+      "id": "flir-emva-imx183",
+      "name": "Teledyne FLIR Blackfly S BFS-U3-200S6 EMVA 1288 page",
+      "kind": "reference",
+      "access": "direct",
+      "url": "https://softwareservices.flir.com/BFS-U3-200S6-BD2/latest/EMVA/EMVA.html",
+      "license": "vendor page, cite-only",
+      "size_bytes": 39696,
+      "gives": "EMVA 1288 temporal dark noise, saturation capacity, DR, QE for IMX183",
+      "harness_use": "sensors.csv row flir-imx183; template for every other FLIR model page (same URL pattern)",
+      "files": [
+        {
+          "url": "https://softwareservices.flir.com/BFS-U3-200S6-BD2/latest/EMVA/EMVA.html",
+          "path": "EMVA.html"
+        }
+      ]
+    },
+    {
+      "id": "europepmc-viewing-distance",
+      "name": "Europe PMC abstracts: measured viewing distances (Rempel 2007; Bababekova 2011)",
+      "kind": "api",
+      "access": "api",
+      "url": "https://europepmc.org/",
+      "license": "Europe PMC REST (abstract metadata)",
+      "size_bytes": 12000,
+      "gives": "monitor distance 52-73 cm recommendation; smartphone 36.2 cm / 32.2 cm mean working distances",
+      "harness_use": "vision_thresholds rows monitor-distance, phone-distance -> display.distance_m",
+      "files": [
+        {
+          "url": "https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=EXT_ID:17915601&resultType=core&format=json",
+          "path": "rempel2007.json"
+        },
+        {
+          "url": "https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=EXT_ID:21499163&resultType=core&format=json",
+          "path": "bababekova2011.json"
+        }
+      ]
+    },
+    {
+      "id": "pmc-ferry-porter",
+      "name": "Fernandez-Alonso et al. 2023: Peripheral flicker fusion at high luminance (PMC10057432)",
+      "kind": "reference",
+      "access": "direct",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10057432/",
+      "license": "CC BY (PMC open access)",
+      "size_bytes": 200000,
+      "gives": "critical flicker fusion saturation ~90-100 Hz at high luminance",
+      "harness_use": "vision_thresholds row cff-saturation",
+      "files": [
+        {
+          "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10057432/",
+          "path": "PMC10057432.html"
+        }
+      ]
+    },
+    {
+      "id": "wikipedia-camera-display-pages",
+      "name": "Wikipedia infobox pages used for sensor dimensions and colour-difference tolerances",
+      "kind": "reference",
+      "access": "direct",
+      "url": "https://en.wikipedia.org/",
+      "license": "CC BY-SA 4.0",
+      "size_bytes": 1500000,
+      "gives": "sensor size and pixel counts (A7R V, A1 II, Z8, Z9, R5 II, R1, Phase One backs), \u0394E tolerances, headset specs",
+      "harness_use": "sensors.csv source_url_2 / quote_2; vision_thresholds rows de-*",
+      "files": [
+        {
+          "url": "https://en.wikipedia.org/wiki/Sony_%CE%B17R_V",
+          "path": "Sony_alpha7R_V.html"
+        },
+        {
+          "url": "https://en.wikipedia.org/wiki/Sony_%CE%B11_II",
+          "path": "Sony_alpha1_II.html"
+        },
+        {
+          "url": "https://en.wikipedia.org/wiki/Nikon_Z8",
+          "path": "Nikon_Z8.html"
+        },
+        {
+          "url": "https://en.wikipedia.org/wiki/Nikon_Z9",
+          "path": "Nikon_Z9.html"
+        },
+        {
+          "url": "https://en.wikipedia.org/wiki/Canon_EOS_R5_Mark_II",
+          "path": "Canon_EOS_R5_Mark_II.html"
+        },
+        {
+          "url": "https://en.wikipedia.org/wiki/Canon_EOS_R1",
+          "path": "Canon_EOS_R1.html"
+        },
+        {
+          "url": "https://en.wikipedia.org/wiki/Phase_One_(company)",
+          "path": "Phase_One_(company).html"
+        },
+        {
+          "url": "https://en.wikipedia.org/wiki/Color_difference",
+          "path": "Color_difference.html"
+        },
+        {
+          "url": "https://en.wikipedia.org/wiki/Apple_Vision_Pro",
+          "path": "Apple_Vision_Pro.html"
+        },
+        {
+          "url": "https://en.wikipedia.org/wiki/Meta_Quest_3",
+          "path": "Meta_Quest_3.html"
+        },
+        {
+          "url": "https://en.wikipedia.org/wiki/8K_resolution",
+          "path": "8K_resolution.html"
+        }
+      ]
+    },
+    {
+      "id": "vendor-spec-pages",
+      "name": "Vendor and review spec pages quoted in the reference tables",
+      "kind": "reference",
+      "access": "direct",
+      "url": "harness/data/reference/",
+      "license": "vendor/review pages, cite-only (short quotes)",
+      "size_bytes": 3000000,
+      "gives": "exact spec lines for Hamamatsu, Gpixel, Leica, Fujifilm, Apple, Samsung (via GSMArena), Dell (via devicebeast), Varjo, Bigscreen, UploadVR (Quest 3), iFixit, LensTip MTF50",
+      "harness_use": "sensors/lenses/displays.csv quotes; re-fetch to re-verify every quote",
+      "files": [
+        {
+          "url": "https://www.hamamatsu.com/us/en/product/cameras/qcmos-cameras/C15550-22UP.html",
+          "path": "hamamatsu_orca_quest2.html"
+        },
+        {
+          "url": "https://www.gpixel.com/en/pro_details_11100.html",
+          "path": "gpixel_gsense4040bsi.html"
+        },
+        {
+          "url": "https://gpixel.com/en/pro_details_11106.html",
+          "path": "gpixel_gsense6060bsi.html"
+        },
+        {
+          "url": "https://leica-camera.com/en-int/photography/cameras/m/m11-black/technical-specification",
+          "path": "leica_m11.html"
+        },
+        {
+          "url": "https://www.fujifilm-x.com/global/products/cameras/gfx100-ii/specifications/",
+          "path": "fujifilm_gfx100ii.html"
+        },
+        {
+          "url": "https://support.apple.com/kb/SP800",
+          "path": "apple_sp800.html"
+        },
+        {
+          "url": "https://www.apple.com/pro-display-xdr/specs/",
+          "path": "apple_pro_display_xdr.html"
+        },
+        {
+          "url": "https://support.apple.com/en-us/121031",
+          "path": "apple_iphone16pro.html"
+        },
+        {
+          "url": "https://www.gsmarena.com/samsung_galaxy_s25_ultra-13322.php",
+          "path": "gsmarena_s25_ultra.html"
+        },
+        {
+          "url": "https://devicebeast.com/display/dell-ultrasharp-up3218k-315",
+          "path": "devicebeast_up3218k.html"
+        },
+        {
+          "url": "https://varjo.com/products/xr-4/",
+          "path": "varjo_xr4.html"
+        },
+        {
+          "url": "https://uploadvr.com/quest-3-specs/",
+          "path": "uploadvr_quest3_specs.html"
+        },
+        {
+          "url": "https://www.bigscreenvr.com/",
+          "path": "bigscreen_beyond.html"
+        },
+        {
+          "url": "https://www.ifixit.com/News/90409/vision-pro-teardown-part-2-whats-the-display-resolution",
+          "path": "ifixit_vision_pro.html"
+        },
+        {
+          "url": "https://www.lenstip.com/390.4-Lens_review-Carl_Zeiss_Otus_55_mm_f_1.4_ZE_ZF.2_Image_resolution.html",
+          "path": "lenstip_otus55.html"
+        },
+        {
+          "url": "https://www.lenstip.com/535.4-Lens_review-Sigma_A_105_mm_f_1.4_DG_HSM_Image_resolution.html",
+          "path": "lenstip_sigma105.html"
+        },
+        {
+          "url": "https://www.lenstip.com/601.4-Lens_review-Sony_FE_50_mm_f_1.2_GM_Image_resolution.html",
+          "path": "lenstip_sony50gm.html"
+        }
+      ]
+    },
+    {
+      "id": "photonstophotos-rn",
+      "name": "Photons to Photos: input-referred read noise and full-well chart (RN_e)",
+      "kind": "reference",
+      "access": "scrape-tos-unclear",
+      "url": "https://www.photonstophotos.net/Charts/RN_e.htm",
+      "license": "site terms unclear; cite-only, values transcribed by hand with quotes",
+      "size_bytes": 298094,
+      "gives": "FWC and read noise vs ISO for ~700 consumer cameras (chart data embedded in the page)",
+      "harness_use": "sensors.csv rows sony-a7r-v, sony-a1-ii, nikon-z8, nikon-z9, canon-r5-ii, canon-r1, leica-m11, phase-one-iq4-150",
+      "notes": "A bulk parse of the chart JS would give every camera at once; not automated until the terms are confirmed."
+    },
+    {
+      "id": "lens-designs-claff",
+      "name": "Lens prescription archive (Bill Claff, Zemax .zmx files in a public Drive folder)",
+      "kind": "dataset",
+      "access": "direct",
+      "url": "https://www.photonstophotos.net/GeneralTopics/Lenses/OpticalBench/OpticalBench.htm",
+      "license": "MIT (per the archive index)",
+      "size_bytes": 6000000.0,
+      "gives": "~1300 patent-derived lens prescriptions (surfaces, radii, glass) for ray tracing",
+      "harness_use": "traced by `lens_traces` (harness/data/optics.py): every .zmx through optiland, refocused on axis, centre Strehl and MTF50 at 0/0.5/0.7/1.0 field; the sharpest full-frame residual feeds camera_presets.best_case_traced. Files optiland cannot read are listed in lens_traces.json",
+      "expander": "lens_designs",
+      "params": {
+        "folder": "1xF3gfK75Vz6D4Kgtmkc2MslcdUU7sHq1",
+        "pattern": "\\.zmx$"
+      },
+      "deriver": "lens_traces",
+      "notes": "Use --param limit=N for a bounded sample; the folder index page is always fetched first."
+    },
+    {
+      "id": "deeplens-lenses",
+      "name": "DeepLens camera lens prescriptions (vccimaging/DeepLens datasets/lenses/camera)",
+      "kind": "dataset",
+      "access": "direct",
+      "url": "https://github.com/vccimaging/DeepLens",
+      "license": "Apache-2.0",
+      "size_bytes": 150000,
+      "gives": "23 lens files (.json/.zmx) incl. ef100mm_f2.8, double-gauss, cellphone lenses",
+      "harness_use": "traced by `lens_traces` from the JSON prescriptions (the .zmx twins fail in optiland's reader); cross-check of the Claff archive with production-lens patents",
+      "expander": "github_dir",
+      "params": {
+        "repo": "vccimaging/DeepLens",
+        "path": "datasets/lenses/camera",
+        "pattern": "\\.(json|zmx)$"
+      },
+      "deriver": "lens_traces"
+    },
+    {
+      "id": "pkg-optiland",
+      "name": "optiland (pip): sequential ray tracing, reads Zemax .zmx, PSF/MTF",
+      "kind": "package",
+      "access": "pip",
+      "url": "https://pypi.org/project/optiland/",
+      "license": "MIT",
+      "gives": "PSF/MTF/wavefront from lens prescriptions",
+      "harness_use": "used: harness/data/optics.py does the sequential trace, image solve, FFT PSF (Strehl), FFT MTF and wavefront RMS with optiland 0.6.3",
+      "requires": [
+        "lens-designs-claff"
+      ]
+    },
+    {
+      "id": "pkg-prysm",
+      "name": "prysm (pip): physical optics propagation, PSF/MTF from pupils",
+      "kind": "package",
+      "access": "pip",
+      "url": "https://pypi.org/project/prysm/",
+      "license": "MIT",
+      "gives": "diffraction PSF/MTF with aberrations and polychromatic sums",
+      "harness_use": "not used: optiland's FFT PSF/MTF cover the monochromatic Strehl and MTF50; polychromatic MTF stays a gap"
+    },
+    {
+      "id": "pkg-rayoptics",
+      "name": "ray-optics (pip): lens design with Zemax/CodeV import",
+      "kind": "package",
+      "access": "pip",
+      "url": "https://pypi.org/project/rayoptics/",
+      "license": "BSD-3-Clause",
+      "gives": "alternative .zmx reader and third-order aberration analysis",
+      "harness_use": "not used: optiland reads 293 of 300 Claff files; the rest are listed in lens_traces.json rather than re-read"
+    },
+    {
+      "id": "vesa-displayhdr",
+      "name": "VESA DisplayHDR performance criteria",
+      "kind": "spec",
+      "access": "page-only",
+      "url": "https://displayhdr.org/performance-criteria/",
+      "license": "VESA, page-only",
+      "gives": "tier luminance/black-level/gamut criteria (400 ... 1400, True Black)",
+      "harness_use": "peak_nits sanity for displays.csv; HDR delivery tiers"
+    },
+    {
+      "id": "dxomark",
+      "name": "DXOMARK sensor scores (landscape DR, sports ISO)",
+      "kind": "reference",
+      "access": "manual",
+      "url": "https://www.dxomark.com/",
+      "license": "proprietary, cite-only",
+      "gives": "measured DR per camera",
+      "harness_use": "cross-check of P2P-derived DR; manual lookups only"
+    },
+    {
+      "id": "hf-iqa-dataset-labels",
+      "name": "IQA-Dataset labels",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/IQA-Dataset-team-IVC/IQA-Dataset",
+      "license": "unknown",
+      "size_bytes": 100000000.0,
+      "gives": "MOS/DMOS CSV",
+      "harness_use": "MOS/DMOS labels for ~20 IQA sets in one table: join key for every Group-A fit",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "IQA-Dataset-team-IVC/IQA-Dataset",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:iqa-dataset-labels. 151.8k label rows, no images; images come from the per-dataset sources below. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-tid2013",
+      "name": "TID2013",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/Jorgvt/TID2013",
+      "license": "none stated; freely available for scientific purposes",
+      "size_bytes": 1520000000.0,
+      "gives": "MOS 0-9 from Swiss-system pairwise",
+      "harness_use": "cross-check for fit_gates: 24 distortion types x 5 levels with MOS 0-9; #7 quantization noise (125 images) checks the banding fit (rank correlation -0.24 with natural.banding_pair: posterisation ratings, not a banding threshold)",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "Jorgvt/TID2013",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:tid2013. unofficial parquet mirror of the official RAR; terms: free for scientific use. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-kadid10k-images",
+      "name": "KADID-10k",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/myzhao1999/kadid10k",
+      "license": "no formal licence; freely available to the research community",
+      "size_bytes": 3100000000.0,
+      "gives": "the only graded sharpening-halo ladder: distortion #24 High_Sharpen, levels 1-5 on 81 references, 30 DCRs each. fit_gates measures edge_overshoot_pair on it and fits gate.edge_overshoot. Lossless PNG inside parquet (512x384); DMOS joined from hf-iqa-dataset-labels",
+      "harness_use": "fit_gates: #24 High_Sharpen ladder fits gate.edge_overshoot = 0.22 (CI 0.19-0.26, rho -0.80, supported, extrapolated); #22 Quantization ladder puts gate.banding_score to the test (rho -0.31, not supported; bounds it below 0.145). Lossless PNG in parquet; DMOS from hf-iqa-dataset-labels",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "myzhao1999/kadid10k",
+        "config": "default",
+        "split": "train"
+      },
+      "deriver": "fit_gates",
+      "notes": "catalog:kadid-10k. images only; dmos.csv is inside the official zip (kadid10k-official). Bound with --param limit=N (shards/files). The datasets-server /rows image assets are JPEG re-encodes (q~75) and must not be used for halo measurement; the parquet shards hold the original PNG bytes."
+    },
+    {
+      "id": "kadid10k-official",
+      "name": "KADID-10k",
+      "kind": "dataset",
+      "access": "manual",
+      "url": "https://database.mmsp-kn.de/kadid-10k-database.html",
+      "license": "no formal licence; freely available to the research community",
+      "size_bytes": 2200000000.0,
+      "gives": "DMOS 1-5 (5-pt DCR)",
+      "harness_use": "DMOS 1-5 per image for the sharpening/blur/noise/colour/compression ladders; joins hf-kadid10k-images; mirrored row-for-row in hf-iqa-dataset-labels, which fit_gates uses",
+      "files": [
+        {
+          "url": "https://datasets.vqa.mmsp-kn.de/archives/kadid10k.zip",
+          "path": "kadid10k.zip"
+        }
+      ],
+      "notes": "catalog:kadid-10k. single zip incl. dmos.csv; no formal licence, 'freely available for research'. URL from the database page; verify on first fetch. The archive host datasets.vqa.mmsp-kn.de closes the TLS handshake for a plain client (SSLEOFError), so this stays a manual download; dmos.csv is also mirrored row-for-row in hf-iqa-dataset-labels, which fit_gates uses."
+    },
+    {
+      "id": "hf-pipal",
+      "name": "PIPAL",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/Yarimasune/PIPAL",
+      "license": "not stated (mirror tag apache-2.0 unofficial)",
+      "size_bytes": 5840000000.0,
+      "gives": "Elo from pairwise",
+      "harness_use": "Elo scores for GAN/restoration outputs: the closest classical set to generative texture artifacts (micro_detail gate)",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "Yarimasune/PIPAL",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:pipal. licence not stated upstream; mirror tag apache-2.0 is unofficial. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-iqa-pytorch-datasets",
+      "name": "chaofengc IQA aggregate",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/chaofengc/IQA-PyTorch-Datasets",
+      "license": "repo cc-by-sa-4.0; original terms apply",
+      "size_bytes": 2400000000.0,
+      "gives": "per source",
+      "harness_use": "bulk mirror of LIVE/CSIQ/LIVE-MD/BID/KonIQ/FLIVE/SPAQ archives (one tgz each) for the Group-A fits",
+      "expander": "hf_hub_files",
+      "params": {
+        "repo": "chaofengc/IQA-PyTorch-Datasets",
+        "pattern": "^(live|csiq|livem)\\.tgz$|^BID\\.zip$"
+      },
+      "notes": "catalog:iqa-pytorch-datasets. pattern keeps the 4 small archives (2.4 GB); widen to flive/spaq/koniq with --param pattern=... Original terms apply per set. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-uhd-iqa",
+      "name": "UHD-IQA",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/V-NovaLtd/UHD-IQA-JPG",
+      "license": "images CC0",
+      "size_bytes": 10700000000.0,
+      "gives": "MOS 0-1",
+      "harness_use": "4K/UHD images with MOS 0-1 (CC0 images): resolution-gate realism check at display ppd",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "V-NovaLtd/UHD-IQA-JPG",
+        "config": "default",
+        "split": "test"
+      },
+      "notes": "catalog:uhd-iqa. 900-row test split is public; licence CC0 for images. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-koniq10k",
+      "name": "KonIQ-10k",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/xyliu6/koniq10k-1024x768",
+      "license": "no formal licence (DaRUS mirror CC BY 4.0)",
+      "size_bytes": 5610000000.0,
+      "gives": "MOS 5-pt ACR",
+      "harness_use": "10k in-the-wild images with 5-pt MOS; distribution prior for 'natural' sharpness/noise levels",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "xyliu6/koniq10k-1024x768",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:koniq-10k. DaRUS mirror is CC BY 4.0; HF mirror unofficial. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-kadis700k",
+      "name": "KADIS-700k",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/VQA-CityU/KADIS700K",
+      "license": "freely available (research)",
+      "size_bytes": 44600000000.0,
+      "gives": "none",
+      "harness_use": "700k pristine+distorted pairs without MOS: unsupervised pre-fit / sanity of artifact metrics at scale",
+      "expander": "hf_hub_files",
+      "params": {
+        "repo": "VQA-CityU/KADIS700K"
+      },
+      "notes": "catalog:kadis-700k. L tier; only after the MOS sets are fitted. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "cid2013",
+      "name": "CID2013",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://zenodo.org/record/2647033",
+      "license": "CC BY 4.0",
+      "size_bytes": 610000000.0,
+      "gives": "MOS + sharpness/graininess/lightness/saturation",
+      "harness_use": "camera-captured MOS + sharpness/graininess/lightness/saturation sub-scores: calibrates tone/noise metrics on real captures",
+      "expander": "zenodo_record",
+      "params": {
+        "record": "2647033"
+      },
+      "notes": "catalog:cid2013. record id from the catalogue; md5-verified by the expander."
+    },
+    {
+      "id": "csiq",
+      "name": "CSIQ",
+      "kind": "dataset",
+      "access": "page-only",
+      "url": "https://s2.smu.edu/~eclarson/csiq.html",
+      "license": "copyright E. Larson; cite",
+      "size_bytes": 390000000.0,
+      "gives": "DMOS 0-1",
+      "harness_use": "DMOS for noise/blur/contrast/JPEG ladders (6 distortions): second Group-A fit target",
+      "notes": "catalog:csiq."
+    },
+    {
+      "id": "band-2k",
+      "name": "BAND-2k",
+      "kind": "dataset",
+      "access": "page-only",
+      "url": "https://github.com/zijianchen98/BAND-2k",
+      "license": "unstated",
+      "gives": "MOS 0-100 banding severity + binary patch labels",
+      "harness_use": "MOS 0-100 banding severity + binary patches: the direct calibration set for artifacts.py banding_score",
+      "notes": "catalog:band-2k. GitHub release; licence unstated -> ask authors before redistribution."
+    },
+    {
+      "id": "koniq-plus-plus",
+      "name": "KonIQ++",
+      "kind": "dataset",
+      "access": "page-only",
+      "url": "https://database.mmsp-kn.de/koniq-image-defects-database.html",
+      "license": "freely available",
+      "size_bytes": 2000000.0,
+      "gives": "5-pt MOS + defect distributions (blur, artifacts, colour, contrast, other)",
+      "harness_use": "defect distributions (blur, artifacts, noise, contrast) per image: multi-label artifact prior",
+      "notes": "catalog:koniq-plus-plus. csv only, 2 MB; images are KonIQ-10k."
+    },
+    {
+      "id": "live-iqa-r2",
+      "name": "LIVE IQA Release 2",
+      "kind": "dataset",
+      "access": "page-only",
+      "url": "https://live.ece.utexas.edu/research/quality/subjective.htm",
+      "license": "UT Austin copyright notice; research use",
+      "size_bytes": 720000000.0,
+      "gives": "DMOS 0-100",
+      "harness_use": "DMOS 0-100 for JPEG/JP2K/noise/blur/fast-fading: classic sanity set for the artifact gates",
+      "notes": "catalog:live-iqa-r2. UT Austin copyright notice: research use, registration page."
+    },
+    {
+      "id": "spaq",
+      "name": "SPAQ",
+      "kind": "dataset",
+      "access": "page-only",
+      "url": "https://github.com/h4nwei/SPAQ",
+      "license": "not stated",
+      "size_bytes": 34840000000.0,
+      "gives": "MOS 0-100 + attribute MOS (brightness, colourfulness, contrast, noisiness, sharpness) + EXIF",
+      "harness_use": "smartphone captures with MOS + brightness/colourfulness/contrast/noisiness/sharpness attribute MOS: real-capture priors",
+      "notes": "catalog:spaq. not stated licence; also mirrored as spaq.tgz in hf-iqa-pytorch-datasets."
+    },
+    {
+      "id": "piq23",
+      "name": "PIQ23",
+      "kind": "dataset",
+      "access": "page-only",
+      "url": "https://github.com/DXOMARK-Research/PIQ2023",
+      "license": "DXOMARK non-commercial research",
+      "size_bytes": 5000000000.0,
+      "gives": "JOD per scene (details, exposure, overall)",
+      "harness_use": "DXOMARK JOD (just-objectionable-difference) scales for details/exposure/overall on smartphone portraits: a JND-scale source for tone gates",
+      "notes": "catalog:piq23. DXOMARK non-commercial research licence."
+    },
+    {
+      "id": "hf-agiqa-3k",
+      "name": "AGIQA-3K",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/strawhat/agiqa-3k",
+      "license": "MIT (GitHub repo)",
+      "size_bytes": 100000000.0,
+      "gives": "MOS + STD for perception quality and text-alignment; continuous 0-5 slider (0.1 step); z-scored; no regions",
+      "harness_use": "MOS quality + alignment on 3k AI-generated images: distribution-shift check of the Group-A thresholds on generated content",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "strawhat/agiqa-3k",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:agiqa-3k. unofficial mirror, 2,087 of 2,982 official images. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-aigciqa2023",
+      "name": "AIGCIQA2023",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/strawhat/aigciqa2023",
+      "license": "apache-2.0 (HF tag on IntMeGroup/AIGCIQA2023); GitHub repo has no license file",
+      "size_bytes": 500000000.0,
+      "gives": "MOS per image on 3 dims (quality, authenticity, correspondence); no regions",
+      "harness_use": "labels-only mirror (name, 3 MOS dims); images come from hf-aigciqa2023-images",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "strawhat/aigciqa2023",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:aigciqa2023. official IntMeGroup/AIGCIQA2023 viewer errors; this mirror returns rows. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-aigciqa2023-images",
+      "name": "AIGCIQA2023 (official images + MOS)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/IntMeGroup/AIGCIQA2023",
+      "license": "apache-2.0 (HF repo tag)",
+      "size_bytes": 893000000.0,
+      "gives": "2,400 AI images (6 generators x 100 prompts x 4) in allimg.zip; moz1/moz2/moz3.txt = MOS quality / authenticity / correspondence (0-100 z-scored), one line per image index; AIGIQA2023.json metadata",
+      "harness_use": "shift_check (DATA_PLAN section 4 step 2), done: NR halo proxy p50 0.016 vs 0.054 on KADID references, rho +0.34 with quality MOS (reads sharpness on generated content; fitted halo gate has no usable NR form); banding step at the 8-bit floor on both sets; banded area rho -0.49 with quality MOS (Glide). Index<->MOS<->generator alignment verified from AIGIQA2023.json and pic-index.xlsx",
+      "expander": "hf_hub_files",
+      "params": {
+        "repo": "IntMeGroup/AIGCIQA2023",
+        "pattern": "^(allimg\\.zip|moz[123]\\.txt|AIGIQA2023\\.json|pic-index\\.xlsx)$"
+      },
+      "deriver": "shift_check",
+      "notes": "catalog:aigciqa2023. Official repo; the strawhat/aigciqa2023 mirror carries the labels only. Image order inside the zip is checked against the MOS line count on load."
+    },
+    {
+      "id": "hf-aigcqa-30k-labels",
+      "name": "AIGIQA-20K / AIGCQA-30K-Image (NTIRE 2024)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/jizhongpeng/AIGCQA-30K",
+      "license": "unknown (ModelScope page not checked; HF mirror tag 'unknown')",
+      "size_bytes": 4000000.0,
+      "gives": "MOS perceptual quality (and text alignment per paper); no regions",
+      "harness_use": "14k MOS labels (no image bytes) for AIGCQA-30K: join with ModelScope images",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "jizhongpeng/AIGCQA-30K",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:aigiqa-20k. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-artibench",
+      "name": "ArtiBench (KRAFTON, 2026)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/KRAFTON/ArtiBench",
+      "license": "cc-by-nc-4.0 (HF tag)",
+      "size_bytes": 500000000.0,
+      "gives": "bounding boxes + free-text explanation + binary label",
+      "harness_use": "1,000 images with artifact bounding boxes + explanations: localisation ground truth for artifacts.py region metrics",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "KRAFTON/ArtiBench",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:artibench. cc-by-nc-4.0: evaluation only, no redistribution in a product. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-x-aigd",
+      "name": "X-AIGD (ICLR 2026)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/Coxy7/X-AIGD",
+      "license": "cc-by-4.0 (HF tag)",
+      "size_bytes": 2000000000.0,
+      "gives": "pixel-level polygon masks + 7 artifact categories in 3 levels (low-level distortions e.g. edge misalignments/unnatural textures; high-level semantics; cognitive",
+      "harness_use": "pixel-level polygon masks for 7 artifact classes on generated images: artifact-map supervision",
+      "expander": "hf_hub_files",
+      "params": {
+        "repo": "Coxy7/X-AIGD"
+      },
+      "notes": "catalog:x-aigd. datasets-server viewer fails; raw repo files via hub tree. cc-by-4.0. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-synthscars",
+      "name": "SynthScars",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/khr0516/SynthScars",
+      "license": "apache-2.0 (HF tag)",
+      "size_bytes": 3000000000.0,
+      "gives": "pixel-level artifact masks (per search; not verifiable from viewer)",
+      "harness_use": "12k generated images with pixel artifact masks: second artifact-map source",
+      "expander": "hf_hub_files",
+      "params": {
+        "repo": "khr0516/SynthScars"
+      },
+      "notes": "catalog:synthscars. masks live in repo files (viewer exposes only images). apache-2.0. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-richhf-18k",
+      "name": "RichHF-18K (Rich Human Feedback)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/Exploration/richhf-18k",
+      "license": "unknown (GitHub repo contains only README + 3 tfrecords, no LICENSE file; GitHub API reports no licence)",
+      "size_bytes": 200000000.0,
+      "gives": "per-image 5-point Likert (plausibility/artifact, aesthetics, alignment, overall; standardised to [0,1]) + artifact heatmap + misalignment heatmap (point marks -",
+      "harness_use": "RichHF-18K artifact_map + misalignment_map heat-maps and 5-pt scores (labels only): artifact-region targets",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "Exploration/richhf-18k",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:richhf-18k. unofficial mirror of Google's tfrecords; images join Pick-a-Pic v1 by filename; licence unstated upstream. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-rapidata-rich-hf",
+      "name": "Rapidata text-2-image Rich Human Feedback (13k and 32k)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/Rapidata/text-2-image-Rich-Human-Feedback",
+      "license": "apache-2.0 (HF tag, both)",
+      "size_bytes": 17900000000.0,
+      "gives": "1-5 Likert style/coherence/alignment (aggregated), click heatmaps for coherence (<3.8) and alignment (<3.2) images, per-word alignment scores; individual respon",
+      "harness_use": "13k images with word-level scores + coherence/alignment heat-maps from crowd clicks: artifact region + preference in one set",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "Rapidata/text-2-image-Rich-Human-Feedback",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:rapidata-rich-human-feedback. apache-2.0; -32k variant has 32,528 rows. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-rapidata-700k",
+      "name": "Rapidata 700k Human Preference (FLUX/SD3/MJ/DALLE3) + sibling style/coherence/alignment sets",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/Rapidata/700k_Human_Preference_Dataset_FLUX_SD3_MJ_DALLE3",
+      "license": "cdla-permissive-2.0 (HF tag, all listed)",
+      "size_bytes": 3730000000.0,
+      "gives": "pairwise preference (and separate style/coherence/alignment questions in sibling sets); per-vote records with country/language/userScore but no stable rater id;",
+      "harness_use": "700k pairwise votes with per-vote rater metadata (country, userScore): primary Bradley-Terry fit data for preference.py",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "Rapidata/700k_Human_Preference_Dataset_FLUX_SD3_MJ_DALLE3",
+        "config": "default",
+        "columns": "prompt,votes_image1,votes_image2,model1,model2,detailed_results,image1_path,image2_path"
+      },
+      "notes": "catalog:rapidata-700k-preference. cdla-permissive-2.0; splits train_0001..; use --param split=train_0001 for a sample. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-rapidata-model-vs-model",
+      "name": "Rapidata per-model t2i human preference series (2025-2026)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/Rapidata/Flux-2-pro_t2i_human_preference",
+      "license": "cdla-permissive-2.0 (per-model sets); cc-by-4.0 (benchmark set)",
+      "size_bytes": 5000000000.0,
+      "gives": "pairwise preference + coherence + alignment votes with rich voter metadata; no stable rater id; ties not documented",
+      "harness_use": "model-vs-model pairwise + coherence + alignment with per-vote demographics: rater-effect term for the BT model",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "Rapidata/Flux-2-pro_t2i_human_preference",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:rapidata-model-vs-model-series. one of ~14 sibling sets (Imagen4, Seedream-3, ...); cdla-permissive-2.0. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-open-image-preferences",
+      "name": "Open Image Preferences v1 (data-is-better-together)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/data-is-better-together/open-image-preferences-v1-results",
+      "license": "apache-2.0 (HF tags)",
+      "size_bytes": 16800000000.0,
+      "gives": "pairwise preference with both_good/both_bad (tie-like) options and annotator ids",
+      "harness_use": "10k pairs with raw multi-annotator votes incl. both_good/both_bad and annotator ids: tie + rater modelling for preference.py",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "data-is-better-together/open-image-preferences-v1-results",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:open-image-preferences-v1. apache-2.0. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-genai-bench-image",
+      "name": "GenAI-Arena pairwise votes (TIGER-Lab/GenAI-Bench + GenAI-Arena-human-eval)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/TIGER-Lab/GenAI-Bench",
+      "license": "cc-by-4.0 (HF tag on both)",
+      "size_bytes": 1000000000.0,
+      "gives": "pairwise arena votes with tie and both-bad options; anonymous web users; no rater id in main set",
+      "harness_use": "3,192 arena battles (left/right image, vote_type incl. tie/both-bad) for T2I: external BT validation",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "TIGER-Lab/GenAI-Bench",
+        "config": "image_generation",
+        "split": "test",
+        "columns": "prompt,left_model,right_model,vote_type"
+      },
+      "notes": "catalog:genai-arena. cc-by-4.0; GenAI-Arena-human-eval adds judge ids (350 rows). Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-genai-arena-human-eval",
+      "name": "GenAI-Arena pairwise votes (TIGER-Lab/GenAI-Bench + GenAI-Arena-human-eval)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/TIGER-Lab/GenAI-Arena-human-eval",
+      "license": "cc-by-4.0 (HF tag on both)",
+      "size_bytes": 200000000.0,
+      "gives": "pairwise arena votes with tie and both-bad options; anonymous web users; no rater id in main set",
+      "harness_use": "350 battles with judge id + anonymity flag: inter-rater agreement check",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "TIGER-Lab/GenAI-Arena-human-eval",
+        "config": "battle",
+        "split": "test"
+      },
+      "notes": "catalog:genai-arena. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-genai-bench-1600",
+      "name": "GenAI-Bench (BaiqiL human ratings)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/BaiqiL/GenAI-Bench-1600",
+      "license": "apache-2.0 (HF tag)",
+      "size_bytes": 4760000000.0,
+      "gives": "per-image 1-5 Likert image-text ALIGNMENT rating (3 raters each, individual ratings kept)",
+      "harness_use": "per-image 1-5 image-text alignment Likert for 1,600 prompts x models: composition/alignment prior",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "BaiqiL/GenAI-Bench-1600",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:genai-bench-ratings. apache-2.0; parquet scan of the un-suffixed repo exceeds the 300 MB viewer limit, hence the -1600 variant. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-mj-bench",
+      "name": "MJ-Bench",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/MJ-Bench/MJ-Bench",
+      "license": "apache-2.0 (HF tag); GitHub code MIT",
+      "size_bytes": 1000000000.0,
+      "gives": "binary pairwise preference; quality perspective reportedly subdivided into distortion (face/limb/object) and blur (defocus/motion) subsets \u2014 UNVERIFIED (from me",
+      "harness_use": "binary pairwise preference across quality/safety/alignment perspectives: cross-check set",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "MJ-Bench/MJ-Bench"
+      },
+      "notes": "catalog:mj-bench. apache-2.0. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-hpdv2-test",
+      "name": "HPD v2 (Human Preference Dataset v2)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/zhwang/HPDv2",
+      "license": "Apache-2.0 (card + GitHub)",
+      "size_bytes": 500000000.0,
+      "gives": "ranking: train groups of 4 images ranked by 1 annotator (-> 6 pairs each); test groups of 9-10 images each ranked by 10 annotators (user_hash kept in raw_annota",
+      "harness_use": "HPDv2 test split with raw per-annotator rankings (user_hash): ranking-to-BT conversion test",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "zhwang/HPDv2",
+        "config": "default",
+        "split": "test"
+      },
+      "notes": "catalog:hpdv2. official ymhao/HPDv2 viewer disabled (script dataset); full set 35.6 GB apache-2.0. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-hpdv3",
+      "name": "HPD v3 / HPSv3",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/MizzenAI/HPDv3",
+      "license": "CONFLICT: MIT on HF card tag and GitHub; paper Sec. 9 says CC BY-NC-SA / non-commercial \u2014 https://arxiv.org/html/2508.03789",
+      "size_bytes": 141000000000.0,
+      "gives": "pairwise preference with per-pair aggregated vote counts (choice_dist) and 'confidence' (inter-annotator agreement); no rater ids; annotators pre-qualified (16/",
+      "harness_use": "1.14M pairwise preferences with per-pair aggregates: the largest open T2I preference set",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "MizzenAI/HPDv3",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:hpdv3. XL; licence conflict MIT (card) vs CC BY-NC-SA (paper) -> treat as non-commercial until resolved. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-pickapic-v2-mirror",
+      "name": "Pick-a-Pic v2",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/liuhuohuo2/pick-a-pic-v2",
+      "license": "unknown (no licence tag on mirror; none stated by authors)",
+      "size_bytes": 250000000000.0,
+      "gives": "same as v1 (pairwise + ties + user_id + ranking_id + timestamps)",
+      "harness_use": "959k pairwise votes with user_id + ranking_id + ties and image bytes: largest raw-vote set",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "liuhuohuo2/pick-a-pic-v2",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:pick-a-pic-v2. XL; unofficial re-upload, official repo returns 401; licence unknown. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-ava-aesthetics-10pct",
+      "name": "AVA (Aesthetic Visual Analysis)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/trojblue/AVA-aesthetics-10pct-min50-10bins",
+      "license": "unknown (original AVA terms not stated; apache-2.0 tag on Iceclear/AVA is the uploader's)",
+      "size_bytes": 2000000000.0,
+      "gives": "per-image 10-bin vote histogram (aesthetic)",
+      "harness_use": "20k images with 10-bin aesthetic vote histograms: prior for the composition gate's preference model",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "trojblue/AVA-aesthetics-10pct-min50-10bins",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:ava. unofficial 10% AVA subset; original AVA terms unstated. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-q-bench",
+      "name": "Q-Bench / Q-Bench2 / A-Bench (low-level MCQ benchmarks)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/q-future/Q-Bench-HF",
+      "license": "NOASSERTION on GitHub (S-Lab licence: research use; commercial use needs permission) ; HF tags mit (q-bench2) / cc-by-4.0 (A-Bench)",
+      "size_bytes": 500000000.0,
+      "gives": "multiple-choice questions about low-level attributes (question_concern field) + golden descriptions; A3 reuses external IQA MOS",
+      "harness_use": "low-level-vision multiple-choice questions with answers: sanity set for metric-vs-perception direction",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "q-future/Q-Bench-HF",
+        "config": "default",
+        "split": "dev"
+      },
+      "notes": "catalog:q-bench. S-Lab licence (research). Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "datapointai-t2i-preferences-2m",
+      "name": "DatapointAI Text-to-Image Human Preferences 2M (2026)",
+      "kind": "dataset",
+      "access": "manual",
+      "url": "https://huggingface.co/datasets/datapointai/text-2-image-human-preferences-2m",
+      "license": "CC-BY-4.0 for votes/prompts/metadata; images under each model provider's terms \u2014 card",
+      "size_bytes": 34900000000.0,
+      "gives": "pairwise preference; responses table has pair_key, chosen, annotator (salted hash, stable), trust_score (0-1), time_taken_ms, country; pairs table has votes_a/b",
+      "harness_use": "216k pairs x 10 votes with rater ids and ties (CC-BY-4.0 votes): best Bradley-Terry raw data; gated manual approval",
+      "notes": "catalog:datapointai-t2i-preferences-2m. request access on the Hub, then: expander hf_parquet with HF_TOKEN."
+    },
+    {
+      "id": "pal4vst",
+      "name": "PAL4VST (Perceptual Artifacts Localization)",
+      "kind": "dataset",
+      "access": "page-only",
+      "url": "https://owenzlz.github.io/PAL4VST/ (code/data: https://github.com/owenzlz/PAL4VST)",
+      "license": "unknown (no licence file per GitHub API)",
+      "gives": "per-pixel perceptual-artifact segmentation masks",
+      "harness_use": "per-pixel perceptual-artifact segmentation on synthesized images: artifact-map supervision",
+      "notes": "catalog:pal4vst. GitHub release; licence file absent."
+    },
+    {
+      "id": "evalmuse-40k",
+      "name": "EvalMuse-40K",
+      "kind": "dataset",
+      "access": "page-only",
+      "url": "https://github.com/DYEvaLab/EvalMuse",
+      "license": "CONFLICT: BSD-3-Clause on HF card; Apache-2.0 on GitHub repo per API",
+      "size_bytes": 54600000000.0,
+      "gives": "5-point overall alignment score + element-level match labels + structure/fidelity labels (human face/hands/limbs, animals, objects) + split_confidence/attribute",
+      "harness_use": "40k images with element-level alignment labels: composition gate (prompt faithfulness)",
+      "notes": "catalog:evalmuse-40k. licence conflict BSD-3 vs Apache on card; images as multi-part zip."
+    },
+    {
+      "id": "imagerewarddb",
+      "name": "ImageReward / ImageRewardDB",
+      "kind": "dataset",
+      "access": "manual",
+      "url": "https://huggingface.co/datasets/zai-org/ImageRewardDB",
+      "license": "Apache-2.0 (dataset card); GitHub repo Apache-2.0 via API",
+      "size_bytes": 23700000000.0,
+      "gives": "per-image 7-point Likert (overall, image-text alignment, fidelity) + per-prompt ranking of 4-9 images into 5 slots with ties (max 2 per slot) + problem flags (b",
+      "harness_use": "137k images with 7-pt Likert (overall, fidelity, alignment): absolute-scale anchor for BT scores",
+      "notes": "catalog:imagerewarddb. script-based dataset (viewer off); use `datasets` with trust_remote_code or the 1k subset (2.7 GB). Apache-2.0."
+    },
+    {
+      "id": "hf-vbench-human",
+      "name": "VBench human annotation",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/Vchitect/VBench_human_annotation",
+      "license": "MIT",
+      "size_bytes": 7000000.0,
+      "gives": "per-dimension pairwise",
+      "harness_use": "per-dimension pairwise human annotations (temporal flicker, motion smoothness, ...): temporal-gate validation",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "Vchitect/VBench_human_annotation",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:vbench-human-annotation. gated:auto -> set HF_TOKEN; 7 MB. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-videogen-rewardbench",
+      "name": "VideoGen-RewardBench",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/KlingTeam/VideoGen-RewardBench",
+      "license": "apache-2.0",
+      "size_bytes": 13400000000.0,
+      "gives": "pairwise per dim (VQ, MQ, TA, overall)",
+      "harness_use": "25k pairwise votes per dimension (VQ, MQ, TA, overall) on generated video: BT fit for the video track",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "KlingTeam/VideoGen-RewardBench",
+        "config": "default",
+        "split": "eval"
+      },
+      "notes": "catalog:videogen-rewardbench. apache-2.0. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-rapidata-t2v",
+      "name": "Rapidata text-2-video human preferences",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/Rapidata/text-2-video-human-preferences",
+      "license": "apache-2.0",
+      "size_bytes": 2100000000.0,
+      "gives": "pairwise raw per-voter",
+      "harness_use": "2.5k T2V pairs with raw per-voter data: rater modelling for video preference",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "Rapidata/text-2-video-human-preferences",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:rapidata-t2v-preferences. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-rapidata-t2v-rich",
+      "name": "Rapidata text-2-video Rich Human Feedback",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/Rapidata/text-2-video-Rich-Human-Feedback",
+      "license": "apache-2.0",
+      "size_bytes": 5000000000.0,
+      "gives": "Likert per dim",
+      "harness_use": "Likert per dimension on generated video: temporal artifact priors",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "Rapidata/text-2-video-Rich-Human-Feedback",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:rapidata-t2v-rich. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-videoscore-bench",
+      "name": "VideoScore-Bench",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/TIGER-Lab/VideoScore-Bench",
+      "license": "apache-2.0",
+      "size_bytes": 28800000000.0,
+      "gives": "per source",
+      "harness_use": "EvalCrafter/GenAI-Bench/VBench/VideoFeedback human ratings re-packaged with videos: one-stop temporal-gate benchmark",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "TIGER-Lab/VideoScore-Bench"
+      },
+      "notes": "catalog:videoscore-bench. configs eval_crafter / genaibench / vbench / video_feedback; pick with --param config=... Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-videofeedback",
+      "name": "VideoFeedback",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/TIGER-Lab/VideoFeedback",
+      "license": "apache-2.0",
+      "size_bytes": 100000000.0,
+      "gives": "per-dim 1-4",
+      "harness_use": "32.9k videos with 1-4 scores on visual quality, temporal consistency, dynamic degree, factual, alignment",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "TIGER-Lab/VideoFeedback",
+        "config": "annotated",
+        "split": "train"
+      },
+      "notes": "catalog:videofeedback. text rows; mp4s in hexuan21/VideoFeedback-videos-mp4 (8.5 GB). Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-videofeedback-mp4",
+      "name": "VideoFeedback",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/hexuan21/VideoFeedback-videos-mp4",
+      "license": "apache-2.0",
+      "size_bytes": 8500000000.0,
+      "gives": "per-dim 1-4",
+      "harness_use": "the mp4 files for hf-videofeedback",
+      "expander": "hf_hub_files",
+      "params": {
+        "repo": "hexuan21/VideoFeedback-videos-mp4",
+        "pattern": "\\.(mp4|zip|tar)$"
+      },
+      "requires": [
+        "hf-videofeedback"
+      ],
+      "notes": "catalog:videofeedback. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-aigve-bench",
+      "name": "AIGVE-Bench",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/xiaoliux/AIGVE-Bench",
+      "license": "other",
+      "size_bytes": 6500000000.0,
+      "gives": "per-dim scores",
+      "harness_use": "2,430 generated videos with per-dimension human scores",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "xiaoliux/AIGVE-Bench",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:aigve-bench. licence 'other' on card: check before any redistribution. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-fetv",
+      "name": "FETV",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/lyx97/FETV",
+      "license": "cc-by-4.0",
+      "size_bytes": 50000000.0,
+      "gives": "per-dim",
+      "harness_use": "619 prompts with per-dimension ratings incl. temporal quality: small T2V sanity set",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "lyx97/FETV",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:fetv. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-konvid-1k-videos",
+      "name": "KoNViD-1k",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/shuoxing/KoNViD_1k_videos",
+      "license": "freely available (research)",
+      "size_bytes": 2300000000.0,
+      "gives": "MOS 1-5 ACR",
+      "harness_use": "1,200 in-the-wild videos (MOS from the official csv): natural flicker/judder priors for temporal.py",
+      "expander": "hf_hub_files",
+      "params": {
+        "repo": "shuoxing/KoNViD_1k_videos"
+      },
+      "notes": "catalog:konvid-1k. MOS csv from database.mmsp-kn.de/konvid-1k-database.html; freely available for research. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-visionrewarddb-video",
+      "name": "VisionRewardDB-Video",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/zai-org/VisionRewardDB-Video",
+      "license": "apache-2.0",
+      "size_bytes": 129000000000.0,
+      "gives": "checklist + pairwise",
+      "harness_use": "checklist + pairwise annotations on generated video at scale",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "zai-org/VisionRewardDB-Video",
+        "config": "regression",
+        "split": "regression"
+      },
+      "notes": "catalog:visionrewarddb-video. XL; apache-2.0. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-mj-bench-video",
+      "name": "MJ-Bench-Video",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/MJ-Bench/MJ-BENCH-VIDEO",
+      "license": "MIT",
+      "size_bytes": 10400000000.0,
+      "gives": "pairwise",
+      "harness_use": "pairwise video preference across perspectives",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "MJ-Bench/MJ-BENCH-VIDEO"
+      },
+      "notes": "catalog:mj-bench-video. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-lift-hra-20k",
+      "name": "LiFT-HRA-20K",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/Fudan-FUXI/LiFT-HRA-20K",
+      "license": "MIT",
+      "size_bytes": 3700000000.0,
+      "gives": "per-dim",
+      "harness_use": "20k videos with per-dimension human ratings + rationales",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "Fudan-FUXI/LiFT-HRA-20K"
+      },
+      "notes": "catalog:lift-hra-20k. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "live-flicker",
+      "name": "LIVE Flicker Video Database",
+      "kind": "dataset",
+      "access": "page-only",
+      "url": "https://live.ece.utexas.edu/research/motion_silencing/index.html",
+      "license": "UT Austin notice",
+      "gives": "SSCQE continuous",
+      "harness_use": "SSCQE continuous ratings of flicker/motion silencing: the only direct flicker-visibility set found",
+      "notes": "catalog:live-flicker. UT Austin notice; registration."
+    },
+    {
+      "id": "live-yt-hfr",
+      "name": "LIVE-YT-HFR",
+      "kind": "dataset",
+      "access": "page-only",
+      "url": "https://github.com/pavancm/LIVE-HFR",
+      "license": "UT Austin notice",
+      "gives": "MOS",
+      "harness_use": "MOS across 24-120 fps versions: frame-rate / judder calibration for temporal.py",
+      "notes": "catalog:live-yt-hfr. UT Austin notice; registration."
+    },
+    {
+      "id": "live-yt-banding",
+      "name": "LIVE-YT-Banding (CBAND)",
+      "kind": "dataset",
+      "access": "page-only",
+      "url": "https://github.com/uniqzheng/CBAND",
+      "license": "unknown",
+      "gives": "MOS",
+      "harness_use": "MOS for banding in video: video banding threshold",
+      "notes": "catalog:live-yt-banding. GitHub CBAND repo."
+    },
+    {
+      "id": "bvi-artefact",
+      "name": "BVI-Artefact",
+      "kind": "dataset",
+      "access": "page-only",
+      "url": "https://chenfeng-bristol.github.io/BVI-Artefact/",
+      "license": "unknown",
+      "gives": "binary, no MOS",
+      "harness_use": "binary labels for 10 video artefact types (no MOS): artifact taxonomy coverage check",
+      "notes": "catalog:bvi-artefact."
+    },
+    {
+      "id": "hf-lrid",
+      "name": "LRID",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/hansen97/LRID",
+      "license": "CC BY-NC 4.0",
+      "size_bytes": 596000000000.0,
+      "gives": "calibration frames",
+      "harness_use": "calibration frames (dark/flat) across ISO: measured read noise + gain to validate camera.py's noise model",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "hansen97/LRID",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:lrid. XL; CC BY-NC 4.0; --param limit=1 gives one shard. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-pixelshift200",
+      "name": "PixelShift200",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/guochengqian/PixelShift200",
+      "license": "CC BY 4.0",
+      "size_bytes": 113000000000.0,
+      "gives": "pixel-shift GT",
+      "harness_use": "pixel-shift full-colour ground truth vs single-shot raw: demosaic error floor for camera.py",
+      "expander": "hf_hub_files",
+      "params": {
+        "repo": "guochengqian/PixelShift200",
+        "pattern": "\\.(ARW|arw|zip|tar)$"
+      },
+      "notes": "catalog:pixelshift200. XL; CC BY 4.0. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-sidd-dng-mirror",
+      "name": "SIDD (+NLF)",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/MhdMohammadi/SIDD-CC-DNG",
+      "license": "MIT (official site)",
+      "size_bytes": 234500000000.0,
+      "gives": "calibrated noise (NLF)",
+      "harness_use": "validates camera.py's shot + read noise law with `noise_check` (harness/data/noise.py): per-pixel temporal variance over 60 of the 150 frames of each burst against the temporal mean, per CFA position; gain, read noise and full well per instance, ISO scaling per camera, distribution and row-noise checks",
+      "expander": "hf_hub_files",
+      "params": {
+        "repo": "MhdMohammadi/SIDD-CC-DNG"
+      },
+      "deriver": "noise_check",
+      "notes": "catalog:sidd. Unofficial DNG mirror of the SIDD source bursts (115 instances x 150 DNG, 234.5 GB); metadata/train_metadata.csv gives camera, ISO, shutter per instance. Bounded pull used: --param pattern='data/train/(0063|0130|0064|0108)_DNG' --max-bytes 1e10 (Google Pixel at ISO 100/400/1600/6400, 8.5 GB); second camera: pattern='data/train/(0028|0068|0032|0030)_DNG' then '(0088|0134)_DNG' (two brighter iPhone 7 ISO 100 bursts, 5.0 GB, step 12) --max-bytes 1e10 (iPhone 7 at ISO 100/200/800/1600, 9.1 GB; the ISO 100 burst is a dark scene and fails the fit with 3 of 4 usable bins); any regex on the repo path works, e.g. pattern='README|metadata' for the metadata alone."
+    },
+    {
+      "id": "hf-mit-adobe-5k",
+      "name": "MIT-Adobe FiveK",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/NemanTeam/mit-adobe-5k",
+      "license": "research-only non-commercial",
+      "size_bytes": 50830000000.0,
+      "gives": "retouch targets",
+      "harness_use": "5k raws + 5 expert retouch targets: tone-mapping preference prior for tone gate",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "NemanTeam/mit-adobe-5k",
+        "config": "default",
+        "split": "train"
+      },
+      "notes": "catalog:mit-adobe-fivek. research-only non-commercial. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "hf-crvd",
+      "name": "CRVD",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/wdy413/CRVD",
+      "license": "CC BY-NC-SA 4.0",
+      "size_bytes": 10000000000.0,
+      "gives": "calibrated shot/read per ISO",
+      "harness_use": "calibrated shot/read noise per ISO for video raws: temporal noise model",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "wdy413/CRVD"
+      },
+      "notes": "catalog:crvd. CC BY-NC-SA 4.0. Bound with --param limit=N (shards/files)."
+    },
+    {
+      "id": "sidd-official",
+      "name": "SIDD (+NLF)",
+      "kind": "dataset",
+      "access": "manual",
+      "url": "https://abdokamel.github.io/sidd/",
+      "license": "MIT",
+      "size_bytes": 234500000000.0,
+      "gives": "calibrated noise (NLF)",
+      "harness_use": "SIDD medium/full with NLF per capture (MIT): primary noise-model calibration",
+      "notes": "catalog:sidd. The page's download links go to 130.63.97.225 (York EECS), which closes a plain HTTP connection from the harness user agent without a response, and the Google Drive links are gone from the page (checked 2026-10-27): stays manual. The DNG bursts come from hf-sidd-dng-mirror instead."
+    },
+    {
+      "id": "hdr-plus-burst",
+      "name": "HDR+ Burst",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://hdrplusdata.org/dataset.html",
+      "license": "CC BY-SA 4.0",
+      "size_bytes": 39060000000.0,
+      "gives": "153-burst subset: 4,056 objects, 39.1 GB; per burst payload_N*.dng raw frames (6.4 MB each), lens_shading_map_N*.tiff, rgb2rgb.txt, timing.txt; results_* hold the merged and finished outputs",
+      "harness_use": "real capture constraints C for the claim schema: `capture_stats` (harness/data/dng.py, struct-only DNG tag reader) takes the first raw frame of each burst for exposure time, ISO, scene luminance (EXIF exposure, K = 12.5), the DNG NoiseProfile in electrons against the SIDD measurement and the lens shading falloff; the full bursts are motion-blur vs exposure ground truth for temporal.py",
+      "expander": "gcs_bucket",
+      "params": {
+        "bucket": "hdrplusdata",
+        "prefix": "20171106_subset/"
+      },
+      "deriver": "capture_stats",
+      "notes": "catalog:hdr-plus-burst. Public bucket listed anonymously through the storage JSON API with size and MD5 per object, no gsutil (checked 2026-10-27: 4,056 objects in 5 pages, 3.7 s). Pulls used: --param pattern='bursts/0006_' for one burst; --param 'pattern=(payload|lens_shading_map)_N000[.](dng|tiff)$' --max-bytes 4e9 for the first frame and shading map of all 153 bursts (3.3 GB, feeds capture_stats)."
+    },
+    {
+      "id": "rawnind",
+      "name": "RawNIND",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://dataverse.uclouvain.be/dataset.xhtml?persistentId=doi:10.14428/DVN/DEQCIM",
+      "license": "CC BY-SA 4.0",
+      "size_bytes": 120170000000.0,
+      "gives": "2,845 raw files, 120 GB (1,784 ARW, 677 RAF, 298 CR2, 60 NEF, 15 CRW, 6 DNG; 2 YAML indexes): per scene an ISO sweep plus a clean GT frame, names carry scene, GT flag, ISO and sha1",
+      "harness_use": "ISO sweeps with clean references (CC BY-SA 4.0): noise-vs-ISO curves",
+      "expander": "dataverse_dataset",
+      "params": {
+        "server": "https://dataverse.uclouvain.be",
+        "doi": "doi:10.14428/DVN/DEQCIM"
+      },
+      "notes": "catalog:rawnind. Dataverse native API lists every file with size and MD5 (checked 2026-10-27). Bounded pulls: --param pattern='yaml$' for the two indexes; --param pattern='Bayer_2pilesofplates' --max-bytes 2e9 for one scene's sweep. Feeds a second camera family for noise_check once a per-ISO sweep is on disk."
+    },
+    {
+      "id": "raw-pixls-us",
+      "name": "raw.pixls.us",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://raw.pixls.us/",
+      "license": "CC0",
+      "size_bytes": 25100000000.0,
+      "gives": "one CC0 sample raw per camera model (926 make/model pairs, 1,874 CC0 files in all; 146 CC BY-NC-SA excluded by default)",
+      "harness_use": "one CC0 sample raw per camera model (~900 cameras): pixel pitch / bit depth / black level cross-check for sensors.csv",
+      "expander": "rpu_index",
+      "params": {
+        "pattern": ".*",
+        "limit": 0
+      },
+      "notes": "catalog:raw-pixls-us. Index first (repository.json), then one sha256-verified raw per make/model; --param limit=N for a sample, --param one_per_model=0 for every variant (55.8 GB), license=all adds the BY-NC-SA rows."
+    },
+    {
+      "id": "eld-noise-params",
+      "name": "ELD",
+      "kind": "dataset",
+      "access": "page-only",
+      "url": "https://github.com/Vandermode/ELD",
+      "license": "code MIT; dataset terms unstated",
+      "size_bytes": 11460000000.0,
+      "gives": "calibrated noise params (K, read, row, colour bias)",
+      "harness_use": "calibrated noise parameters (K, read, row, colour) per camera: direct inputs for camera.py presets",
+      "notes": "catalog:eld. code MIT; dataset terms unstated."
+    },
+    {
+      "id": "snic",
+      "name": "SNIC",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://doi.org/10.7910/DVN/SGHDCP",
+      "license": "MIT",
+      "size_bytes": 473360000000.0,
+      "gives": "14 files, 473 GB: 12 zips of 38 GB each per phone camera and scene set (e.g. iphone_11_pro_main/indoor), a .tab index and a README",
+      "harness_use": "ISO series + calibration frames, MIT, Harvard Dataverse",
+      "expander": "dataverse_dataset",
+      "params": {
+        "server": "https://dataverse.harvard.edu",
+        "doi": "doi:10.7910/DVN/SGHDCP"
+      },
+      "notes": "catalog:snic. Dataverse native API (Harvard) lists the files with MD5 (checked 2026-10-27). Each zip is one 38 GB unit, so the smallest useful pull is --param pattern='README|tab$' for the index, then one zip by name."
+    },
+    {
+      "id": "slanted-edge-raws",
+      "name": "ISO 12233 slanted-edge raw sets",
+      "kind": "dataset",
+      "access": "pip",
+      "url": "https://www.imatest.com/ ; https://github.com/fvdbergh/mtfmapper",
+      "license": "n/a",
+      "gives": "none",
+      "harness_use": "Imatest / MTF Mapper slanted-edge references: validate resolution.py's SFR against a reference implementation",
+      "notes": "catalog:slanted-edge-raws. mtfmapper is a C++ tool; use it as an oracle for the MTF50 estimator."
+    },
+    {
+      "id": "realsr-iccv2019",
+      "name": "RealSR (ICCV 2019): DSLR LR/HR pairs by focal length, Canon 5D3 and Nikon D810",
+      "kind": "dataset",
+      "access": "manual",
+      "url": "https://github.com/csjcai/RealSR",
+      "license": "not stated in the repository",
+      "size_bytes": 12000000000,
+      "gives": "V1 234 scenes (204 train / 30 test), V2 559 (459 / 100), V3 559; x2/x3/x4 pairs registered from real zoom changes",
+      "harness_use": "rendered-layer evaluation set beside OSEDiff and PiSA-SR (LANDSCAPE section 6 item 5); real optical degradation, no ground-truth provenance",
+      "notes": "Google Drive and Baidu links in the README; evaluation crops also ship inside hf-stablesr-testsets"
+    },
+    {
+      "id": "drealsr-eccv2020",
+      "name": "DRealSR (ECCV 2020 CDC): five DSLRs, x2/x3/x4 real-world SR pairs",
+      "kind": "dataset",
+      "access": "manual",
+      "url": "https://github.com/xiezw5/Component-Divide-and-Conquer-for-Real-World-Image-Super-Resolution",
+      "license": "not stated in the repository",
+      "size_bytes": 20000000000,
+      "gives": "31,970 training patches of 192x192 and 93 test pairs at x4; Sony, Canon, Olympus, Nikon and Panasonic bodies",
+      "harness_use": "rendered-layer evaluation set with a wider lens and sensor mix than RealSR",
+      "notes": "Google Drive folder 1tP5m4k1_shFT6Dcw31XV8cWHtblGmbOk, Baidu code osiy; evaluation crops also ship inside hf-stablesr-testsets"
+    },
+    {
+      "id": "hf-stablesr-testsets",
+      "name": "StableSR test sets (Hugging Face Iceclear/StableSR-TestSets): DIV2K-Val synthetic pairs, RealSR and DRealSR validation crops, DPED LQ",
+      "kind": "dataset",
+      "access": "api",
+      "url": "https://huggingface.co/datasets/Iceclear/StableSR-TestSets",
+      "license": "S-Lab License 1.0 (non-commercial research)",
+      "size_bytes": 3060000000,
+      "gives": "about 9.8k rows: 3000 DIV2K_Val LR/HR pairs under the Real-ESRGAN pipeline, centre-cropped RealSR Val and DRealSR Val pairs, DPED Val LQ-only",
+      "harness_use": "the fetchable copy of the RealSR and DRealSR evaluation crops used by StableSR, OSEDiff and PiSA-SR, so rendered-layer numbers are comparable with the papers",
+      "expander": "hf_parquet",
+      "params": {
+        "dataset": "Iceclear/StableSR-TestSets"
+      },
+      "notes": "imagefolder layout auto-converted to parquet by the Hub; cites arXiv 2305.07015; evaluation only under the licence"
+    },
+    {
+      "id": "ntire2026-up-isp",
+      "name": "NTIRE 2026 Learned Smartphone ISP with Unpaired Data (UP-ISP): Google Pixel 6 RAW and unpaired JPEG targets",
+      "kind": "dataset",
+      "access": "manual",
+      "url": "https://github.com/gosha20777/unpaired-isp-ntire-baseline",
+      "license": "not stated; challenge terms on Codabench",
+      "size_bytes": 4000000000,
+      "gives": "13,420 RAW .npy tiles 256x256x4 packed RGGB 10-bit and 13,421 unpaired 512x512 JPEG targets from more than 900 scenes",
+      "harness_use": "recovered-layer external evidence: a real-phone RAW to ISP track to report beside the NTIRE results (LANDSCAPE section 6 item 5)",
+      "notes": "Codabench competition 12932 (registration); challenge report Perevozchikov et al., CVPRW 2026"
+    },
+    {
+      "id": "reallq250",
+      "name": "RealLQ250: 250 real low-quality images, no reference",
+      "kind": "dataset",
+      "access": "manual",
+      "url": "https://arxiv.org/abs/2503.13358",
+      "license": "unknown",
+      "size_bytes": 200000000,
+      "gives": "250 real-world degraded photographs used as a no-reference test set by RSD (arXiv 2503.13358) and later one-step restorers",
+      "harness_use": "no-reference rendered-layer comparison only; the harness has no truth for it, so it feeds the blinded preference track, not the gates",
+      "notes": "origin and download host not confirmed: cited by RSD, not on the AdcSR page or its Hugging Face test-set repo; enter the link once a paper states it"
+    }
+  ]
+}

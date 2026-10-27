@@ -1,15 +1,183 @@
 {
-  "claim_id": "still-conservatory-01",
-  "regime": "synthetic_world",
-  "qualities": ["geometry", "tone_color", "artifacts", "resolution"],
-  "scene": {"generator": "procedural", "seed": 7, "width": 512, "height": 512, "frames": 1},
-  "capture": {
-    "exposure_s": 0.01,
-    "exposure_ev": 0.0,
-    "motion_px_per_s": [120.0, 0.0],
-    "camera": {"pixel_pitch_um": 3.76, "f_number": 2.8, "full_well_e": 51000, "read_noise_e": 1.5, "bit_depth": 14}
+  "qualities": {
+    "resolution": [
+      "mtf50_cpp",
+      "texture_hf_fidelity"
+    ],
+    "shadows": [
+      "shadow_snr_db"
+    ],
+    "highlights": [
+      "highlight_loss_fraction",
+      "dr_steps"
+    ],
+    "color": [
+      "delta_e_mean",
+      "delta_e_max"
+    ],
+    "artifacts": [
+      "edge_overshoot",
+      "banding_score",
+      "periodicity"
+    ],
+    "geometry_lighting": [
+      "landmark_error_px",
+      "shading_rmse"
+    ],
+    "temporal": [
+      "flicker",
+      "flow_warped_excess",
+      "motion_region_error",
+      "trajectory_error_px"
+    ],
+    "provenance": [
+      "invented_detail_fraction",
+      "undeclared_invention_fraction",
+      "rendered_fraction"
+    ]
   },
-  "display": {"diagonal_in": 31.5, "width_px": 7680, "height_px": 4320, "distance_m": 0.6},
-  "candidate": {"kind": "truth"},
-  "delivery": {"format": "jpeg", "quality": 92}
+  "scene": {
+    "width": 768,
+    "height": 432,
+    "supersample": 4,
+    "seed": 7,
+    "n_frames": 1,
+    "fps": 24.0,
+    "exposure_s": 0.0
+  },
+  "camera": {
+    "preset": "best_case_earth",
+    "exposure_s": 0.020833333333333332,
+    "seed": 1
+  },
+  "display": {
+    "diagonal_in": 31.5,
+    "width_px": 7680,
+    "height_px": 4320,
+    "distance_m": 0.6,
+    "delivery": {
+      "format": "jpeg",
+      "quality": 92
+    }
+  },
+  "rendered_map": {
+    "policy": "optional"
+  },
+  "gates": [
+    {
+      "name": "composition",
+      "checks": [
+        {
+          "metric": "pref_convincing_p_beats_camera_low",
+          "op": ">",
+          "value": 0.5
+        }
+      ]
+    },
+    {
+      "name": "provenance",
+      "checks": [
+        {
+          "metric": "undeclared_invention_fraction",
+          "op": "<=",
+          "value": 0.01
+        }
+      ]
+    },
+    {
+      "name": "lighting_materials",
+      "checks": [
+        {
+          "metric": "shading_rmse",
+          "op": "<=",
+          "value": 0.02
+        },
+        {
+          "metric": "landmark_error_px",
+          "op": "<=",
+          "value": 0.5
+        }
+      ]
+    },
+    {
+      "name": "tone_color",
+      "checks": [
+        {
+          "metric": "delta_e_mean",
+          "op": "<=",
+          "value": 2.0
+        },
+        {
+          "metric": "highlight_loss_fraction",
+          "op": "<=",
+          "value": 0.0
+        },
+        {
+          "metric": "dr_steps",
+          "op": "beats_camera"
+        }
+      ]
+    },
+    {
+      "name": "artifacts",
+      "checks": [
+        {
+          "metric": "edge_overshoot",
+          "op": "<=",
+          "value": 0.02
+        },
+        {
+          "metric": "banding_score",
+          "op": "<=",
+          "value": 0.01
+        },
+        {
+          "metric": "periodicity",
+          "op": "<=",
+          "value": 0.3
+        }
+      ]
+    },
+    {
+      "name": "resolution",
+      "checks": [
+        {
+          "metric": "display_ppd",
+          "op": ">=",
+          "value": 94.0
+        },
+        {
+          "metric": "mtf50_cpp",
+          "op": "beats_camera"
+        }
+      ]
+    },
+    {
+      "name": "micro_detail",
+      "checks": [
+        {
+          "metric": "texture_hf_fidelity",
+          "op": "beats_camera"
+        }
+      ]
+    },
+    {
+      "name": "temporal",
+      "checks": [
+        {
+          "metric": "flicker",
+          "op": "beats_camera"
+        },
+        {
+          "metric": "flow_warped_excess",
+          "op": "<=",
+          "value": 0.005
+        },
+        {
+          "metric": "motion_region_error",
+          "op": "beats_camera"
+        }
+      ]
+    }
+  ]
 }
