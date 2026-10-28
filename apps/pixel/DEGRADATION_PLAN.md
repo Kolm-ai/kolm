@@ -299,9 +299,12 @@ aliasing-sensitive metrics.
 1. Set `HARNESS_DATA_ROOT=D:\lens-harness-data` and move the data root there.
 2. Collect Poly Haven and ambientCG HDRIs at 2k, raw.pixls.us, RawNIND, Wikimedia featured pictures and
    quality images (licence per file), each under `--max-bytes`; FiveK separately and for evaluation only.
-   Status 2026-10-28: Poly Haven at 1k, raw.pixls.us (25 GB), the featured pictures (38 GB), 40 GB of RawNIND, the
-   HDR+ merges of both result sets (285) and the reference frame of every burst are on D:; the rest of RawNIND
-   (90 GB budget) and the SIDD Medium sRGB mirror are queued behind it, and the quality images are collecting.
+   Status 2026-10-28: Poly Haven at 1k, raw.pixls.us (25 GB), the featured pictures (38 GB), RawNIND complete (120 GB,
+   2,836 files; the remainder's 1,919 files, 79.9 GB, landed, 10 files failed in all), the HDR+ merges of both result sets (285) and the
+   reference frame of every burst, the SIDD Medium sRGB mirror (640 PNGs, 320 noisy/ground-truth pairs, 13.2 GB;
+   the raw-domain set is not mirrored there) and 12,678 Wikimedia quality images (100 GB, the budget; the API walk
+   listed 20,000 and skipped 2,475 for licence, type or size, 7,772 lie past the budget; not a training source yet) are
+   on D:.
 3. `python -m harness data label --sources <all clean ids> --n 10000000 --chunk 64 --crops 16 --per-tile 16`
    (36 to 50 h on this machine; resumable per item: the ledger's shards say which files are labelled under the
    current tile, draw and crop settings, so a re-run after the corpus grew labels only the new files, into new
@@ -335,8 +338,9 @@ aliasing-sensitive metrics.
    quantiles, and the real rows are the first ground truth the conditioning can be checked against.
 5. Train with the metric vector as conditioning; evaluate on the chart metrics and the real pairs.
    Started 2026-10-27 in `harness/model/` (pairs rendered on the fly by the sampler, conditioned residual UNet,
-   `python -m harness model train|apply|eval-demo`); nine runs, six on 2026-10-27 and three on 2026-10-28, each fixing one unidentifiable
-   variable found by the previous one (section 7); the measured demo-world verdicts per run are in README.md
+   `python -m harness model train|apply|eval-demo`); ten runs, six on 2026-10-27 and four on 2026-10-28, the first nine each
+   fixing one unidentifiable variable found by the previous one (section 7) and the tenth training on the linear
+   references of step 4; the measured demo-world verdicts per run are in README.md
    and LANDSCAPE.md section 6. Since the ninth run `python -m harness model eval-raw` scores a checkpoint on real
    raws no run trains on (raw.pixls.us through the demo camera, section 7), and since step 4 `eval-raw --real
    --source <id>` scores it on the real pairs with the measured noise law as the capture (`--blind` withholds it).
@@ -348,5 +352,13 @@ aliasing-sensitive metrics.
    while halving mtf50 (0.39 to 0.19 and 0.17, losing on 45 and 47 tiles) and cutting texture fidelity to a fifth
    (0.67 to 0.11 and 0.15): 2 beats, 7 ties, 3 losses known for both, 2, 5, 5 and 2, 6, 4 blind. The run that
    sharpened the raw.pixls.us tiles rendered through the demo camera blurs real noisy raws: on real noise it is a
-   denoiser that pays in resolution, texture, colour and edges, known and blind alike. No run has trained on a
-   linear reference yet; that verdict is the one the tenth run has to move.
+   denoiser that pays in resolution, texture, colour and edges, known and blind alike. The tenth run trained on the
+   linear references (the HDR+ merges and RawNIND GT raws, 772 of 6,341 items, about one draw in eight) for 9000 steps
+   and did not move that verdict: HDR+ 1 beat, 4 ties, 7 losses known and 1, 7, 4 blind (shadow SNR 14.0 to 21.1 dB,
+   texture 1.22 to 0.74, ΔE 0.68 to 1.30); RawNIND 2, 6, 4 and 2, 7, 3 (shadow SNR 13.4 to 20.2 dB, mtf50 0.39 to 0.15,
+   texture 0.67 to 0.18 known and 0.26 blind). On the demo still and the raw.pixls.us set it drifted back toward the
+   eighth run (mtf50 0.43 and 0.317, highlight loss 0.163, overshoot 0.155 and 0.023, a dynamic-range step lost on 25
+   tiles), and the video's undeclared invention fell to 1.02 %, just over the gate. One linear reference in eight
+   draws does not outweigh the ISP outputs in the other seven; the targets' share (a per-source sampling weight), or
+   the real pairs themselves as training pairs (the ISO sweeps' noisy raws against their GT, the val and test scenes
+   held out), is the next variable.

@@ -10,6 +10,7 @@ import shutil
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -106,6 +107,35 @@ def sha256_of(path: Path | str) -> str:
     return _digest(path, "sha256")
 
 
+@contextmanager
+def _file_lock(path: Path):
+    """An exclusive lock on `path` held across processes (msvcrt on Windows, fcntl elsewhere). Two collectors
+    appending to one ledger need it: the C runtime's append mode seeks to the end before each write, so two writers
+    racing that seek leave one record's head overwritten by the other's record (one line torn, one record lost)."""
+    fd = os.open(fs(path), os.O_RDWR | os.O_CREAT)
+    try:
+        if os.name == "nt":
+            import msvcrt
+            while True:
+                try:
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:  # held by another collector
+                    time.sleep(0.01)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            if os.name == "nt":
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
 class Collector:
     def __init__(self, root: Path | None = None, jobs: int = 8, dry_run: bool = False,
                  max_bytes: float | None = None, log=print):
@@ -125,18 +155,30 @@ class Collector:
 
     # ---- ledger -------------------------------------------------------------------
     def _load_ledger(self) -> None:
+        """Index every readable line. A line that is not a record (torn by two collectors appending at once before
+        `_record` took the file lock) is counted in `torn` and skipped: its record is lost, and the next run fetches
+        that one file again."""
+        self.torn = 0
         if not self.ledger_path.exists():
             return
         for line in self.ledger_path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
+            if not line.strip():
+                continue
+            try:
                 e = LedgerEntry(**json.loads(line))
-                self._index(e)
+            except (ValueError, TypeError):
+                self.torn += 1
+                continue
+            self._index(e)
+        if self.torn:
+            self.log(f"ledger: {self.torn} torn line(s) skipped in {self.ledger_path}")
 
     def _record(self, e: LedgerEntry) -> None:
         with self._ledger_lock:
             self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.ledger_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(asdict(e)) + "\n")
+            with _file_lock(self.ledger_path.with_suffix(".lock")):
+                with open(self.ledger_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(asdict(e)) + "\n")
             self._index(e)
 
     def _index(self, e: LedgerEntry) -> None:

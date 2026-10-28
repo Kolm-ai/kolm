@@ -17,6 +17,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import math
+import warnings
 from collections import OrderedDict
 from pathlib import Path
 
@@ -24,7 +25,7 @@ import numpy as np
 
 from ..data import data_root
 from ..data.degrade import DegradeParams, Distributions, degrade, prepare_tile, sample_params, tile_shading
-from ..data.label import PARQUET_SOURCES, Item, clean_settings, list_items, load_items, scene_of
+from ..data.label import PARQUET_SOURCES, Item, clean_settings, list_items, load_items, scene_of, skip_reason
 from ..data.tilemetrics import tile_metrics
 from ..metrics import STILL_METRICS
 from ..io import save_png
@@ -199,6 +200,7 @@ class TileSource:
         self.tile, self.split, self.tiles_per_image = tile, split, tiles_per_image
         self._cur: Item | None = None
         self._left = 0
+        self.dropped: dict[Item, str] = {}   # items whose file the decoder rejected, with the skip_reason
         self.items = [it for s in sources for it in list_items(s, self.root) if split_of(it) == split]
         if not self.items:
             raise ValueError(f"no items for split {split!r} in {sources}")
@@ -233,22 +235,37 @@ class TileSource:
 
     def random_tile(self, rng: np.random.Generator) -> tuple[np.ndarray, Item, int, int]:
         """A random tile; with tiles_per_image > 1 consecutive draws stay on one decoded image (the stream's
-        throughput is bound by decoding whole HDRIs, not by the sampler)."""
+        throughput is bound by decoding whole HDRIs, not by the sampler). An item whose file the decoder rejects
+        is dropped and the draw moves on: one file never ends a training run."""
         for _ in range(64):
-            if self._left > 0 and self._cur is not None:
-                it = self._cur
-                self._left -= 1
+            if not self.items:
+                raise ValueError("every item failed to decode")
+            fresh = self._left <= 0 or self._cur is None
+            it = self.items[int(rng.integers(len(self.items)))] if fresh else self._cur
+            try:
                 img = self.image(it)
-            else:
-                it = self.items[int(rng.integers(len(self.items)))]
-                img = self.image(it)
-                self._cur, self._left = it, self.draws_on(img) - 1
+            except Exception as e:  # noqa: BLE001 - recorded with its reason; a MemoryError here is the file's size
+                self.drop(it, e)
+                continue
+            if fresh:
+                self._cur, self._left = it, self.draws_on(img)
+            self._left -= 1
             h, w = img.shape[:2]
             if h >= self.tile and w >= self.tile:
                 y0, x0 = int(rng.integers(0, h - self.tile + 1)), int(rng.integers(0, w - self.tile + 1))
                 return np.ascontiguousarray(img[y0:y0 + self.tile, x0:x0 + self.tile], dtype=np.float64), it, y0, x0
             self._left = 0
         raise ValueError("no item large enough for the tile")
+
+    def drop(self, it: Item, e: BaseException) -> None:
+        """Forget an item whose file the decoder rejects (the 188-megapixel featured picture past Pillow's pixel cap
+        that ended the tenth run at step 4200 from a loader worker; a torn download): it leaves this process's list
+        with its skip_reason in `dropped`, and a RuntimeWarning names it in the run's log."""
+        self.dropped[it] = skip_reason(e)
+        self.items.remove(it)
+        if self._cur == it:
+            self._cur, self._left = None, 0
+        warnings.warn(f"{it.source}/{it.file} dropped from the sampler: {self.dropped[it]}", RuntimeWarning, stacklevel=2)
 
 
 def capture_descriptor(airy_first_zero_px: float, residual_sigma_px: float, electrons_at_clip: float,

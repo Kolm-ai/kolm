@@ -221,6 +221,37 @@ def test_stream_source_stays_on_one_image_for_several_tiles():
     assert len({one.random_tile(rng)[1] for _ in range(12)}) > 1
 
 
+def test_stream_source_drops_an_item_its_decoder_rejects(tmp_path, monkeypatch):
+    """A 188-megapixel featured picture past Pillow's pixel cap ended the tenth run at step 4200 from a loader
+    worker: a file the decoder rejects leaves the sampler's list with its skip reason and the draw moves on."""
+    from PIL import Image
+
+    import harness.model.data as D
+    from harness.model.data import TileSource
+
+    d = tmp_path / "raw" / "tiny"
+    d.mkdir(parents=True)
+    rng = np.random.default_rng(0)
+    Image.fromarray((rng.random((40, 40, 3)) * 255).astype(np.uint8)).save(d / "small.png")
+    Image.fromarray((rng.random((120, 120, 3)) * 255).astype(np.uint8)).save(d / "huge.png")
+    (d / "torn.png").write_bytes(b"not a picture")
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 5000)  # 120 x 120 is past twice the cap: DecompressionBombError
+    monkeypatch.setattr(D, "split_of", lambda it: "train")
+    src = TileSource(["tiny"], "train", 16, root=tmp_path, tiles_per_image=4)
+    assert sorted(it.file for it in src.items) == ["huge.png", "small.png", "torn.png"]
+    with pytest.warns(RuntimeWarning, match="dropped from the sampler"):
+        drawn = {src.random_tile(rng)[1].file for _ in range(40)}
+    assert drawn == {"small.png"} and [it.file for it in src.items] == ["small.png"]
+    reasons = {it.file: r for it, r in src.dropped.items()}
+    assert reasons["huge.png"].startswith("decode_error:DecompressionBombError: Image size (14400 pixels)")
+    assert reasons["torn.png"].startswith("decode_error:") and src._cur is not None
+    with pytest.warns(RuntimeWarning):
+        for it in list(src.items):
+            src.drop(it, ValueError("gone"))
+    with pytest.raises(ValueError, match="every item failed to decode"):
+        src.random_tile(rng)
+
+
 def test_tiled_inference_matches_whole_frame_on_identity(monkeypatch):
     from harness.model import apply as A
     from harness.model.apply import Bundle, restore_frames

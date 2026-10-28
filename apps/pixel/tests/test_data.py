@@ -47,6 +47,46 @@ def test_collector_is_idempotent_and_verifies(tmp_path):
     assert sum(json.loads(l)["status"] == "failed" for l in lines) == 1
 
 
+def test_ledger_survives_a_torn_line_and_locks_its_append(tmp_path):
+    """Two collectors appending to one ledger at once (two collection chains on 2026-10-28) left one record's head
+    overwritten by the other's record: the next collector must load past that line, and the append must hold a lock
+    across processes so it does not happen again."""
+    import threading
+    import time
+
+    from harness.data.collect import _file_lock
+
+    src = _local_source(tmp_path)
+    root = tmp_path / "data"
+    assert Collector(root=root, jobs=2, log=lambda *_: None).fetch_source(src)["done"] == 3
+    ledger = root / "ledger.jsonl"
+    lines = ledger.read_text(encoding="utf-8").splitlines()
+    ledger.write_text("\n".join([lines[0], lines[1][60:], lines[2]]) + "\n", encoding="utf-8")
+    msgs = []
+    c = Collector(root=root, log=lambda *a: msgs.append(" ".join(map(str, a))))
+    assert c.torn == 1 and c.status()["local"]["files"] == 2 and any("1 torn line" in m for m in msgs)
+    s = c.fetch_source(src)  # the lost record's file is fetched again, and the ledger is whole
+    assert s["failed"] == 0 and s["already"] == 2 and s["done"] == 1
+    assert Collector(root=root, log=lambda *_: None).status()["local"]["files"] == 3
+    assert (root / "ledger.lock").exists()
+    order = []
+
+    def hold():
+        with _file_lock(root / "ledger.lock"):
+            order.append("a in")
+            time.sleep(0.3)
+            order.append("a out")
+
+    t = threading.Thread(target=hold)
+    t.start()
+    time.sleep(0.05)
+    with _file_lock(root / "ledger.lock"):
+        order.append("b in")
+    t.join()
+    assert order == ["a in", "a out", "b in"]
+
+
+
 def test_dry_run_touches_nothing(tmp_path):
     src = _local_source(tmp_path, 2)
     c = Collector(root=tmp_path / "data", dry_run=True, log=lambda *_: None)
