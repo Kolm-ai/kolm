@@ -1,6 +1,6 @@
 # Degradation plan: synthetic training data with harness metrics as offline labels
 
-Status 2026-10-27. Code: [harness/data/degrade.py](harness/data/degrade.py) (parameter sampler, camera and ISP
+Status 2026-10-28. Code: [harness/data/degrade.py](harness/data/degrade.py) (parameter sampler, camera and ISP
 model), [harness/data/tilemetrics.py](harness/data/tilemetrics.py) (the twelve still metrics on a natural tile
 against its clean tile), [harness/data/label.py](harness/data/label.py) and the CLI
 `python -m harness data label --sources <ids> --n <count> --out data/labels`. Tests:
@@ -299,18 +299,54 @@ aliasing-sensitive metrics.
 1. Set `HARNESS_DATA_ROOT=D:\lens-harness-data` and move the data root there.
 2. Collect Poly Haven and ambientCG HDRIs at 2k, raw.pixls.us, RawNIND, Wikimedia featured pictures and
    quality images (licence per file), each under `--max-bytes`; FiveK separately and for evaluation only.
-   Status 2026-10-28: Poly Haven at 1k, raw.pixls.us (25 GB), the featured pictures (38 GB) and 40 GB of RawNIND
-   are on D:; the quality images are collecting.
+   Status 2026-10-28: Poly Haven at 1k, raw.pixls.us (25 GB), the featured pictures (38 GB), 40 GB of RawNIND, the
+   HDR+ merges of both result sets (285) and the reference frame of every burst are on D:; the rest of RawNIND
+   (90 GB budget) and the SIDD Medium sRGB mirror are queued behind it, and the quality images are collecting.
 3. `python -m harness data label --sources <all clean ids> --n 10000000 --chunk 64 --crops 16 --per-tile 16`
    (36 to 50 h on this machine; resumable per item: the ledger's shards say which files are labelled under the
    current tile, draw and crop settings, so a re-run after the corpus grew labels only the new files, into new
-   chunks, and never rewrites a shard). Status 2026-10-28: 42,048 rows in 351 shards at tile 256, 4 draws, 4 crops;
-   on this branch the pass stops after one chunk when a worker dies (`BrokenProcessPool`, a native decoder taking
-   a worker down), and the pool retry that survives it is on the `pixel-label-raw-exr` branch, not yet merged.
+   chunks, and never rewrites a shard). Status 2026-10-28: the pass finished, 104,448 rows in 841 shards at tile
+   256, 4 draws, 4 crops, with PR 15's pool retry (merged) surviving the worker deaths. The rows of HDR+ payload
+   frames and of RawNIND's noisy raws predate step 4's `include` keys and are no longer rows of clean items: they
+   and the raw.pixls.us rows are to be filtered out when the shards feed training, and a re-run labels the merges
+   and the GT raws.
 4. Real-pair labels from RawNIND and HDR+ with the same tile metrics; compare distributions.
+   Done 2026-10-28 (`harness/data/realpairs.py`, `python -m harness data realpairs --sources hdr-plus-burst rawnind
+   --n 64 --compare`, 12 tests). RawNIND's GT raws and the HDR+ merges are the clean items of their sources at
+   scale 2 (`clean.include`), a scene key per source (`clean.scene`) splits a scene's GT, ISO sweep, burst frames
+   and merges together, and RawNIND's 22 test-reserve scenes are split `test` (`clean.holdout`). The pairs (a
+   burst's reference frame against its merge; each noisy raw and the second GT against the first GT) are decoded at
+   the clean scale, aligned by phase correlation with a quadrant check, the reference brought to the capture's
+   exposure by a per-channel gain fitted below clip, the noise law (electrons at clip, read noise) fitted per tile
+   from the residual, and the twelve tile metrics of capture against reference written as label rows under
+   `derived/realpairs/<source>/`, seeded and cached. Seed 0, 64 tiles of 256 px per source: HDR+ from the 10 bursts
+   of the val split (none rejected once every burst's reference frame was on disk; electrons at clip 121 to 14,220,
+   median 4,952); RawNIND from 64 of 80 pairs in 9 val and test scenes (3 rejected: the skull scene's captures are 4
+   to 7 px apart; electrons at clip 43 to 39,370, median 2,056; ISO 50 to 65,535). Against the 104 k synthetic rows
+   (camera stage on) the synthetic draws are an order of magnitude heavier on sharpness (mtf50 median 0.089 against
+   0.5 HDR+ and 0.39 RawNIND), colour (ΔE mean 9.8 against 0.68 and 0.73), periodicity (0.10 against 0.016 and
+   0.031) and shading (0.10 against 0.0066 and 0.0093), while the real noise (shadow SNR median 14.0 and 13.4 dB
+   against 17.1), dynamic range (3 steps against 4), overshoot and banding sit inside the synthetic range (coverage
+   98 to 100 %). The HDR+ pairs measure noise, colour and range, not sharpness: mtf50 saturates at 0.5 on every
+   tile (the merge has the frame's resolution) and texture fidelity above 1 (median 1.22) is the frame's noise
+   counted as high-frequency energy. The RawNIND sweeps do spread sharpness (mtf50 0.05 to 0.5) and texture (0.07 to
+   0.94 between the quartiles): the noisiest raws lose their edges to the noise. So the sampler is about right on
+   the sensor and far too hard on the optics, the colour and the shading; its draws want a prior from these real
+   quantiles, and the real rows are the first ground truth the conditioning can be checked against.
 5. Train with the metric vector as conditioning; evaluate on the chart metrics and the real pairs.
    Started 2026-10-27 in `harness/model/` (pairs rendered on the fly by the sampler, conditioned residual UNet,
    `python -m harness model train|apply|eval-demo`); nine runs, six on 2026-10-27 and three on 2026-10-28, each fixing one unidentifiable
    variable found by the previous one (section 7); the measured demo-world verdicts per run are in README.md
    and LANDSCAPE.md section 6. Since the ninth run `python -m harness model eval-raw` scores a checkpoint on real
-   raws no run trains on (raw.pixls.us through the demo camera, section 7); the real-pair evaluation waits on step 4.
+   raws no run trains on (raw.pixls.us through the demo camera, section 7), and since step 4 `eval-raw --real
+   --source <id>` scores it on the real pairs with the measured noise law as the capture (`--blind` withholds it).
+   On the HDR+ pairs the eighth and ninth runs raise shadow SNR by 7 dB (14.0 to 21.4 and 21.8 dB, beating on 40
+   and 46 of 64 tiles) and lose everything else that moves: texture fidelity 1.22 to 0.90 and 0.67, ΔE 0.68 to 1.20
+   and 1.29, overshoot 0.006 to 0.037, landmark error 0.06 to 0.16 px; 1 beat, 4 ties, 7 losses and 1, 5, 6 on the
+   medians (1, 4, 7 and 1, 6, 5 blind). On the RawNIND pairs, where sharpness is measurable, both runs raise shadow
+   SNR by 7 to 8 dB (13.4 to 21.6 and 20.9 dB, beating on 43 tiles) and lower banding (0.021 to 0.015 and 0.014)
+   while halving mtf50 (0.39 to 0.19 and 0.17, losing on 45 and 47 tiles) and cutting texture fidelity to a fifth
+   (0.67 to 0.11 and 0.15): 2 beats, 7 ties, 3 losses known for both, 2, 5, 5 and 2, 6, 4 blind. The run that
+   sharpened the raw.pixls.us tiles rendered through the demo camera blurs real noisy raws: on real noise it is a
+   denoiser that pays in resolution, texture, colour and edges, known and blind alike. No run has trained on a
+   linear reference yet; that verdict is the one the tenth run has to move.

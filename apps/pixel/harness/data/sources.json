@@ -1893,6 +1893,23 @@
    "notes": "catalog:crvd. CC BY-NC-SA 4.0. Bound with --param limit=N (shards/files)."
   },
   {
+   "id": "hf-sidd-medium-srgb-mirror",
+   "name": "SIDD Medium sRGB (unofficial Hugging Face mirror cdtrejo/sidd-medium-lmdb)",
+   "kind": "dataset",
+   "access": "api",
+   "url": "https://huggingface.co/datasets/cdtrejo/sidd-medium-lmdb",
+   "license": "SIDD terms (MIT on the official site); the mirror's card carries no licence of its own",
+   "size_bytes": 13300000000.0,
+   "gives": "the official SIDD_Medium_Srgb.zip (13.2 GB) and its unpacked tree raw/train/<scene>_<instance>_<phone>_<ISO>_<shutter>_<temperature>_<brightness>/: 160 scene instances x 2 noisy/GT 8-bit sRGB PNG pairs, 5 phones, ISO 100 to 10000",
+   "harness_use": "real noisy/clean pairs at native scale, 8-bit sRGB from the phones' own pipelines: the real-pair rows and metric distributions of DEGRADATION_PLAN step 4 beside RawNIND and HDR+, and a SIDD number to report; never a training source",
+   "expander": "hf_hub_files",
+   "params": {
+    "repo": "cdtrejo/sidd-medium-lmdb",
+    "pattern": "^raw/train/.*[.]PNG$"
+   },
+   "notes": "catalog:sidd. 655 files, 54.6 GB in the repo: the zip, its unpacked PNGs (640 files, 13.2 GB, what the pattern takes) and LMDB packs of them (27.8 GB, not taken). The raw-domain SIDD Medium (Bayer .MAT with metadata) is not mirrored here; MhdMohammadi/SIDD-CC holds a re-processed raw set (ground truth re-estimated, new split, 24.6 GB, SIDD terms) that is a different dataset. Bounded pull used: --max-bytes 1.4e10 --jobs 4."
+  },
+  {
    "id": "sidd-official",
    "name": "SIDD (+NLF)",
    "kind": "dataset",
@@ -1902,7 +1919,7 @@
    "size_bytes": 234500000000.0,
    "gives": "calibrated noise (NLF)",
    "harness_use": "SIDD medium/full with NLF per capture (MIT): primary noise-model calibration",
-   "notes": "catalog:sidd. The page's download links go to 130.63.97.225 (York EECS), which closes a plain HTTP connection from the harness user agent without a response, and the Google Drive links are gone from the page (checked 2026-10-27): stays manual. The DNG bursts come from hf-sidd-dng-mirror instead."
+   "notes": "catalog:sidd. The page's download links go to 130.63.97.225 (York EECS), which closes a plain HTTP connection from the harness user agent without a response, and the Google Drive links are gone from the page (checked 2026-10-27): stays manual. The DNG bursts come from hf-sidd-dng-mirror instead, the Medium sRGB set from hf-sidd-medium-srgb-mirror."
   },
   {
    "id": "hdr-plus-burst",
@@ -1920,12 +1937,14 @@
     "prefix": "20171106_subset/"
    },
    "clean": {
-    "exclude": [
-     "*lens_shading_map_*.tiff"
-    ]
+    "scale": 2,
+    "include": [
+     "results_*/*/merged.dng"
+    ],
+    "scene": "^(?:bursts|results_[0-9]+)/([^/]+)/"
    },
    "deriver": "capture_stats",
-   "notes": "catalog:hdr-plus-burst. Public bucket listed anonymously through the storage JSON API with size and MD5 per object, no gsutil (checked 2026-10-27: 4,056 objects in 5 pages, 3.7 s). Pulls used: --param pattern='bursts/0006_' for one burst; --param 'pattern=(payload|lens_shading_map)_N000[.](dng|tiff)$' --max-bytes 4e9 for the first frame and shading map of all 153 bursts (3.3 GB, feeds capture_stats)."
+   "notes": "catalog:hdr-plus-burst. Public bucket listed anonymously through the storage JSON API with size and MD5 per object, no gsutil (checked 2026-10-27: 4,056 objects in 5 pages, 3.7 s). Pulls used: --param pattern='bursts/0006_' for one burst; --param 'pattern=(payload|lens_shading_map)_N000[.](dng|tiff)$' --max-bytes 4e9 for the first frame and shading map of all 153 bursts (3.3 GB, feeds capture_stats); --param 'pattern=results_20161014/[^/]+/merged[.]dng$' and 'pattern=results_20171023/[^/]+/merged[.]dng$' for the merges (11.7 MB each). Clean source: the merges only (include, newest results preferred by realpairs.py), at scale 2, one scene per burst id across bursts/ and results_*/ so a burst's frames and merges split together; the burst frames are the inputs of the real pairs."
   },
   {
    "id": "rawnind",
@@ -1942,7 +1961,38 @@
     "server": "https://dataverse.uclouvain.be",
     "doi": "doi:10.14428/DVN/DEQCIM"
    },
-   "notes": "catalog:rawnind. Dataverse native API lists every file with size and MD5 (checked 2026-10-27). Bounded pulls: --param pattern='yaml$' for the two indexes; --param pattern='Bayer_2pilesofplates' --max-bytes 2e9 for one scene's sweep. Feeds a second camera family for noise_check once a per-ISO sweep is on disk."
+   "clean": {
+    "scale": 2,
+    "include": [
+     "*_GT_ISO*"
+    ],
+    "scene": "^(?:Bayer|X-Trans)_(?:TEST_)?(.+?)_(?:GT_)?ISO",
+    "holdout": [
+     "7D-2",
+     "CourtineDeVillersDebris",
+     "D60-1",
+     "Laura_Lemons_platformer",
+     "LucieB_board",
+     "LucieB_bw_drawing1",
+     "LucieB_bw_drawing2",
+     "LucieB_groceries",
+     "LucieB_painted_plants",
+     "LucieB_painted_wallpaper",
+     "MuseeL-Bobo",
+     "MuseeL-Bobo-C500D",
+     "MuseeL-Saint-Pierre-C500D",
+     "MuseeL-bluebirds-A7C",
+     "MuseeL-vases-A7C",
+     "Pen-pile",
+     "TitusToys",
+     "Vaxt-i-trad",
+     "boardgames_top",
+     "stefantiek",
+     "ursulines-building",
+     "ursulines-red"
+    ]
+   },
+   "notes": "catalog:rawnind. Clean source: the GT raws only (include), two per scene, at scale 2 (24 MP to 6 MP, the sensor's demosaic and residual noise below the pixel), a scene per name (the TEST_ prefix the reserve's files carry stripped), the 22 test-reserve scenes (dataset.yaml flags and test_reserve.yaml, 2026-10-28) held out of training as split \"test\"; the noisy raws are the inputs of the real pairs (harness/data/realpairs.py). Dataverse native API lists every file with size and MD5 (checked 2026-10-27). Bounded pulls: --param pattern='yaml$' for the two indexes; --param pattern='Bayer_2pilesofplates' --max-bytes 2e9 for one scene's sweep. Feeds a second camera family for noise_check once a per-ISO sweep is on disk."
   },
   {
    "id": "raw-pixls-us",

@@ -69,11 +69,15 @@ def cmd_eval_demo(args) -> int:
 
 
 def cmd_eval_raw(args) -> int:
-    """Real raws no run trains on, through the demo camera: the held-out real-capture evaluation (heldout.py)."""
+    """Real raws no run trains on, through the demo camera (heldout.py), or with --real the real capture/reference
+    pairs of a source (realpairs.py) with the measured noise law as the capture; one report directory per mode
+    and, for the real pairs, per source."""
     from .heldout import evaluate, to_markdown
-    out = Path(args.out) if args.out else Path(args.ckpt).resolve().parent / f"heldout_{'blind' if args.blind else 'known'}"
+    name = f"heldout_{f'real_{args.source}_' if args.real else ''}{'blind' if args.blind else 'known'}"
+    out = Path(args.out) if args.out else Path(args.ckpt).resolve().parent / name
     rep = evaluate(args.ckpt, blind=args.blind, source=args.source, n=args.n, tile=args.tile, seed=args.seed,
-                   ss=args.ss, device=args.device, out=out, save_tiles=args.save_tiles)
+                   ss=args.ss, device=args.device, out=out, save_tiles=args.save_tiles, real=args.real,
+                   scale=args.scale)
     out.mkdir(parents=True, exist_ok=True)
     (out / "heldout.json").write_text(json.dumps(rep, indent=1), encoding="utf-8")
     md = to_markdown(rep)
@@ -128,7 +132,11 @@ def add_parser(sub) -> None:
     r.add_argument("--ckpt", required=True)
     r.add_argument("--out", help="report directory (default: heldout_known or heldout_blind beside the checkpoint)")
     r.add_argument("--blind", action="store_true", help="withhold the capture descriptor")
-    r.add_argument("--source", default="raw-pixls-us", help="a clean source no run trains on")
+    r.add_argument("--source", default="raw-pixls-us",
+                   help="a clean source no run trains on (with --real: rawnind or hdr-plus-burst)")
+    r.add_argument("--real", action="store_true",
+                   help="real pairs instead of simulated captures: the source's captures against their references (data.realpairs)")
+    r.add_argument("--scale", type=int, help="with --real: the working scale (default: the manifest's clean scale)")
     r.add_argument("--n", type=int, default=64, help="tiles in the set (the set is a function of source, seed, n, tile)")
     r.add_argument("--tile", type=int, default=256)
     r.add_argument("--seed", type=int, default=0)

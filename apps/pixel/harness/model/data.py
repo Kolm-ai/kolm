@@ -14,6 +14,7 @@ redrawn (the plan's open tail: a 46 px blur on a 256 px tile is not a restoratio
 references from parquet sources are exported once to PNG so loader workers read files, not shards."""
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import math
 from collections import OrderedDict
@@ -23,7 +24,7 @@ import numpy as np
 
 from ..data import data_root
 from ..data.degrade import DegradeParams, Distributions, degrade, prepare_tile, sample_params, tile_shading
-from ..data.label import PARQUET_SOURCES, Item, list_items, load_items, scene_of
+from ..data.label import PARQUET_SOURCES, Item, clean_settings, list_items, load_items, scene_of
 from ..data.tilemetrics import tile_metrics
 from ..metrics import STILL_METRICS
 from ..io import save_png
@@ -163,8 +164,13 @@ def _h(*parts) -> int:
 
 
 def split_of(item: Item) -> str:
-    """Hashed on the scene, not the file: the 1k and 2k copies of one Poly Haven HDRI land on the same side."""
-    return "val" if _h("split", item.source, scene_of(item), item.row) % HOLDOUT_MOD == 0 else "train"
+    """Hashed on the scene, not the file: the 1k and 2k copies of one Poly Haven HDRI land on the same side. A
+    scene the source's manifest `clean.holdout` names is "test": never trained on, never validated on, kept for
+    the real-pair evaluation (RawNIND's test reserve)."""
+    scene = scene_of(item)
+    if any(fnmatch.fnmatchcase(scene, pat) for pat in clean_settings(item.source).get("holdout", [])):
+        return "test"
+    return "val" if _h("split", item.source, scene, item.row) % HOLDOUT_MOD == 0 else "train"
 
 
 def export_clean_refs(sources: list[str], root: Path | None = None, log=print) -> None:

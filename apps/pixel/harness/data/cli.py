@@ -170,6 +170,33 @@ def cmd_label(args) -> int:
     return 0
 
 
+def cmd_realpairs(args) -> int:
+    """Real capture/reference pairs (realpairs.py): build the cached set and its label rows per source, and with
+    --compare put the real rows' metric quantiles against the synthetic label rows'."""
+    from .realpairs import build_set, compare, compare_markdown, rows_path, set_path, summarise, tile_rows
+    rc = 0
+    for source in args.sources:
+        try:
+            rs = build_set(source, args.n, args.tile, args.scale, args.seed, splits=tuple(args.splits), log=print)
+        except (ValueError, FileNotFoundError) as ex:
+            print(f"{source}: {ex}")
+            rc = 1
+            continue
+        print(summarise(rs))
+        path = set_path(source, rs.seed, rs.n, rs.tile, rs.scale)
+        print(f"  set: {path}\n  rows: {rows_path(path)}")
+        if args.compare:
+            from .label import read_labels
+            labels = Path(args.labels) if args.labels else data_root() / "labels"
+            rep = compare(tile_rows(rs), read_labels(labels))
+            md = compare_markdown(rep, f"{source}, seed {rs.seed}, {rs.n} tiles of {rs.tile} px at scale {rs.scale}")
+            p = path.with_name(path.stem + "_compare.md")
+            p.write_text(md, encoding="utf-8")
+            print(md, end="")
+            print(f"  report: {p}")
+    return rc
+
+
 def add_parser(sub) -> None:
     d = sub.add_parser("data", help="source registry, collector and derivers")
     ds = d.add_subparsers(dest="dcmd", required=True)
@@ -216,3 +243,14 @@ def add_parser(sub) -> None:
     lb.add_argument("--retry-skipped", action="store_true",
                     help="label again the items the ledger records as skipped (unreadable or too small)")
     lb.set_defaults(func=cmd_label)
+
+    rp = ds.add_parser("realpairs", help="real capture/reference pairs: aligned, gain-matched tiles with label rows")
+    rp.add_argument("--sources", nargs="+", default=["rawnind", "hdr-plus-burst"], help="rawnind and/or hdr-plus-burst")
+    rp.add_argument("--n", type=int, default=64, help="tiles in the set (a function of source, seed, n, tile, scale)")
+    rp.add_argument("--tile", type=int, default=256)
+    rp.add_argument("--scale", type=int, help="working scale (default: the manifest's clean scale)")
+    rp.add_argument("--seed", type=int, default=0)
+    rp.add_argument("--splits", nargs="+", default=["val", "test"], help="scene splits the pairs come from")
+    rp.add_argument("--compare", action="store_true", help="real rows' metric quantiles against the synthetic label rows'")
+    rp.add_argument("--labels", help="synthetic label shard directory for --compare (default <data root>/labels)")
+    rp.set_defaults(func=cmd_realpairs)

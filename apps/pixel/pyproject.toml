@@ -11,7 +11,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # `python -m harness data collect|derive|label`: the collector and parquet label shards
-data = ["requests>=2.31", "pyarrow>=14"]
+data = ["requests>=2.31", "pyarrow>=14", "PyYAML>=6"]
 # measured distributions that need raw decoding / ray tracing (noise_check, lens_traces)
 measure = ["rawpy>=0.19", "optiland>=0.3"]
 # labeller decoders: camera raws through LibRaw and OpenEXR (plain or zipped); both ship cp312 wheels for

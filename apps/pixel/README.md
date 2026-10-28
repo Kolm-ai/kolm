@@ -197,12 +197,16 @@ The ninth run (`recovered_v9`) adds that term and stopped at step 6743 when the 
 
 `eval-raw` is the held-out real-capture evaluation (`harness/model/heldout.py`): 64 tiles of 256 px cut at clean scale 4 from `raw-pixls-us`, one CC0 raw per camera model (777 usable files) that no run trains on, rendered through the demo claim's `best_case_earth` camera with the sampler's exposure policy, restored known and blind, and scored with the twelve still metrics against the clean tile, input and model alike, with a per-tile verdict at each gate's tie margin. The set is a function of source, seed, count and tile size and is cached under `derived/heldout/`, so every checkpoint sees the same tiles; the report goes to `heldout_known/` or `heldout_blind/` beside the checkpoint. The references carry each camera's own noise and demosaic (scale 4 averages most of it away), which bounds the score. On it the eighth run sharpens (mtf50 0.254 to 0.365, texture 0.237 to 0.585, beating the capture on 47 of 64 tiles) but adds noise in the shadows (shadow SNR 14.8 to 12.9 dB, losing on 19 tiles), puts a halo on edges that had none (overshoot 0 to 0.029, losing on 45 tiles) and drops a dynamic-range step on 28 tiles; colour, banding, periodicity, landmark and shading tie: 3 beats, 5 ties, 4 losses on the medians. The ninth run's range term removes exactly those three: overshoot 0.0003 known and 0 blind, shadow SNR 14.6 known and 14.9 blind (ties), the dynamic-range step kept, at about half the sharpening gain (mtf50 0.307 known and 0.284 blind, texture 0.358 and 0.302): 3 beats, 8 ties, 1 loss (banding, 0.0095 to 0.013) known and 2, 8, 2 blind (banding and the colour maximum). Known and blind differ by less than the tie margins on every metric for both runs: on real captures the capture descriptor is carrying almost nothing.
 
+`eval-raw --real --source <id>` is the second real evaluation, on the real capture/reference pairs that `data realpairs` builds (`harness/data/realpairs.py`): a burst's reference frame (`reference_frame.txt`) against its HDR+ merge, and each RawNIND noisy raw, and the second GT, against the first GT of the scene, decoded at the clean scale (2), aligned by phase correlation with a quadrant check, the reference brought to the capture's exposure by a per-channel gain fitted below clip, and the noise law (electrons at clip, read noise) fitted per tile from the residual against the reference. That noise law is the capture descriptor the model sees known; `--blind` withholds it. Input and model are scored against the aligned reference with the same twelve metrics and tie margins, and the report goes to `heldout_real_<source>_known/` or `_blind/` beside the checkpoint. The set is a function of source, seed, count, tile and scale, cached under `derived/realpairs/<source>/` with its rows as a label parquet; `--compare` puts the real rows' metric quantiles against the synthetic label rows' with a coverage per metric. Seed 0 gives 64 tiles of 256 px per source: the 10 HDR+ bursts of the val split, and 64 RawNIND pairs of 80 in 9 val and test scenes (3 rejected, the skull scene's captures being 4 to 7 px apart). The HDR+ pairs measure noise, colour and range and not sharpness (mtf50 saturates at 0.5 for frame and merge alike, and texture fidelity above 1 is the frame's noise counted as high-frequency energy); the RawNIND sweeps measure sharpness too (mtf50 0.05 to 0.5 across the tiles). On HDR+ the eighth run raises shadow SNR from 14.0 to 21.4 dB (beating on 40 of 64 tiles) and nothing else, losing texture (1.22 to 0.90), colour (ΔE 0.68 to 1.20), edges (overshoot 0.006 to 0.037) and landmarks (0.06 to 0.16 px): 1 beat, 4 ties, 7 losses on the medians; the ninth is the same picture with cleaner shadows (21.8 dB, 46 beats): 1, 5, 6 known and 1, 6, 5 blind. On RawNIND both runs raise shadow SNR by 7 to 8 dB (13.4 to 21.6 and 20.9 dB, beating on 43 of 64 tiles) and lower banding (0.021 to 0.015 and 0.014) while halving mtf50 (0.39 to 0.19 and 0.17, losing on 45 and 47 tiles) and cutting texture fidelity to a fifth (0.67 to 0.11 and 0.15): 2 beats, 7 ties, 3 losses known for both, 2, 5, 5 and 2, 6, 4 blind. The run that sharpens the raw.pixls.us tiles rendered through the demo camera blurs real noisy raws: on real noise it is a denoiser that pays in resolution, texture, colour and edges, known and blind alike. Against the synthetic label rows the real pairs put the sampler's optics, colour, periodicity and shading draws an order of magnitude above any real pair (mtf50 median 0.09 synthetic against 0.5 and 0.39 real, ΔE 9.8 against 0.7, shading 0.10 against 0.009) and its noise and dynamic range on top of the real ones (coverage 98 to 100 %).
+
 ```bash
 python -m harness model train --out data/models/recovered_v9 --steps 9000 --minutes 75 --batch 16 --tile 256 --workers 12
 python -m harness model eval-demo --ckpt data/models/recovered_v9/best.pt --out demo_out_model
 python -m harness model eval-demo --ckpt data/models/recovered_v9/best.pt --out demo_out_model_blind --blind
 python -m harness model eval-raw --ckpt data/models/recovered_v9/best.pt            # held-out real raws, capture known
 python -m harness model eval-raw --ckpt data/models/recovered_v9/best.pt --blind    # the same tiles, capture withheld
+python -m harness data realpairs --sources hdr-plus-burst rawnind --n 64 --compare   # real capture/reference sets (cached under derived/realpairs/), real-against-synthetic metric quantiles
+python -m harness model eval-raw --ckpt data/models/recovered_v9/best.pt --real --source hdr-plus-burst   # the real pairs, the measured noise law as the capture; --blind withholds it
 python -m harness model apply --ckpt data/models/recovered_v9/best.pt --input frames.npy --out restored --white-level 1.0 --capture capture.json
 ```
 
@@ -215,7 +219,9 @@ judges the result through the gates like any candidate, so the report says on wh
 best-case camera and whether it stays under the provenance limit. `train` resumes from `last.pt`, logs to
 `train_log.jsonl` (loss, images per second, per-metric medians of input and output against the clean target on
 the held-out restore set every checkpoint), and keeps `best.pt` by validation loss. Held-out items are a hash
-split of the clean sources by scene (one in sixteen), and `eval-raw` scores real raws no run trains on.
+split of the clean sources by scene (one in sixteen) plus the scenes a source's `clean.holdout` names (RawNIND's
+22 test-reserve scenes), which are split `test` and never trained or validated on; `eval-raw` scores real raws
+no run trains on.
 
 ## Data: no invented constants
 
@@ -313,7 +319,10 @@ references, the Poly Haven HDRIs and the Wikimedia featured pictures: 4,027 expe
 (38 GB; the API walk listed 5,000 and skipped 672 for licence, type or size), the licence read per file and kept
 as the first path component. Each source's `clean` block in `sources.json` says how the labeller and the sampler
 read it: `scale` (the featured pictures at 2, and at `low_quality_scale` 4 when the JPEG quality is low;
-raw.pixls.us at 4) and `exclude` (the `*.tif` scan containers of raw.pixls.us, the HDR+ lens-shading maps).
+raw.pixls.us at 4), `exclude` (the `*.tif` scan containers of raw.pixls.us), `include` (only RawNIND's GT raws
+and the HDR+ merges are clean items; the noisy raws and the burst frames are the inputs of the real pairs), `scene`
+(a regex whose first group is the scene key, so a RawNIND scene's GT and ISO sweep, and a burst's frames and
+merges, split together) and `holdout` (scene keys split `test`).
 raw.pixls.us (777 raws, 25 GB, one per camera model) is held out for `eval-raw` and never trained on; the
 held-out split of the training sources is by scene, so a Poly Haven HDRI's resolutions and a burst's frames fall
 on one side of the hash.
@@ -347,6 +356,6 @@ harness/data/           manifest, parallel resumable collector, expanders (HF, Z
 harness/data/reference/ sourced CSVs: sensors, lenses, displays, vision thresholds
 harness/data/catalog/   122 human-rated image/video datasets and what each can calibrate
 harness/model/          the recovered layer: on-the-fly pairs from the sampler, conditioned UNet, trainer, inference, held-out raw evaluation
-$HARNESS_DATA_ROOT/     raw/<source>/..., ledger.jsonl, derived/*.json, derived/heldout/, labels/, models/<run>/ (outside the repo)
+$HARNESS_DATA_ROOT/     raw/<source>/..., ledger.jsonl, derived/*.json, derived/heldout/, derived/realpairs/<source>/, labels/, models/<run>/ (outside the repo)
 tests/                  physics sanity, metric sensitivity, pipeline
 ```

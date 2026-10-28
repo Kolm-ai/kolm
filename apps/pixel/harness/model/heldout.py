@@ -17,7 +17,11 @@ than the tile, is skipped and recorded.
 
 What the numbers mean: the input column is the simulated capture and the model column its restoration, both
 against the same reference, so a reference that carries its own high-ISO noise penalises both alike
-(raw-pixls-us is a format corpus, not a low-ISO one). The per-tile tallies use the gates' verdict() margins."""
+(raw-pixls-us is a format corpus, not a low-ISO one). The per-tile tallies use the gates' verdict() margins.
+
+With real=True the set is data.realpairs' instead: real captures (a RawNIND noisy raw, an HDR+ burst frame)
+against a real reference (the low-ISO GT, the burst merge) aligned and gain-matched, no camera simulation, and
+the capture descriptor is the measured noise law. Same scorer, same report; the cache is derived/realpairs/."""
 from __future__ import annotations
 
 import json
@@ -185,24 +189,35 @@ def score(samples: list[dict], restore) -> dict:
 
 def evaluate(ckpt, blind: bool = False, source: str = HELDOUT_SOURCE, n: int = 64, tile: int = 256, seed: int = 0,
              preset: str = DEMO_PRESET, ss: int = 1, root: Path | None = None, device: str | None = None,
-             out: Path | None = None, save_tiles: int = 0, log=print) -> dict:
+             out: Path | None = None, save_tiles: int = 0, log=print, real: bool = False,
+             scale: int | None = None) -> dict:
     """A checkpoint on the held-out set, the report as a JSON-ready dict. With `out` and `save_tiles` the first
-    tiles are written there as input / model / target PNG stacks (io.save_frames) for looking at."""
+    tiles are written there as input / model / target PNG stacks (io.save_frames) for looking at. With `real`
+    the set is the real pairs of `source` (data.realpairs.build_set, at `scale` or the manifest's clean scale)
+    and the capture descriptor the measured noise law."""
     from .apply import load_model, restore_frames
     b = load_model(ckpt, device)
-    hs = build_set(source, n, tile, seed, root, log)
-    samples = render_set(hs, preset, ss)
+    if real:
+        from ..data.realpairs import build_set as build_real
+        rs = build_real(source, n, tile, scale, seed, root=root, log=log)
+        samples = [{"x": rs.tiles[k].astype(np.float64), "y": rs.targets[k].astype(np.float64),
+                    "capture": rs.captures[k]} for k in range(rs.n)]
+        set_scale, records, skipped, preset = rs.scale, rs.records, rs.rejected, "real"
+    else:
+        hs = build_set(source, n, tile, seed, root, log)
+        samples = render_set(hs, preset, ss)
+        set_scale, records, skipped = hs.scale, hs.records, hs.skipped
     t0 = time.perf_counter()
 
     def restore(s):
-        cap = None if blind else capture_of_params(s["a"])
+        cap = None if blind else (s["capture"] if real else capture_of_params(s["a"]))
         return restore_frames(b, s["x"][None], white_level=1.0, capture=cap)[0]
 
     rep = score(samples, restore)
     outputs = rep.pop("outputs")
-    rep.update(ckpt=str(ckpt), step=b.step, blind=blind, source=source, seed=seed, n=n, tile=tile, scale=hs.scale,
-               preset=preset, ss=ss, seconds=round(time.perf_counter() - t0, 1),
-               records=[asdict(r) for r in hs.records], skipped=hs.skipped)
+    rep.update(ckpt=str(ckpt), step=b.step, blind=blind, source=source, seed=seed, n=n, tile=tile, scale=set_scale,
+               preset=preset, ss=ss, real=real, seconds=round(time.perf_counter() - t0, 1),
+               records=[asdict(r) for r in records], skipped=skipped)
     if out is not None and save_tiles > 0:
         from ..io import save_frames
         k = min(save_tiles, len(samples))
@@ -221,20 +236,26 @@ def to_markdown(rep: dict) -> str:
     ms = rep["metrics"]
     won = sum(s["median_verdict"] == "beats" for s in ms.values())
     lost = sum(s["median_verdict"] == "loses" for s in ms.values())
-    lines = [f"# Held-out raw evaluation: {rep['source']} at clean scale {rep['scale']}, {rep['n']} tiles of "
+    real = rep.get("real", False)
+    kind = "Real-pair evaluation" if real else "Held-out raw evaluation"
+    capture = ("the measured noise law" if real else f"camera preset `{rep['preset']}`, ss {rep['ss']}")
+    lines = [f"# {kind}: {rep['source']} at clean scale {rep['scale']}, {rep['n']} tiles of "
              f"{rep['tile']} px, seed {rep['seed']}", "",
              f"Checkpoint `{rep['ckpt']}` (step {rep['step']}), capture descriptor "
-             f"{'withheld' if rep['blind'] else 'known'}, camera preset `{rep['preset']}`, ss {rep['ss']}, "
+             f"{'withheld' if rep['blind'] else 'known'} ({capture}), "
              f"{rep['seconds']} s of inference and scoring.", "",
              "| metric | input (median) | model (median) | verdict | beats | ties | loses |",
              "|---|---:|---:|---|---:|---:|---:|"]
     for m, s in ms.items():
         lines.append(f"| {m} | {_fmt(s['input'])} | {_fmt(s['output'])} | {s['median_verdict'] or '-'} | "
                      f"{s['beats']} | {s['ties']} | {s['loses']} |")
-    lines += ["", f"On the medians the model beats the simulated capture on {won} of {len(ms)} metrics, "
-                  f"ties {len(ms) - won - lost}, loses {lost}. Input and model are both scored against the clean tile "
-                  f"in the capture's rendering intent; the per-tile tallies use the gates' tie margins."]
+    what = "real capture" if real else "simulated capture"
+    against = ("the reference aligned and brought to the capture's exposure" if real
+               else "the clean tile in the capture's rendering intent")
+    lines += ["", f"On the medians the model beats the {what} on {won} of {len(ms)} metrics, "
+                  f"ties {len(ms) - won - lost}, loses {lost}. Input and model are both scored against {against}; "
+                  f"the per-tile tallies use the gates' tie margins."]
     if rep["skipped"]:
-        lines += ["", f"{len(rep['skipped'])} file(s) skipped while building the set:"]
+        lines += ["", f"{len(rep['skipped'])} {'pair(s) rejected' if real else 'file(s) skipped'} while building the set:"]
         lines += [f"- `{f}`: {why}" for f, why in rep["skipped"].items()]
     return "\n".join(lines) + "\n"

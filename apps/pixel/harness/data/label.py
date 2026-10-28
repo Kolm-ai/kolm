@@ -127,9 +127,16 @@ def _seed(*parts) -> int:
 
 
 def scene_of(item: Item) -> str:
-    """The scene an item depicts, the key of the train/validation split: its path with resolution directories
+    """The scene an item depicts, the key of the train/validation split. A source whose manifest `clean.scene`
+    gives a regex takes its first group where it matches the path (RawNIND's scene name shared by the GT and the
+    ISO sweep, an HDR+ burst id shared by bursts/ and results_*/). Otherwise the path with resolution directories
     (`1k/`, `2k/`) and resolution stem suffixes (`_4k`) removed, so every resolution tier of one Poly Haven HDRI is
-    one scene. Any other path is its own scene."""
+    one scene, and any other path is its own scene."""
+    pat = clean_settings(item.source).get("scene")
+    if pat:
+        m = re.search(pat, item.file)
+        if m and m.groups():
+            return m.group(1)
     parts = item.file.split("/")
     stem, ext = os.path.splitext(parts[-1])
     kept = [d for d in parts[:-1] if not _RES_DIR.match(d)]
@@ -146,7 +153,9 @@ def clean_settings(source: str) -> dict:
     box-downsampling factor applied in linear light after decoding; `low_quality_scale`, the factor for a JPEG
     whose quantisation tables put it below LOW_QUALITY_JPEG; `exclude`, fnmatch patterns (case-insensitive, on
     the posix path relative to the source, "<zip>::<member>" for an archive member) of files that are not
-    pictures."""
+    pictures; `include`, patterns of the only files that are (RawNIND's GT raws, the HDR+ merges); `scene`, a
+    regex whose first group is the scene key (scene_of); `holdout`, patterns of scene keys the sampler never
+    trains or validates on (model.data.split_of gives them "test")."""
     return _manifest_clean().get(source, {})
 
 
@@ -194,10 +203,15 @@ def list_items(source: str, root: Path | None = None) -> list[Item]:
                     g += 1
         rel = "|".join(f.relative_to(base).as_posix() for f in files)
         return [Item(source, rel, r, column) for r in rows]
-    excluded = [pat.lower() for pat in clean_settings(source).get("exclude", [])]
+    settings = clean_settings(source)
+    excluded = [pat.lower() for pat in settings.get("exclude", [])]
+    included = [pat.lower() for pat in settings.get("include", [])]
 
     def keep(file: str) -> bool:
-        return not any(fnmatch.fnmatchcase(file.lower(), pat) for pat in excluded)
+        f = file.lower()
+        if included and not any(fnmatch.fnmatchcase(f, pat) for pat in included):
+            return False
+        return not any(fnmatch.fnmatchcase(f, pat) for pat in excluded)
 
     items = []
     for f in sorted(base.rglob("*")):
