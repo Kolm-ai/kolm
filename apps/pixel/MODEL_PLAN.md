@@ -906,7 +906,7 @@ v18 is three runs of one recipe that differ only in the seed, 24 hours each on t
 - **Recipe: v17's or v15's, picked when v17 is scored (about 06:40 on 10-30).**
   - v17's if it passes the tone gate wherever v15 does and keeps every gate v15 passes.
   - Otherwise v15's: v17's flags without `--resample smooth`, `--overshoot-weight` and `--pyramid-weight`.
-  - The pick is written to `.tmp/v18_recipe`; the queue waits for it.
+  - `.tmp/v18_pick_recipe.sh` makes the pick unattended once v17 is scored (`v18_gate_check.py v15 v17`) and writes it to `.tmp/v18_recipe`; the queue waits for it.
   - The shape stays at about 120M (base 64, mults 1,2,4,8, blocks 2,3,6,8, 12 mid blocks). This run asks what more steps on real data buy, not what size does.
 - **Data: the real stores as they stand at launch, plus v17's clean sources and weights.**
 
@@ -917,7 +917,7 @@ v18 is three runs of one recipe that differ only in the seed, 24 hours each on t
   | SI-HDR | 164 scenes | 435 pairs |
 
   - **UHD-IQA joins** (`hf-uhd-iqa`, CC0) at weight 1: 845 decoded, 593 kept by the target audit (`max_halo` 0.044; 555 train, 38 val). It adds to the synthetic validation draw, so v18's validation losses do not read against v17's. And v18 against v17 measures the budget and UHD-IQA together. The release is judged on the gates and against the baselines, not against v17.
-  - **The Commons quality images stay out.** Their audit is nearly done (7,700 of 8,557 read, none rejected), but D: is below the decoded store's 300 GB floor, so they cannot be decoded before the launch. They join a later run once the store has room.
+  - **The Commons quality images stay out.** Their audit finished on 10-30 (12,208 images read, 5,353 under the 0.044 halo cut), but D: is below the decoded store's 300 GB floor, so they cannot be decoded before the launch. They join a later run once the store has room.
   - **Not in v18, still open:** a halo cut for SI-HDR (its references read p75 0.072 and p90 0.25 on the audit, against the 0.044 cut; about 4 % of real draws), and RawNIND's quadrant alignment re-estimated on a denoised copy.
   - **Never in training:** raw.pixls.us (held-out), RawNIND's test_reserve and holdout scenes, the real-pair val and test scenes, SIDD, and generated images.
 - **Budget: 24 hours a seed (`--minutes 1440 --steps 300000`).**
