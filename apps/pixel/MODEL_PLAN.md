@@ -612,6 +612,9 @@ The differentiator is the verified provenance, not raw PSNR.
   - The rest compact after v15's audit, beside its fill, and again once v15 has trained, since its sampler holds files open. Halving the float32 part would return up to about 380 GB (est).
 - `data decoded --prune` removes the arrays no current item keys: the old names a key change leaves behind, and items dropped from a listing.
 - The store's floor (`HARNESS_DECODED_RESERVE_GB`, default 300; v15's fill runs at 250) means it stops writing before the real store's 150 GB floor or the collector's.
+- On 10-30 the Commons quality images' folder in the store (`derived/decoded/wikimedia-quality-images`) became a directory junction to `C:/lens-harness-decoded/wikimedia-quality-images`: D: is below the floor and C: has about 820 GB free.
+  - The store's paths and keys are unchanged, and its floor is read on C: (`shutil.disk_usage` follows the junction).
+  - Moving the 2,045 arrays already there off D: (26 GB in 3.7 minutes) stalled v17's sampler for about 4 minutes. A bulk read of D: waits for a gap between runs, or is throttled.
 - Video and synthetic sets (items 8–11, about 1 TB) need a second drive.
 
 ## 14. Risks
@@ -917,7 +920,7 @@ v18 is three runs of one recipe that differ only in the seed, 24 hours each on t
   | SI-HDR | 164 scenes | 435 pairs |
 
   - **UHD-IQA joins** (`hf-uhd-iqa`, CC0) at weight 1: 845 decoded, 593 kept by the target audit (`max_halo` 0.044; 555 train, 38 val). It adds to the synthetic validation draw, so v18's validation losses do not read against v17's. And v18 against v17 measures the budget and UHD-IQA together. The release is judged on the gates and against the baselines, not against v17.
-  - **The Commons quality images stay out.** Their audit finished on 10-30 (12,208 images read, 5,353 under the 0.044 halo cut), but D: is below the decoded store's 300 GB floor, so they cannot be decoded before the launch. They join a later run once the store has room.
+  - **The Commons quality images join after v18, not in it.** Their audit finished on 10-30: 12,208 images read, 5,359 kept (5,353 under the 0.044 halo cut and 6 it could not read; 5,035 train and 324 val). D: is below the decoded store's 300 GB floor, so their arrays go to C: through a junction (the disk note in section 13). 772 were already decoded. The other 4,587 (about 80 GB) decode at low priority from 04:24 on 10-30, beside v17, whose sampler goes from 66–67 to 64–65 images a second. v18's three seeds keep one source list, so they stay comparable; the Commons images join the run after them.
   - **Not in v18, still open:** a halo cut for SI-HDR (its references read p75 0.072 and p90 0.25 on the audit, against the 0.044 cut; about 4 % of real draws), and RawNIND's quadrant alignment re-estimated on a denoised copy.
   - **Never in training:** raw.pixls.us (held-out), RawNIND's test_reserve and holdout scenes, the real-pair val and test scenes, SIDD, and generated images.
 - **Budget: 24 hours a seed (`--minutes 1440 --steps 300000`).**
