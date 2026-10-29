@@ -8,6 +8,7 @@ import json
 import shutil
 
 import numpy as np
+import pytest
 import torch
 
 import harness.model.data as D
@@ -63,3 +64,32 @@ def test_burst_run_and_eval_from_a_single_checkpoint(tmp_path, monkeypatch):
         assert (tmp_path / "ev" / f"burst_{tag}.json").exists()
     md = BT.summary_table(rep)
     assert "| metric | input | frames | none | single | truth |" in md
+
+
+@needs_data
+def test_burst_run_moves_no_module(tmp_path, monkeypatch):
+    # The step-0 reference is the burst model's own body (BurstNet(single) keeps it as model.single): moving it to
+    # the CPU after its validation left the body there and the first step failed on two devices (10-30, the burst
+    # run on v17). A run moves its modules once, to the device, before the reference is scored.
+    from harness.model import bursttrain as BT
+    init = _setup(tmp_path, monkeypatch)
+    moved = []
+    real_cpu = torch.nn.Module.cpu
+
+    def cpu(self):
+        moved.append(type(self).__name__)
+        return real_cpu(self)
+    monkeypatch.setattr(torch.nn.Module, "cpu", cpu)
+    BT.burst_train(str(tmp_path / "burst"), str(init), steps=1, batch=2, tile=32, frames=2, workers=0,
+                   p_real_burst=0.0, p_single=0.5, val_n=2, ckpt_every=1, device="cpu", log=lambda *a: None)
+    assert moved == []
+
+
+@needs_data
+@pytest.mark.skipif(torch.cuda.device_count() == 0, reason="needs a GPU")
+def test_burst_run_steps_on_the_gpu(tmp_path, monkeypatch):
+    from harness.model import bursttrain as BT
+    init = _setup(tmp_path, monkeypatch)
+    v = BT.burst_train(str(tmp_path / "burst"), str(init), steps=2, batch=2, tile=32, frames=2, workers=0,
+                       p_real_burst=0.0, p_single=0.5, val_n=2, ckpt_every=1, device="cuda", log=lambda *a: None)
+    assert np.isfinite(v["val_frames"]["val_loss"])

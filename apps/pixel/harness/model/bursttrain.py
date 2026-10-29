@@ -187,15 +187,12 @@ def burst_train(out: str, init: str, steps: int = 40000, batch: int = 16, tile: 
         val_real = None
         log(f"no real burst validation set: {ex}")
     logf = open(out / "train_log.jsonl", "a", encoding="utf-8")
-    ref = single.to(dev).eval()
-    if not ck:
+    if not ck:   # the starting checkpoint alone: model.single, the burst model's own body, scored where it is
         for name, vs, sh in (("val_single", val, False), ("val_real_single", val_real, shift)):
             if vs:
-                v = validate(ref, vs, norm, dev, shift=sh, **loss_kw)
+                v = validate(single, vs, norm, dev, shift=sh, **loss_kw)
                 logf.write(json.dumps({"step": 0, name: v}) + "\n"); logf.flush()
                 log(f"  {name}: loss {v['val_loss']:.4f}; {_line(v)}")
-    ref.cpu()
-    del ref
 
     def val_all(at: int) -> dict:
         rec = {"step": at}
