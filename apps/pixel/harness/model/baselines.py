@@ -96,7 +96,7 @@ def load_net(name: str, device: str | None = None, root: Path | None = None):
     b = BASELINES[name]
     p = weights_path(b, root)
     if not p.exists():
-        raise FileNotFoundError(f"{p}: fetch it first (python -m harness data collect --source {b.source})")
+        raise FileNotFoundError(f"{p}: fetch it first (python -m harness data collect --ids {b.source})")
     mod, cls = b.arch.split(":")
     net = getattr(importlib.import_module(f".baseline_archs.{mod}", __package__), cls)(**b.kwargs)
     sd = torch.load(p, map_location="cpu", weights_only=True)

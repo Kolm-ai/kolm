@@ -51,7 +51,7 @@ def test_every_baseline_is_a_ledgered_evaluation_only_source():
 
 
 def test_load_net_names_the_collect_command_when_the_weights_are_missing(tmp_path):
-    with pytest.raises(FileNotFoundError, match="data collect --source baseline-scunet-real"):
+    with pytest.raises(FileNotFoundError, match="data collect --ids baseline-scunet-real"):
         bl.load_net("scunet", device="cpu", root=tmp_path)
 
 

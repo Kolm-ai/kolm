@@ -21,6 +21,8 @@ decode = ["rawpy>=0.19", "OpenEXR>=3.2"]
 model = ["torch>=2.3"]
 # video candidates and the h264 delivery check
 video = ["imageio>=2.31", "imageio-ffmpeg>=0.4"]
+# `python -m harness model baseline`: the vendored Restormer and SCUNet reshape with einops; SIDD validation is LMDB
+baselines = ["torch>=2.3", "einops>=0.6", "lmdb>=1.4"]
 dev = ["pytest>=7"]
 
 [build-system]
@@ -31,7 +33,7 @@ build-backend = "setuptools.build_meta"
 include = ["harness*"]
 
 [tool.setuptools.package-data]
-harness = ["data/sources.json", "data/catalog/*.json", "data/reference/*.csv"]
+harness = ["data/sources.json", "data/catalog/*.json", "data/reference/*.csv", "model/baseline_archs/LICENSE-*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -40,3 +42,5 @@ addopts = "-p no:cacheprovider"
 [tool.ruff]
 line-length = 110
 target-version = "py310"
+# vendored upstream code keeps its own style (headers in each file say what was changed)
+extend-exclude = ["harness/model/baseline_archs"]

@@ -1950,10 +1950,11 @@
     {
      "url": "https://github.com/swz30/Restormer/releases/download/v1.0/real_denoising.pth",
      "path": "real_denoising.pth",
+     "sha256": "4cae18bed8a291b9a5deeeab48756bbe6f61fcf7f31a4cca0969b24608601387",
      "size": 104611957
     }
    ],
-   "notes": "Release v1.0 asset; no published hash, so the sha256 is recorded from the first fetch. The architecture is vendored as harness/model/baseline_archs/restormer.py."
+   "notes": "Release v1.0 asset; no published hash, so the sha256 is the one recorded from the first fetch (10-30). The architecture is vendored as harness/model/baseline_archs/restormer.py."
   },
   {
    "id": "baseline-scunet-real",
@@ -1969,10 +1970,11 @@
     {
      "url": "https://github.com/cszn/KAIR/releases/download/v1.0/scunet_color_real_psnr.pth",
      "path": "scunet_color_real_psnr.pth",
+     "sha256": "fa78899ba2caec9d235a900e91d96c689da71c42029230c2028b00f09f809c2e",
      "size": 71982841
     }
    ],
-   "notes": "KAIR release v1.0 asset; no published hash, so the sha256 is recorded from the first fetch. The architecture is vendored as harness/model/baseline_archs/scunet.py, with timm's trunc_normal_ and DropPath replaced by torch's and a few lines."
+   "notes": "KAIR release v1.0 asset; no published hash, so the sha256 is the one recorded from the first fetch (10-30). The architecture is vendored as harness/model/baseline_archs/scunet.py, with timm's trunc_normal_ and DropPath replaced by torch's and a few lines."
   },
   {
    "id": "sidd-official",

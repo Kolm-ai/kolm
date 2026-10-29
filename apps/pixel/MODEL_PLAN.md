@@ -514,6 +514,8 @@ Every baseline runs through the same gates; licences were read today.
 
 Commercial tools are run by the user under their EULA, or the claim says they were not tested.
 
+**Wired so far (10-29):** NAFNet-SIDD-width64, Restormer's real denoiser and SCUNet's real-noise PSNR model, through `python -m harness model baseline heldout|sidd` (baselines.py). Their weights come through the collector (sources.json `baseline-*`, hash-checked). Their architectures are vendored in `harness/model/baseline_archs/` from megvii-research/NAFNet 2b4af71e, swz30/Restormer 68dc6ac4 and cszn/SCUNet 52e440a8. Each file says what was changed and carries its licence text. The changes are imports, a print and demo code, plus NAFNet's LayerNorm2d and timm's DropPath re-expressed with the same forward. A CPU check on 16 evenly spaced SIDD validation blocks (10-30) gives 40.58 dB for NAFNet and 40.49 dB for Restormer, near their reported 40.30 and 40.02 on all 1,280. SCUNet's real model, which was not trained on SIDD, gives 35.25 dB. The input is 23.76 dB. They are scored blind on the held-out sets and on SIDD validation, and our releases are scored on SIDD too, in the gap after the burst run on v17 and before v18 (section 19).
+
 **Public evaluation-only sets:**
 
 - SIDD validation (1,280 blocks; current sRGB best about 40.5 dB);
