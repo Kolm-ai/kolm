@@ -555,3 +555,45 @@ def test_the_cosine_anneals_over_whichever_budget_runs_out_first():
     assert mid == pytest.approx(lr * (0.05 + 0.95 * 0.5))
     assert lr_at(WARMUP + 100, steps, lr, spent=1.0) == pytest.approx(0.05 * lr)  # a run its --minutes stop ends annealed
     assert lr_at(steps - 10, steps, lr, spent=0.1) < lr_at(steps // 2, steps, lr, spent=0.1)   # the steps ahead
+
+
+def test_the_trainer_holds_its_allocator_to_the_card(monkeypatch):
+    # Past the card, the Windows driver spills into shared system memory instead of raising (the burst run on v17,
+    # 10-30, ran at 1 img/s). The trainers cap the allocator at what is free at start, their own share counted back
+    # in, less a margin, so a run that does not fit fails at once and its retry comes next.
+    import harness.model.train as T
+    gb = 2**30
+    set_to = []
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda dev=None: (20 * gb, 32 * gb))
+    monkeypatch.setattr(torch.cuda, "memory_reserved", lambda dev=None: 2 * gb)
+    monkeypatch.setattr(torch.cuda, "set_per_process_memory_fraction", lambda f, dev=None: set_to.append(f))
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 0)
+    monkeypatch.setattr(T, "card_used_bytes", lambda idx: None)
+    frac = T.hold_to_card(torch.device("cuda"), log=lambda *a: None)
+    assert frac == pytest.approx((20 + 2 - T.SPILL_MARGIN_GB) / 32) and set_to == [frac]
+    # under WDDM mem_get_info sees this process alone; the card's own count (nvidia-smi) wins where it is lower
+    monkeypatch.setattr(T, "card_used_bytes", lambda idx: 15 * gb)
+    frac = T.hold_to_card(torch.device("cuda"), log=lambda *a: None)
+    assert frac == pytest.approx((32 - 15 + 2 - T.SPILL_MARGIN_GB) / 32) and set_to[-1] == frac
+    assert T.hold_to_card(torch.device("cpu"), log=lambda *a: None) is None and len(set_to) == 2
+
+
+@pytest.mark.skipif(torch.cuda.device_count() == 0, reason="needs a GPU")
+def test_the_card_count_reads_on_a_gpu():
+    import harness.model.train as T
+    idx = torch.cuda.current_device()
+    used = T.card_used_bytes(idx)
+    assert used is not None and 0 < used < torch.cuda.mem_get_info(idx)[1]
+
+
+@pytest.mark.skipif(torch.cuda.device_count() == 0, reason="needs a GPU")
+def test_an_allocation_past_the_cap_raises_instead_of_spilling():
+    # what hold_to_card relies on, at a 0.5 GB cap so a failure here costs 1 GB beside a running job
+    dev = torch.cuda.current_device()
+    total = torch.cuda.mem_get_info(dev)[1]
+    torch.cuda.set_per_process_memory_fraction(0.5 * 2**30 / total, dev)
+    try:
+        with pytest.raises(torch.OutOfMemoryError):
+            torch.empty(2**30, dtype=torch.uint8, device=dev)
+    finally:
+        torch.cuda.set_per_process_memory_fraction(1.0, dev)

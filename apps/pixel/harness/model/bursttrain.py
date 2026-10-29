@@ -38,7 +38,7 @@ from .burst import BurstNet, BurstStream, encode_t, load_burst, load_single, syn
 from .data import Normaliser, _h, cond_vector, decode, encode
 from .losses import best_shift
 from .net import CondUNet
-from .train import EMA_DECAY, LR_FLOOR, StreamDataset, lr_at, pair_loss, save
+from .train import EMA_DECAY, LR_FLOOR, StreamDataset, hold_to_card, lr_at, pair_loss, save
 
 LOSS_KEYS = ("range_weight", "range_k", "flat_weight", "flat_k", "texture_weight", "ssim_weight", "transfer_weight",
              "overshoot_weight", "pyramid_weight")
@@ -133,6 +133,7 @@ def burst_train(out: str, init: str, steps: int = 40000, batch: int = 16, tile: 
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     dev = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    hold_to_card(dev, log)
     single, ck0 = load_single(init)
     targs = dict(ck0.get("train") or {})
     norm = Normaliser.from_state(ck0["normaliser"])

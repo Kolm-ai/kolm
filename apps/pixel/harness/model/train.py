@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import json
 import math
+import subprocess
 import time
 from pathlib import Path
 
@@ -71,6 +72,46 @@ WARMUP = 500
 LR_FLOOR = 0.05      # the cosine's end as a share of the peak rate
 EMA_DECAY = 0.999
 CLIP_LOG = float(encode(np.array([0.995]))[0])
+
+
+SPILL_MARGIN_GB = 1.0   # left under the card's free memory, for what the allocator does not hold
+
+
+def card_used_bytes(idx: int) -> int | None:
+    """Memory every process holds on CUDA device `idx`, from nvidia-smi matched by the device's UUID; None without
+    nvidia-smi or a match. Under Windows' WDDM, torch.cuda.mem_get_info counts only this process's share."""
+    try:
+        uid = str(torch.cuda.get_device_properties(idx).uuid)
+        out = subprocess.run(["nvidia-smi", "--query-gpu=uuid,memory.used", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=20).stdout
+    except (OSError, subprocess.SubprocessError, RuntimeError, AttributeError):
+        return None
+    for line in out.splitlines():
+        u, _, mib = line.partition(",")
+        if u.strip().removeprefix("GPU-") == uid and mib.strip().isdigit():
+            return int(mib.strip()) * 2**20
+    return None
+
+
+def hold_to_card(dev: torch.device, log=print) -> float | None:
+    """Caps this process's CUDA allocator at the card's memory free at start (every process's use, from
+    card_used_bytes where it reads; what this one already holds counted back in), less SPILL_MARGIN_GB, and returns the fraction set (None off CUDA). Past the card, the Windows driver spills
+    an allocation into shared system memory instead of failing: the burst run on v17 (10-30) held 28.5 GB on the
+    card and 9 GB in system RAM, at 1 img/s against 11 with gradient checkpointing. Under the cap a run that does
+    not fit raises torch.OutOfMemoryError at once, so its retry comes next, not hours at a crawl."""
+    if dev.type != "cuda":
+        return None
+    idx = torch.cuda.current_device() if dev.index is None else dev.index
+    free, total = torch.cuda.mem_get_info(idx)
+    used = card_used_bytes(idx)
+    if used is not None:
+        free = min(free, total - used)
+    room = free + torch.cuda.memory_reserved(idx) - SPILL_MARGIN_GB * 2**30
+    frac = min(1.0, max(0.05, room / total))
+    torch.cuda.set_per_process_memory_fraction(frac, idx)
+    log(f"GPU memory held to {frac * total / 2**30:.1f} of {total / 2**30:.1f} GB "
+        f"({free / 2**30:.1f} GB free at start)")
+    return frac
 
 
 class StreamDataset(IterableDataset):
@@ -243,6 +284,7 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     dev = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    hold_to_card(dev, log)
     real, weights = tuple(real), dict(weights or {})
     range_weight = RANGE_WEIGHT if range_weight is None else float(range_weight)
     range_k = RANGE_K if range_k is None else int(range_k)
