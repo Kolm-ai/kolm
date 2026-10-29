@@ -39,7 +39,8 @@ def cmd_train(args) -> int:
     sources = args.sources.split(",") if args.sources else DEFAULT_SOURCES
     real = tuple(s for s in args.real.split(",") if s) if args.real else ()
     train(args.out, sources, steps=args.steps, batch=args.batch, tile=args.tile, workers=args.workers, lr=args.lr,
-          minutes=args.minutes, seed=args.seed, base=args.base, val_n=args.val_n, ckpt_every=args.ckpt_every,
+          minutes=args.minutes, seed=args.seed, val_seed=args.val_seed, base=args.base, val_n=args.val_n,
+          ckpt_every=args.ckpt_every,
           device=args.device, real=real, p_real=args.p_real, weights=parse_weights(args.weights),
           range_weight=args.range_weight, range_k=args.range_k, flat_weight=args.flat_weight, flat_k=args.flat_k,
           texture_weight=args.texture_weight, p_dead_leaves=args.p_dead_leaves,
@@ -171,7 +172,9 @@ def add_parser(sub) -> None:
     t.add_argument("--minutes", type=float, help="wall-clock budget, summed across resumes; the run stops and "
                    "checkpoints at the budget, and the cosine anneals over whichever of --steps and --minutes "
                    "runs out first")
-    t.add_argument("--seed", type=int, default=0)
+    t.add_argument("--seed", type=int, default=0, help="the initial weights and the training stream")
+    t.add_argument("--val-seed", type=int, help="the calibration and validation draws (default: --seed); a "
+                   "seed sweep keeps it fixed, so its runs choose best.pt on one validation set")
     t.add_argument("--base", type=int, default=48, help="UNet base width")
     t.add_argument("--mults", default="1,2,4,4", help="width multiple of each level, comma-separated; a level halves the side")
     t.add_argument("--blocks", default="2", help="residual blocks per level: one count, or one per level comma-separated")

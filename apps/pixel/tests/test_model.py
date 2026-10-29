@@ -370,6 +370,19 @@ def test_train_records_the_sixteenth_run_terms_and_apply_rebuilds_a_smooth_net(t
 
 
 @needs_data
+@needs_clean
+def test_train_records_the_val_seed_and_defaults_it_to_the_seed(tmp_path):
+    from harness.model.train import train
+    kw = dict(steps=1, batch=2, tile=32, workers=0, base=8, val_n=4, calib_n=8, ckpt_every=1, device="cpu",
+              log=lambda *a: None)
+    train(str(tmp_path / "a"), SOURCES, seed=2, val_seed=0, **kw)
+    train(str(tmp_path / "b"), SOURCES, seed=2, **kw)
+    a = torch.load(tmp_path / "a" / "last.pt", map_location="cpu", weights_only=False)["train"]
+    b = torch.load(tmp_path / "b" / "last.pt", map_location="cpu", weights_only=False)["train"]
+    assert (a["seed"], a["val_seed"]) == (2, 0) and (b["seed"], b["val_seed"]) == (2, 2)
+
+
+@needs_data
 def test_edit_pairs_keep_the_input_exposure_and_scene_range():
     """The target's brightness is not in the metric vector, so no pair may change it: every edit target
     carries the input's expose flag, exposure offset and scene range; only the other fields differ."""

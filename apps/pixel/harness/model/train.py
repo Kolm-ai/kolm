@@ -219,7 +219,8 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
           shift_real: bool = False, subpix_real: bool = False,
           noise_map: bool = False, compile_model: bool = False, warmup: int | None = None,
           lr_floor: float | None = None, target_audit: bool = False, overshoot_weight: float | None = None,
-          pyramid_weight: float | None = None, resample: str = "learned", log=print) -> dict:
+          pyramid_weight: float | None = None, resample: str = "learned", val_seed: int | None = None,
+          log=print) -> dict:
     """`real` names stored real-pair sources (data.realstore) drawn with probability `p_real` per sample; `weights`
     maps a clean source to its draw weight (1 unnamed); `range_weight`, `range_k`, `flat_weight`, `flat_k` and
     `texture_weight` set the range, flat-texture and texture-deficit terms; `p_dead_leaves` is the share of rendered
@@ -236,7 +237,9 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
     warmup steps and its end as a share of `lr`), `target_audit` (the clean items the target audit keeps,
     data.targetaudit). The sixteenth run's, as off by default and as recorded: `overshoot_weight` and
     `pyramid_weight` (losses.overshoot_loss, losses.pyramid_loss), `resample` (how the network's levels change
-    scale, net.CondUNet; in its `config`)."""
+    scale, net.CondUNet; in its `config`). `seed` draws the initial weights and the training stream;
+    `val_seed` (default `seed`) the calibration and validation draws, so the runs of a seed sweep fit one
+    normaliser and choose best.pt on one validation set."""
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     dev = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -275,7 +278,9 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
     mults, blocks = tuple(int(m) for m in mults), (int(blocks) if isinstance(blocks, int) else tuple(map(int, blocks)))
     if tile % 2 ** (len(mults) - 1):
         raise ValueError(f"tile {tile} must be a multiple of {2 ** (len(mults) - 1)} for {len(mults)} levels")
-    args = dict(sources=list(sources), steps=steps, batch=batch, tile=tile, lr=lr, seed=seed, base=base,
+    vs = seed if val_seed is None else int(val_seed)
+    args = dict(sources=list(sources), steps=steps, batch=batch, tile=tile, lr=lr, seed=seed, val_seed=vs,
+                base=base,
                 real=list(real), p_real=p_real, weights=weights, p_dead_leaves=p_dead_leaves, mults=list(mults),
                 blocks=blocks if isinstance(blocks, int) else list(blocks), mid_blocks=mid_blocks,
                 shift_real=bool(shift_real), subpix_real=bool(subpix_real), noise_map=bool(noise_map), compile=bool(compile_model), warmup=warmup,
@@ -288,11 +293,11 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
         log(f"resuming from step {ck['step']}")
     else:
         log(f"calibration draw: {calib_n} samples")
-        calib = fixed_set(list(sources), "train", calib_n, min(tile, 128), seed + 1, log=quiet, audit=target_audit)
+        calib = fixed_set(list(sources), "train", calib_n, min(tile, 128), vs + 1, log=quiet, audit=target_audit)
         norm = Normaliser.fit(np.array([[s["metrics"][m] for m in STILL_METRICS] for s in calib]))
         cond_restore = np.mean([norm(s["metrics"]) for s in calib if s["restore"]], axis=0).astype(np.float32)
     log(f"validation draw: {val_n} samples at {tile} px")
-    val = fixed_set(list(sources), "val", val_n, tile, seed + 2, log=quiet, audit=target_audit)
+    val = fixed_set(list(sources), "val", val_n, tile, vs + 2, log=quiet, audit=target_audit)
     if target_audit:
         rep = TileSource(list(sources), "train", tile, audit=True).audit_report
         log("target audit: " + ("; ".join(f"{k} max_halo {r['max_halo']}: {r['kept']} kept, {r['over']} over, "
@@ -308,10 +313,11 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
         from ..data.realstore import RealStore
         log(f"real pairs drawn with probability {p_real:.2f}: {RealStore(list(real), 'train', tile=tile, subpix=subpix_real).summary()}")
         try:
-            val_real = real_fixed_set(list(real), "val", val_n, tile, seed + 3, subpix=subpix_real)
+            val_real = real_fixed_set(list(real), "val", val_n, tile, vs + 3, subpix=subpix_real)
             log(f"real validation draw: {len(val_real)} tiles of the stored val scenes")
         except (ValueError, FileNotFoundError) as ex:
             log(f"no real validation set: {ex}")
+    torch.manual_seed(seed)   # the initial weights (a resume loads its own)
     model = CondUNet(base=base, mults=mults, blocks=blocks, mid_blocks=mid_blocks, noise_map=noise_map,
                      resample=resample).to(dev)
     ema = copy.deepcopy(model).eval()
