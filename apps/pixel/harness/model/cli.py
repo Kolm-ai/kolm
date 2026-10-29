@@ -110,18 +110,14 @@ def cmd_eval_raw(args) -> int:
     """Real raws no run trains on, through the demo camera (heldout.py), or with --real the real capture/reference
     pairs of a source (realpairs.py) with the measured noise law as the capture; one report directory per mode
     and, for the real pairs, per source."""
-    from .heldout import evaluate, to_markdown
-    sp = "sp_" if args.real and args.subpix else ""
-    name = f"heldout_{f'real_{args.source}_' if args.real else ''}{sp}{'blind' if args.blind else 'known'}"
+    from .heldout import evaluate, report_name, write_report
+    name = report_name(args.source, args.real, args.subpix, args.blind)
     out = Path(args.out) if args.out else Path(args.ckpt).resolve().parent / name
     rep = evaluate(args.ckpt, blind=args.blind, source=args.source, n=args.n, tile=args.tile, seed=args.seed,
                    ss=args.ss, device=args.device, out=out, save_tiles=args.save_tiles, real=args.real,
                    scale=args.scale, bf16=args.bf16, subpix=args.subpix, noise=args.noise,
                    frontier=not args.no_frontier)
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "heldout.json").write_text(json.dumps(rep, indent=1), encoding="utf-8")
-    md = to_markdown(rep)
-    (out / "heldout.md").write_text(md, encoding="utf-8")
+    md = write_report(out, rep)
     print(md, end="")
     print(f"  report: {out / 'heldout.md'}")
     return 0
@@ -147,11 +143,13 @@ def cmd_rescore(args) -> int:
 
 
 def cmd_compare(args) -> int:
-    """every run's held-out reports side by side (compare.py), printed and with --out written"""
+    """every run's held-out reports side by side (compare.py), the public baselines' after them and the SIDD
+    validation table, printed and with --out written"""
     from ..data import data_root
-    from .compare import collect, to_markdown
-    md = to_markdown(collect(Path(args.models) if args.models else data_root() / "models",
-                             [r.strip() for r in args.runs.split(",")] if args.runs else None))
+    from .compare import collect, collect_sidd, to_markdown
+    models = Path(args.models) if args.models else data_root() / "models"
+    runs = [r.strip() for r in args.runs.split(",")] if args.runs else None
+    md = to_markdown(collect(models, runs), collect_sidd(models, runs))
     if args.out:
         Path(args.out).write_text(md, encoding="utf-8")
     print(md, end="")
@@ -290,7 +288,7 @@ def add_parser(sub) -> None:
 
     c = ms.add_parser("compare", help="every run's held-out reports side by side, a table per report set")
     c.add_argument("--models", help="the runs' directory (default: <data root>/models)")
-    c.add_argument("--runs", help="comma-separated runs to show, e.g. v13,v14b,v15 (default: every run)")
+    c.add_argument("--runs", help="comma-separated runs and baselines to show, e.g. v15,v17,nafnet (default: all)")
     c.add_argument("--out", help="also write the markdown here")
     c.set_defaults(func=cmd_compare)
 
@@ -299,6 +297,9 @@ def add_parser(sub) -> None:
 
     from .card import add_parser as add_card_parser
     add_card_parser(ms)
+
+    from .baselines import add_parser as add_baseline_parser
+    add_baseline_parser(ms)
 
 
 def _noise_args(p) -> None:

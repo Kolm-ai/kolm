@@ -1908,13 +1908,71 @@
    "license": "SIDD terms (MIT on the official site); the mirror's card carries no licence of its own",
    "size_bytes": 13300000000.0,
    "gives": "the official SIDD_Medium_Srgb.zip (13.2 GB) and its unpacked tree raw/train/<scene>_<instance>_<phone>_<ISO>_<shutter>_<temperature>_<brightness>/: 160 scene instances x 2 noisy/GT 8-bit sRGB PNG pairs, 5 phones, ISO 100 to 10000",
-   "harness_use": "real noisy/clean pairs at native scale, 8-bit sRGB from the phones' own pipelines: the real-pair rows and metric distributions of DEGRADATION_PLAN step 4 beside RawNIND and HDR+, and a SIDD number to report; never a training source",
+   "harness_use": "real noisy/clean pairs at native scale, 8-bit sRGB from the phones' own pipelines: the real-pair rows and metric distributions of DEGRADATION_PLAN step 4 beside RawNIND and HDR+, and a SIDD number to report; never a training source; its validation blocks (val/, 1,280 sRGB blocks of 256 px) score the public baselines and our runs on SIDD's own protocol (python -m harness model baseline sidd)",
    "expander": "hf_hub_files",
    "params": {
     "repo": "cdtrejo/sidd-medium-lmdb",
     "pattern": "^raw/train/.*[.]PNG$"
    },
-   "notes": "catalog:sidd. 655 files, 54.6 GB in the repo: the zip, its unpacked PNGs (640 files, 13.2 GB, what the pattern takes) and LMDB packs of them (27.8 GB, not taken). The raw-domain SIDD Medium (Bayer .MAT with metadata) is not mirrored here; MhdMohammadi/SIDD-CC holds a re-processed raw set (ground truth re-estimated, new split, 24.6 GB, SIDD terms) that is a different dataset. Bounded pull used: --max-bytes 1.4e10 --jobs 4."
+   "notes": "catalog:sidd. 655 files, 54.6 GB in the repo: the zip, its unpacked PNGs (640 files, 13.2 GB, what the pattern takes) and LMDB packs of them (27.8 GB, not taken). The raw-domain SIDD Medium (Bayer .MAT with metadata) is not mirrored here; MhdMohammadi/SIDD-CC holds a re-processed raw set (ground truth re-estimated, new split, 24.6 GB, SIDD terms) that is a different dataset. Bounded pull used: --max-bytes 1.4e10 --jobs 4. Validation pull: --param pattern='^val/(input|gt)_crops[.]lmdb/(data[.]mdb|meta_info[.]txt)$', 4 files, 315.8 MB: NAFNet's LMDB packs of ValidationNoisyBlocksSrgb and ValidationGtBlocksSrgb, PNG bytes keyed ValidationBlocksSrgb_<i>."
+  },
+  {
+   "id": "baseline-nafnet-sidd",
+   "name": "NAFNet-SIDD-width64 (megvii-research/NAFNet, ECCV 2022): the released SIDD denoising weights",
+   "kind": "model",
+   "access": "direct",
+   "url": "https://github.com/megvii-research/NAFNet",
+   "license": "MIT (megvii-research), with BasicSR's Apache-2.0 notice for the code taken from it (the repository's LICENSE, read 10-29); the weights are released with the code",
+   "size_bytes": 464154961,
+   "gives": "a BasicSR checkpoint, {'params': state dict}, of NAFNet width 64 trained on SIDD Medium sRGB; 40.3045 dB, SSIM 0.9614 on SIDD validation (README)",
+   "harness_use": "a public baseline through our held-out gates and on SIDD validation (python -m harness model baseline, MODEL_PLAN 11.3); evaluation only, never a teacher, a target or a training source",
+   "files": [
+    {
+     "url": "https://huggingface.co/spaces/chuxiaojie/NAFNet/resolve/main/NAFNet-SIDD-width64.pth",
+     "path": "NAFNet-SIDD-width64.pth",
+     "sha256": "cd685efaae01f7c4e9951f2deab05780079c8eb1e49ed664b72f6db04dabb445",
+     "size": 464154961
+    }
+   ],
+   "notes": "The README links the weights on Google Drive and Baidu; the first author's Hugging Face space chuxiaojie/NAFNet serves the SIDD checkpoint over plain HTTPS with its LFS sha256. The architecture is vendored as harness/model/baseline_archs/nafnet.py."
+  },
+  {
+   "id": "baseline-restormer-real",
+   "name": "Restormer real-image denoiser (swz30/Restormer, CVPR 2022): the released weights",
+   "kind": "model",
+   "access": "direct",
+   "url": "https://github.com/swz30/Restormer",
+   "license": "MIT (the repository's LICENSE)",
+   "size_bytes": 104611957,
+   "gives": "a BasicSR checkpoint, {'params': state dict}, of Restormer (dim 48, BiasFree LayerNorm) trained on SIDD Medium sRGB; 40.02 dB, SSIM 0.960 on SIDD validation (paper, Table 2)",
+   "harness_use": "a public baseline through our held-out gates and on SIDD validation (python -m harness model baseline, MODEL_PLAN 11.3); evaluation only, never a teacher, a target or a training source",
+   "files": [
+    {
+     "url": "https://github.com/swz30/Restormer/releases/download/v1.0/real_denoising.pth",
+     "path": "real_denoising.pth",
+     "size": 104611957
+    }
+   ],
+   "notes": "Release v1.0 asset; no published hash, so the sha256 is recorded from the first fetch. The architecture is vendored as harness/model/baseline_archs/restormer.py."
+  },
+  {
+   "id": "baseline-scunet-real",
+   "name": "SCUNet real-noise PSNR model (cszn/SCUNet, MIR 2023): the released weights, from KAIR's release",
+   "kind": "model",
+   "access": "direct",
+   "url": "https://github.com/cszn/SCUNet",
+   "license": "Apache-2.0 (SCUNet); the file is hosted on KAIR's release (MIT)",
+   "size_bytes": 71982841,
+   "gives": "a bare state dict of SCUNet (dim 64, config [4]*7) trained for real noise on a synthetic degradation pipeline, not on SIDD; its authors report no SIDD number for it",
+   "harness_use": "a public baseline through our held-out gates and on SIDD validation (python -m harness model baseline, MODEL_PLAN 11.3); evaluation only, never a teacher, a target or a training source",
+   "files": [
+    {
+     "url": "https://github.com/cszn/KAIR/releases/download/v1.0/scunet_color_real_psnr.pth",
+     "path": "scunet_color_real_psnr.pth",
+     "size": 71982841
+    }
+   ],
+   "notes": "KAIR release v1.0 asset; no published hash, so the sha256 is recorded from the first fetch. The architecture is vendored as harness/model/baseline_archs/scunet.py, with timm's trunc_normal_ and DropPath replaced by torch's and a few lines."
   },
   {
    "id": "sidd-official",

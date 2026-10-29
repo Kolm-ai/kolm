@@ -372,19 +372,29 @@ def evaluate(ckpt, blind: bool = False, source: str = HELDOUT_SOURCE, n: int = 6
     score's."""
     from .apply import load_model, restore_frames
     b = load_model(ckpt, device, bf16)
-    samples, set_scale, records, skipped, preset = _samples(real, source, n, tile, scale, seed, root, log, subpix,
-                                                            preset, ss)
-    table = cached_ladder(samples, root or data_root(), noise, log=log) if frontier else None
-    t0 = time.perf_counter()
 
     def restore(s):
         cap = None if blind else (s["capture"] if real else capture_of_params(s["a"]))
         return np.asarray(restore_frames(b, s["x"][None], white_level=1.0, capture=cap)[0], dtype=np.float32)  # as stored
 
+    return evaluate_with(restore, {"ckpt": str(ckpt), "step": b.step, "blind": blind}, source, n, tile, seed, preset,
+                         ss, root, out, save_tiles, log, real, scale, subpix, noise, frontier)
+
+
+def evaluate_with(restore, fields: dict, source: str = HELDOUT_SOURCE, n: int = 64, tile: int = 256, seed: int = 0,
+                  preset: str = DEMO_PRESET, ss: int = 1, root: Path | None = None, out: Path | None = None,
+                  save_tiles: int = 0, log=print, real: bool = False, scale: int | None = None, subpix: bool = False,
+                  noise: str = "residual", frontier: bool = True) -> dict:
+    """evaluate() with any `restore(sample) -> linear tile` in place of a checkpoint (a public baseline,
+    baselines.py): the same set, scorer, stored outputs and report, `fields` (what restored it) first."""
+    samples, set_scale, records, skipped, preset = _samples(real, source, n, tile, scale, seed, root, log, subpix,
+                                                            preset, ss)
+    table = cached_ladder(samples, root or data_root(), noise, log=log) if frontier else None
+    t0 = time.perf_counter()
     rep = score(samples, restore, noise, table)
     outputs = rep.pop("outputs")
-    rep.update(ckpt=str(ckpt), step=b.step, blind=blind, source=source, seed=seed, n=n, tile=tile, scale=set_scale,
-               preset=preset, ss=ss, real=real, subpix=bool(real and subpix), seconds=round(time.perf_counter() - t0, 1),
+    rep.update(**fields, source=source, seed=seed, n=n, tile=tile, scale=set_scale, preset=preset, ss=ss, real=real,
+               subpix=bool(real and subpix), seconds=round(time.perf_counter() - t0, 1),
                records=[asdict(r) for r in records], skipped=skipped)
     if out is not None:
         Path(out).mkdir(parents=True, exist_ok=True)
@@ -397,6 +407,22 @@ def evaluate(ckpt, blind: bool = False, source: str = HELDOUT_SOURCE, n: int = 6
         save_frames(d, np.stack(outputs[:k]), "model")
         save_frames(d, np.stack([s["y"] for s in samples[:k]]), "target")
     return rep
+
+
+def report_name(source: str, real: bool = False, subpix: bool = False, blind: bool = False) -> str:
+    """a report's directory name beside its run: heldout_[real_<source>_][sp_]{known|blind}"""
+    return (f"heldout_{f'real_{source}_' if real else ''}{'sp_' if real and subpix else ''}"
+            f"{'blind' if blind else 'known'}")
+
+
+def write_report(out: Path, rep: dict) -> str:
+    """heldout.json and heldout.md into `out`: the markdown"""
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "heldout.json").write_text(json.dumps(rep, indent=1), encoding="utf-8")
+    md = to_markdown(rep)
+    (out / "heldout.md").write_text(md, encoding="utf-8")
+    return md
 
 
 def rescore(report_dir: Path, noise: str = "residual", frontier: bool = True, root: Path | None = None,
@@ -436,8 +462,11 @@ def to_markdown(rep: dict) -> str:
     capture = ("the measured noise law" if real else f"camera preset `{rep['preset']}`, ss {rep['ss']}")
     lines = [f"# {kind}: {rep['source']} at clean scale {rep['scale']}, {rep['n']} tiles of "
              f"{rep['tile']} px, seed {rep['seed']}", "",
-             f"Checkpoint `{rep['ckpt']}` (step {rep['step']}), capture descriptor "
-             f"{'withheld' if rep['blind'] else 'known'} ({capture}), "
+             (f"Public baseline `{rep['baseline']}` (weights `{rep['ckpt']}`, {rep.get('licence', '-')}, "
+              f"trained on {rep.get('trained_on', '-')}), run on each tile through the sRGB curve and back; it takes "
+              f"no capture descriptor ({capture} made the set), " if rep.get("baseline") else
+              f"Checkpoint `{rep['ckpt']}` (step {rep['step']}), capture descriptor "
+              f"{'withheld' if rep['blind'] else 'known'} ({capture}), ") +
              f"{rep['seconds']} s of inference and scoring; noise read as `{rep.get('noise', 'hp')}`."
              + (" Targets, and the camera's photo, registered to the input to a fraction of a pixel (data.subpix)."
                 if rep.get("subpix") else ""), "",

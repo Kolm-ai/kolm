@@ -8,7 +8,7 @@ from pathlib import Path
 
 MANIFEST_PATH = Path(__file__).with_name("sources.json")
 
-KINDS = ("reference", "dataset", "api", "generator", "spec", "package")
+KINDS = ("reference", "dataset", "api", "generator", "spec", "package", "model")
 ACCESS = ("direct", "api", "hf", "pip", "docker", "manual", "page-only", "scrape-tos-unclear")
 TIERS = ("S", "M", "L", "XL")  # <50 MB, <2 GB, <50 GB, beyond
 TIER_BYTES = {"S": 50e6, "M": 2e9, "L": 50e9, "XL": float("inf")}
