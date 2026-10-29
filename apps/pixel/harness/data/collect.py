@@ -19,7 +19,7 @@ from urllib.request import url2pathname
 
 import requests
 
-from . import data_root
+from . import data_root, keeps_reserve, reserve_bytes
 from .manifest import FileSpec, Source
 
 USER_AGENT = os.environ.get("HARNESS_USER_AGENT") or (
@@ -227,7 +227,9 @@ class Collector:
         summary = {"source": source.id, "requested": len(specs), "already": len(specs) - len(todo),
                    "done": 0, "failed": 0, "bytes": 0, "errors": []}
         if self.dry_run:
-            self.log(f"[dry-run] {source.id}: {len(todo)} file(s) to fetch, {summary['already']} present")
+            known = [sp.size for sp in todo if sp.size]
+            self.log(f"[dry-run] {source.id}: {len(todo)} file(s) to fetch, {summary['already']} present; "
+                     f"{sum(known) / 1e9:.1f} GB listed" + (f" ({len(todo) - len(known)} unsized)" if len(known) < len(todo) else ""))
             summary["planned"] = [s.url for s in todo]
             return summary
         with ThreadPoolExecutor(max_workers=self.jobs) as pool:
@@ -253,6 +255,9 @@ class Collector:
                     if self._spent + spec.size > self.max_bytes:
                         raise RuntimeError("byte budget exhausted")
                     self._spent += spec.size
+            if not keeps_reserve(self.raw, spec.size or 0, reserve_bytes("HARNESS_COLLECT_RESERVE_GB", 150)):
+                raise RuntimeError("disk reserve: the drive would fall below its free-space floor "
+                                   "(HARNESS_COLLECT_RESERVE_GB, default 150)")
             os.makedirs(fs(dst.parent), exist_ok=True)
             scheme = urlparse(spec.url).scheme
             if scheme == "file":

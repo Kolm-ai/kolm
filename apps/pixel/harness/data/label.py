@@ -12,13 +12,16 @@ Input domains. Every decoder hands the labeller linear RGB float64, so the metri
 thing whatever file it came from; the row's `domain` column says what the file held and `is_hdr` how
 prepare_tile treats its range:
 
-  srgb8             8-bit sRGB files (PNG, JPEG, WebP, BMP, 8-bit TIFF; parquet image blobs): value / 255,
+  srgb8             8-bit sRGB files (PNG, JPEG, JPEG 2000, WebP, BMP, 8-bit TIFF; parquet image blobs): value / 255,
                     then the sRGB transfer function inverted. is_hdr False.
   srgb16            16-bit integer PNG/TIFF: value / 65535, then the sRGB transfer function inverted.
                     is_hdr False.
   linear16          camera raws through LibRaw (rawpy): demosaiced, camera white balance, sRGB primaries,
                     gamma (1, 1) so the output is linear, no auto-brightening, no sharpening, 16-bit output
                     / 65535, so 1.0 is the sensor white level. is_hdr True: the range is kept as captured.
+                    Pixel-shift merges (.mat, PixelShift200's RGGB: four sensor-shifted shots sample R, G, G
+                    and B at every site, so there is no demosaic) are rendered the way LibRaw renders their
+                    camera's single shot (_decode_rggb_mat), into the same domain.
   linear_float_hdr  Radiance .hdr and OpenEXR .exr (plain files or members of a .zip): relative scene
                     radiance as stored, non-finite samples zeroed, negatives clipped to 0. is_hdr True.
 
@@ -57,6 +60,7 @@ import json
 import math
 import os
 import re
+import tarfile
 import time
 import zipfile
 from concurrent.futures import ProcessPoolExecutor
@@ -77,7 +81,7 @@ from ..colorspace import srgb_to_linear
 from ..metrics import STILL_METRICS
 from ..scene import box_downsample
 
-IMAGE_EXT = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".jp2", ".j2k"}   # JPEG 2000: openjpeg
 TIFF_EXT = {".tif", ".tiff"}
 # LibRaw's file formats (libraw.org/supported-cameras); one LibRaw rejects is recorded as skipped, not fatal
 RAW_EXT = {".3fr", ".ari", ".arw", ".bay", ".cap", ".cr2", ".cr3", ".crw", ".dcr", ".dcs", ".dng", ".drf", ".erf",
@@ -86,8 +90,12 @@ RAW_EXT = {".3fr", ".ari", ".arw", ".bay", ".cap", ".cr2", ".cr3", ".crw", ".dcr
 HDR_EXT = {".hdr"}
 EXR_EXT = {".exr"}
 ZIP_EXT = {".zip"}
-ZIP_MEMBER_EXT = HDR_EXT | EXR_EXT | RAW_EXT   # what is listed inside an archive (not its previews)
-ZIP_SEP = "::"                                  # Item.file of a member: "<zip path>::<member path>"
+TAR_EXT = {".tar"}                              # uncompressed only: a member is one seek and read (_tar_index)
+ARCHIVE_EXT = ZIP_EXT | TAR_EXT
+MAT_EXT = {".mat"}                              # pixel-shift merges, _decode_rggb_mat
+ZIP_MEMBER_EXT = HDR_EXT | EXR_EXT | RAW_EXT   # what is listed inside an archive (not its previews); plain images
+#                                                 too for a source whose clean.archive_images is set (UHD-IQA's tar)
+ZIP_SEP = "::"                                  # Item.file of a member: "<archive path>::<member path>"
 NO_DECODER = "no_decoder:"                      # skip reason prefix that never counts as done
 PARQUET_SOURCES = {"hf-kadid10k-images": ("image", "kadid"), "hf-tid2013": ("reference", "tid")}
 SEED_MASK = (1 << 63) - 1
@@ -99,11 +107,17 @@ _LUMA_TABLE_SUM = 3688   # sum of the ITU T.81 K.1 luminance table, what the IJG
 _RES_DIR = re.compile("^[0-9]+k$", re.IGNORECASE)      # Poly Haven's resolution tiers: 1k/<name>.hdr, 2k/<name>.hdr
 _RES_SUFFIX = re.compile("_[0-9]+k$", re.IGNORECASE)
 _SRGB_LUT = srgb_to_linear(np.arange(256) / 255.0)     # the transfer curve of the 256 8-bit values, once
+_XYZ_RGB = np.array([[0.412453, 0.357580, 0.180423],    # linear sRGB (D65) to XYZ, LibRaw's xyz_rgb
+                     [0.212671, 0.715160, 0.072169],
+                     [0.019334, 0.119193, 0.950227]])
+RGGB_WHITE = 16383            # a pixel-shift merge's white: PixelShift200 subtracts the black and scales to 14 bits
+RGGB_OFFSET = 2               # its site (i, j) is the raw's (i + 2, j + 2): the merge cuts 2 px from every side
+_FLIP_TURNS = {0: 0, 3: 2, 5: 1, 6: 3}                  # LibRaw's sizes.flip as np.rot90 quarter turns
 
 
 @dataclass(frozen=True)
 class Item:
-    """One clean image: a file under <root>/raw/<source> (or a member of a zip there, see ZIP_SEP), or one row
+    """One clean image: a file under <root>/raw/<source> (or a member of a zip or tar there, see ZIP_SEP), or one row
     of a parquet shard there. is_hdr is what the extension promises; the decoder has the last word (Decoded)."""
     source: str
     file: str            # path relative to <root>/raw/<source>, posix; "<zip>::<member>" inside an archive
@@ -155,7 +169,8 @@ def clean_settings(source: str) -> dict:
     the posix path relative to the source, "<zip>::<member>" for an archive member) of files that are not
     pictures; `include`, patterns of the only files that are (RawNIND's GT raws, the HDR+ merges); `scene`, a
     regex whose first group is the scene key (scene_of); `holdout`, patterns of scene keys the sampler never
-    trains or validates on (model.data.split_of gives them "test")."""
+    trains or validates on (model.data.split_of gives them "test"); `archive_images`, list an archive's plain
+    images as items (they are its previews unless the source says otherwise)."""
     return _manifest_clean().get(source, {})
 
 
@@ -163,25 +178,64 @@ def split_member(file: str) -> tuple[str, str | None]:
     """Item.file -> (path on disk, member path inside it or None)."""
     if ZIP_SEP in file:
         z, m = file.split(ZIP_SEP, 1)
-        if z.lower().endswith(tuple(ZIP_EXT)):
+        if z.lower().endswith(tuple(ARCHIVE_EXT)):
             return z, m
     return file, None
 
 
-def _zip_members(path: Path) -> list[str] | None:
-    """Decodable members of an archive in a fixed order; None when it is not a readable zip."""
+@lru_cache(maxsize=8)
+def _tar_index(path: str, mtime_ns: int) -> dict[str, tuple[int, int]]:
+    """member -> (data offset, size) of an uncompressed tar's regular files, read once per process: tarfile finds
+    a member by walking every header before it, so a 900-member tar would cost a walk per decode."""
+    with tarfile.open(path, "r:") as t:
+        return {m.name: (m.offset_data, m.size) for m in t if m.isreg()}
+
+
+def _archive_members(path: Path, exts: set[str]) -> list[str] | None:
+    """Members of an archive with an extension in `exts`, in a fixed order; None when it is not a readable zip
+    or uncompressed tar. Members are read, never extracted, so their paths are only names."""
     try:
-        with zipfile.ZipFile(path) as z:
-            return sorted(i.filename for i in z.infolist()
-                          if not i.is_dir() and Path(i.filename).suffix.lower() in ZIP_MEMBER_EXT)
-    except (zipfile.BadZipFile, OSError):
+        if path.suffix.lower() in TAR_EXT:
+            names = list(_tar_index(str(path), path.stat().st_mtime_ns))
+        else:
+            with zipfile.ZipFile(path) as z:
+                names = [i.filename for i in z.infolist() if not i.is_dir()]
+    except (zipfile.BadZipFile, tarfile.TarError, OSError):
         return None
+    return sorted(n for n in names if Path(n).suffix.lower() in exts)
+
+
+def read_member(path: Path, member: str) -> bytes:
+    """One archive member's bytes (a zip's through zipfile, a tar's by its indexed offset)."""
+    if path.suffix.lower() in TAR_EXT:
+        off, size = _tar_index(str(path), path.stat().st_mtime_ns)[member]
+        with open(path, "rb") as f:
+            f.seek(off)
+            return f.read(size)
+    with zipfile.ZipFile(path) as z:
+        return z.read(member)
+
+
+def file_filter(source: str):
+    """The predicate on a source-relative file the source's `clean.include` and `clean.exclude` patterns make
+    (fnmatch, case-insensitive): list_items, the real-pair listing and the real store all apply it."""
+    settings = clean_settings(source)
+    excluded = [pat.lower() for pat in settings.get("exclude", [])]
+    included = [pat.lower() for pat in settings.get("include", [])]
+
+    def keep(file: str) -> bool:
+        f = file.lower()
+        if included and not any(fnmatch.fnmatchcase(f, pat) for pat in included):
+            return False
+        return not any(fnmatch.fnmatchcase(f, pat) for pat in excluded)
+    return keep
 
 
 def list_items(source: str, root: Path | None = None) -> list[Item]:
     """Every clean image of a source on disk, in a fixed order: plain image, raw and HDR files, the decodable
-    members of every zip (an unreadable zip is listed as one item so the run records why it was skipped); files
-    matching the source's `clean.exclude` patterns are left out."""
+    members of every zip or uncompressed tar (an unreadable archive is listed as one item so the run records why
+    it was skipped; plain images inside one only with clean.archive_images); files matching the source's
+    `clean.exclude` patterns are left out."""
     root = Path(root) if root else data_root()
     base = root / "raw" / source
     if not base.is_dir():
@@ -203,30 +257,22 @@ def list_items(source: str, root: Path | None = None) -> list[Item]:
                     g += 1
         rel = "|".join(f.relative_to(base).as_posix() for f in files)
         return [Item(source, rel, r, column) for r in rows]
-    settings = clean_settings(source)
-    excluded = [pat.lower() for pat in settings.get("exclude", [])]
-    included = [pat.lower() for pat in settings.get("include", [])]
-
-    def keep(file: str) -> bool:
-        f = file.lower()
-        if included and not any(fnmatch.fnmatchcase(f, pat) for pat in included):
-            return False
-        return not any(fnmatch.fnmatchcase(f, pat) for pat in excluded)
-
+    keep = file_filter(source)
+    member_ext = ZIP_MEMBER_EXT | (IMAGE_EXT if clean_settings(source).get("archive_images") else set())
     items = []
     for f in sorted(base.rglob("*")):
         if not f.is_file():
             continue
         ext = f.suffix.lower()
         rel = f.relative_to(base).as_posix()
-        if ext in ZIP_EXT:
-            members = _zip_members(f)
+        if ext in ARCHIVE_EXT:
+            members = _archive_members(f, member_ext)
             if members is None:
                 items.append(Item(source, rel))
             else:
-                items += [Item(source, f"{rel}{ZIP_SEP}{m}", is_hdr=True)
+                items += [Item(source, f"{rel}{ZIP_SEP}{m}", is_hdr=Path(m).suffix.lower() not in IMAGE_EXT)
                           for m in members if keep(f"{rel}{ZIP_SEP}{m}")]
-        elif ext in HDR_EXT or ext in EXR_EXT or ext in RAW_EXT:
+        elif ext in HDR_EXT or ext in EXR_EXT or ext in RAW_EXT or ext in MAT_EXT:
             items.append(Item(source, rel, is_hdr=True))
         elif ext in IMAGE_EXT:
             items.append(Item(source, rel))
@@ -260,6 +306,51 @@ def _decode_raw(src: str | io.BytesIO) -> np.ndarray:
     with rawpy.imread(src) as raw:
         rgb = raw.postprocess(gamma=(1, 1), no_auto_bright=True, output_bps=16, use_camera_wb=True)
     return np.asarray(rgb, dtype=np.float64) / 65535.0
+
+
+def _decode_rggb_mat(src, companion: Path) -> np.ndarray:
+    """A pixel-shift merge -> float64 (H, W, 3) in the linear16 domain. The MAT's `rggb` (R, Gr, Gb, B at every
+    site, RGGB_WHITE the white, its site the raw's shifted by RGGB_OFFSET) rendered as LibRaw renders the scene's
+    single-shot raw `companion`: the greens' mean; the raw's as-shot white balance over its smallest multiplier,
+    each channel clipped at white after it; the raw's camera-to-sRGB matrix (a DNG's own, else the one LibRaw
+    derives from the camera's XYZ-to-camera one: camera-from-sRGB with rows normalised to 1, inverted; neither, the
+    camera's colour as it is); clipped to [0, 1]; cut to the raw's visible area and turned as LibRaw turns it. The
+    MAT's own gains are LibRaw's daylight multipliers, not the shot's: the raw is read for them."""
+    import rawpy
+    import scipy.io as sio
+    m = sio.loadmat(src, variable_names=["rggb"]).get("rggb")
+    if m is None or m.ndim != 3 or m.shape[-1] != 4:
+        raise ValueError("no (H, W, 4) rggb array: not a pixel-shift merge")
+    with rawpy.imread(str(companion)) as raw:
+        wb = np.asarray(raw.camera_whitebalance[:3], dtype=np.float64)
+        if not (wb > 0).all():
+            wb = np.asarray(raw.daylight_whitebalance[:3], dtype=np.float64)
+        rgb_cam = np.asarray(raw.color_matrix, dtype=np.float64)[:3, :3]
+        cam_xyz = np.asarray(raw.rgb_xyz_matrix[:3], dtype=np.float64)
+        s = raw.sizes
+    if not rgb_cam.any():
+        cam_rgb = cam_xyz @ _XYZ_RGB
+        rgb_cam = np.linalg.inv(cam_rgb / cam_rgb.sum(axis=1, keepdims=True)) if cam_xyz.any() else np.eye(3)
+    r0, c0 = max(s.top_margin - RGGB_OFFSET, 0), max(s.left_margin - RGGB_OFFSET, 0)
+    m = m[r0:s.top_margin + s.height - RGGB_OFFSET, c0:s.left_margin + s.width - RGGB_OFFSET]
+    cam = np.empty(m.shape[:2] + (3,), dtype=np.float32)
+    cam[..., 0], cam[..., 2] = m[..., 0], m[..., 3]
+    cam[..., 1] = (m[..., 1].astype(np.float32) + m[..., 2]) * 0.5
+    cam *= (wb / wb.min() / RGGB_WHITE).astype(np.float32)
+    np.clip(cam, 0.0, 1.0, out=cam)
+    out = np.clip(cam.reshape(-1, 3).astype(np.float64) @ rgb_cam.T, 0.0, 1.0).reshape(cam.shape)
+    k = _FLIP_TURNS.get(int(s.flip), 0)
+    return np.ascontiguousarray(np.rot90(out, k)) if k else out
+
+
+def _companion_raw(it: Item, root: Path) -> Path:
+    """The single-shot raw a pixel-shift merge is rendered by: the source's `clean.companion` template, {name} the
+    merge's file stem less a trailing _rggb."""
+    template = clean_settings(it.source).get("companion")
+    if not template:
+        raise ValueError(f"{it.source}: a pixel-shift merge needs the clean block's companion raw template")
+    stem = Path(split_member(it.file)[1] or split_member(it.file)[0]).stem
+    return root / "raw" / it.source / template.format(name=stem[:-5] if stem.endswith("_rggb") else stem)
 
 
 def _decode_pil(src) -> Decoded:
@@ -308,7 +399,9 @@ def decode_item(it: Item, root: Path | None = None, tile: int = 0) -> Decoded:
     missing, anything else when the file cannot be read."""
     root = Path(root) if root else data_root()
     dec = _decode_file(it, root, tile)
-    k = clean_scale(it, root / "raw" / it.source / split_member(it.file)[0])
+    disk, member = split_member(it.file)
+    p = root / "raw" / it.source / disk
+    k = clean_scale(it, io.BytesIO(read_member(p, member)) if member is not None else p)
     return dec if k == 1 else Decoded(box_downsample(dec.img, k), dec.domain, dec.is_hdr, k)
 
 
@@ -329,11 +422,13 @@ def _decode_file(it: Item, root: Path, tile: int) -> Decoded:
     p = root / "raw" / it.source / disk
     ext = Path(member if member is not None else disk).suffix.lower()
     if member is not None:
-        with zipfile.ZipFile(p) as z:
-            data = z.read(member)
+        data = read_member(p, member)
     elif ext in ZIP_EXT:
         zipfile.ZipFile(p).close()  # listed as a single item only when it was unreadable: raise that
         raise ValueError("zip archive without decodable members")
+    elif ext in TAR_EXT:
+        tarfile.open(p, "r:").close()
+        raise ValueError("tar archive without decodable members")
     else:
         data = None
     if ext in EXR_EXT:
@@ -347,6 +442,9 @@ def _decode_file(it: Item, root: Path, tile: int) -> Decoded:
         return Decoded(np.clip(rgb, 0.0, None, out=rgb), "linear_float_hdr", True)
     if ext in RAW_EXT:
         return Decoded(_decode_raw(io.BytesIO(data) if data is not None else str(p)), "linear16", True)
+    if ext in MAT_EXT:
+        return Decoded(_decode_rggb_mat(io.BytesIO(data) if data is not None else str(p), _companion_raw(it, root)),
+                       "linear16", True)
     src = io.BytesIO(data) if data is not None else p
     try:
         dec = _decode_pil(src)

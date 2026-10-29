@@ -14,14 +14,14 @@ from harness.data.degrade import DegradeParams, Distributions, degrade, prepare_
 from harness.metrics import STILL_METRICS
 from harness.model.data import (COND_DIM, METRIC_COND_DIM, Normaliser, decode, draw_pair, encode, render_pair, restore_target,
                                 split_of)
-from harness.model.net import CondUNet, pad_to
+from harness.model.net import BlurDown, CondUNet, SmoothUp, pad_to
 
 from harness.data import data_root
 
 DERIVED = data_root() / "derived"
 needs_data = pytest.mark.skipif(not (DERIVED / "camera_presets.json").exists(), reason="derived stats not built")
 SOURCES = ["hf-kadid10k-images", "hf-tid2013"]
-needs_clean = pytest.mark.skipif(not all((Path("data/raw") / s).exists() for s in SOURCES), reason="clean sources absent")
+needs_clean = pytest.mark.skipif(not all((data_root() / "raw" / s).exists() for s in SOURCES), reason="clean sources absent")
 
 
 def _tile(rng, n=64):
@@ -269,6 +269,106 @@ def test_tiled_inference_matches_whole_frame_on_identity(monkeypatch):
     assert np.allclose(tiled, frames, atol=1e-5)
 
 
+def test_net_scales_by_level_depth_and_bottleneck_and_rebuilds_from_its_config():
+    """Per-level block counts and a bottleneck count shape the net; its config rebuilds it, and a config written
+    before the counts existed (one count, no mid_blocks) builds the net it always did."""
+    flat = CondUNet(base=8, mults=(1, 2, 4), blocks=1)
+    old = {k: v for k, v in flat.config.items() if k != "mid_blocks"}
+    assert CondUNet(**old).n_params() == flat.n_params()
+    deep = CondUNet(base=8, mults=(1, 2, 4), blocks=(1, 1, 2), mid_blocks=3)
+    assert [len(lv.blocks) for lv in deep.down] == [1, 1, 2, 1, 1] and len(deep.mid.blocks) == 3
+    assert CondUNet(**deep.config).n_params() == deep.n_params() > flat.n_params()
+    with pytest.raises(ValueError, match="one per level"):
+        CondUNet(base=8, mults=(1, 2, 4), blocks=(1, 2))
+
+
+def test_smooth_resampling_leaves_no_grid_and_rebuilds_from_its_config():
+    """SmoothUp takes a constant to a constant where a stride-2 transposed conv paints its four 2 px phases, BlurDown
+    keeps a constant's interior flat, the smooth net rebuilds and reloads from its config, and a config written
+    before `resample` existed builds the learned net it always did."""
+    torch.manual_seed(0)
+    c = torch.ones(1, 4, 8, 8)
+    up = SmoothUp(4, 4)(c)
+    assert up.shape == (1, 4, 16, 16) and float(up.std(dim=(2, 3)).max()) < 1e-6
+    assert float(torch.nn.ConvTranspose2d(4, 4, 2, stride=2)(c).std(dim=(2, 3)).max()) > 1e-3
+    down = BlurDown(4, 6)(c)
+    assert down.shape == (1, 6, 4, 4) and float(down[..., 1:-1, 1:-1].std(dim=(2, 3)).max()) < 1e-6
+    smooth = CondUNet(base=8, mults=(1, 2, 4), blocks=1, resample="smooth")
+    again = CondUNet(**smooth.config)
+    again.load_state_dict(smooth.state_dict())          # the blur kernel is a buffer outside the checkpoint
+    assert isinstance(again.up[0], SmoothUp) and isinstance(again.pool[0], BlurDown)
+    x, cond = torch.rand(2, 3, 32, 32), torch.zeros(2, COND_DIM)
+    assert smooth(x, cond).shape == x.shape
+    old = {k: v for k, v in smooth.config.items() if k != "resample"}
+    assert isinstance(CondUNet(**old).up[0], torch.nn.ConvTranspose2d)
+    with pytest.raises(ValueError, match="resample"):
+        CondUNet(base=8, mults=(1, 2), resample="pixel-shuffle")
+
+
+def test_gradient_checkpointing_changes_no_output_or_gradient():
+    torch.manual_seed(0)
+    net = CondUNet(base=8, mults=(1, 2), blocks=2)
+    with torch.no_grad():
+        for p in net.parameters():          # off the zero init, so every block carries a gradient
+            p.add_(0.05 * torch.randn_like(p))
+    x, c = torch.rand(2, 3, 16, 16), torch.randn(2, COND_DIM)
+    runs = []
+    for on in (False, True):
+        net.set_grad_ckpt(on).zero_grad()
+        y = net(x, c)
+        y.square().mean().backward()
+        runs.append((y.detach(), [p.grad.clone() for p in net.parameters()]))
+    assert torch.allclose(runs[0][0], runs[1][0])
+    assert all(torch.allclose(a, b, atol=1e-6) for a, b in zip(runs[0][1], runs[1][1]))
+
+
+def test_inference_pads_to_the_net_level_multiple():
+    """A five-level net halves the side four times: apply pads to 16, not 8, and strips the padding again."""
+    from harness.model.apply import Bundle, restore_frames
+    net = CondUNet(base=8, mults=(1, 2, 2, 2, 2), blocks=1).eval()
+    b = Bundle(net, Normaliser(np.zeros(12), np.ones(12)), np.zeros(METRIC_COND_DIM, dtype=np.float32), 0,
+               torch.device("cpu"))
+    frames = np.random.default_rng(2).random((1, 40, 56, 3))     # multiples of 8, not of 16
+    assert np.allclose(restore_frames(b, frames), frames, atol=1e-5)
+
+
+def test_train_rejects_a_tile_the_levels_cannot_halve(tmp_path):
+    from harness.model.train import train
+    with pytest.raises(ValueError, match="multiple of 16"):
+        train(str(tmp_path / "m"), SOURCES, steps=1, tile=24, workers=0, mults=(1, 2, 4, 8, 8), device="cpu")
+
+
+@needs_data
+@needs_clean
+def test_train_records_the_shape_and_apply_rebuilds_it(tmp_path):
+    from harness.model.apply import load_model
+    from harness.model.train import train
+    out = tmp_path / "m"
+    train(str(out), SOURCES, steps=1, batch=2, tile=32, workers=0, base=8, mults=(1, 2, 2, 2, 2), blocks=(1, 1, 1, 2, 2),
+          mid_blocks=3, grad_ckpt=True, val_n=4, calib_n=8, ckpt_every=1, device="cpu", log=lambda *a: None)
+    ck = torch.load(out / "last.pt", map_location="cpu", weights_only=False)
+    assert ck["config"]["blocks"] == (1, 1, 1, 2, 2) and ck["config"]["mid_blocks"] == 3
+    assert ck["train"]["mults"] == [1, 2, 2, 2, 2] and ck["train"]["blocks"] == [1, 1, 1, 2, 2]
+    b = load_model(out / "last.pt", "cpu")
+    assert b.model.n_levels == 5 and len(b.model.mid.blocks) == 3
+
+
+@needs_data
+@needs_clean
+def test_train_records_the_sixteenth_run_terms_and_apply_rebuilds_a_smooth_net(tmp_path):
+    from harness.model.apply import load_model
+    from harness.model.train import train
+    out = tmp_path / "m"
+    train(str(out), SOURCES, steps=1, batch=2, tile=32, workers=0, base=8, val_n=4, calib_n=8, ckpt_every=1,
+          overshoot_weight=1.5, pyramid_weight=0.5, resample="smooth", device="cpu", log=lambda *a: None)
+    ck = torch.load(out / "last.pt", map_location="cpu", weights_only=False)
+    assert ck["config"]["resample"] == "smooth" and ck["train"]["resample"] == "smooth"
+    assert ck["train"]["overshoot_weight"] == 1.5 and ck["train"]["pyramid_weight"] == 0.5
+    assert isinstance(load_model(out / "last.pt", "cpu").model.pool[0], BlurDown)
+    with pytest.raises(ValueError, match="overshoot and pyramid"):
+        train(str(tmp_path / "n"), SOURCES, steps=1, workers=0, pyramid_weight=-1.0, device="cpu")
+
+
 @needs_data
 def test_edit_pairs_keep_the_input_exposure_and_scene_range():
     """The target's brightness is not in the metric vector, so no pair may change it: every edit target
@@ -338,6 +438,65 @@ def test_range_loss_is_zero_at_the_target_and_charges_a_halo():
     assert float(range_excess(out, y).max()) == pytest.approx(0.2)
     assert float(range_excess(out, y)[..., :, 7].max()) == 0.0   # the dark side is inside its range
     assert float(pair_loss(out, y, x)) > float(pair_loss(y, y, x)) == 0.0
+    base = float(pair_loss(out, y, x, range_weight=0.0))
+    one, two = float(pair_loss(out, y, x, range_weight=1.0)), float(pair_loss(out, y, x, range_weight=2.0))
+    assert base < one < two and two - one == pytest.approx(one - base)     # linear in the weight, zero turns it off
+    assert float(range_excess(out, y, 5).sum()) >= float(range_excess(out, y, 3).sum()) > 0.0
+
+
+def test_flat_loss_charges_texture_only_where_the_target_is_flat():
+    import pytest
+    import torch
+    from harness.model.train import flat_excess, local_std, pair_loss
+    g = torch.Generator().manual_seed(0)
+    d = 0.001 / 15
+    y = torch.full((1, 3, 16, 32), 6.0)                       # at the encoded domain's scale ...
+    y[..., :16] += d * torch.arange(16.0)                     # ... a gentle ramp (std 2 d over 7 px) ...
+    y[..., 16:] += torch.rand(1, 3, 16, 16, generator=g)       # ... beside a textured half
+    x = y.clone()
+    s = local_std(y, 7)[..., :, 3:13]
+    assert torch.allclose(s, torch.full_like(s, 2 * d), rtol=1e-3, atol=1e-7)   # no float32 cancellation noise
+    assert float(flat_excess(y, y).sum()) == 0.0              # the target itself is never charged
+    out = y + 0.02 * torch.randn(y.shape, generator=g)        # texture everywhere
+    e = flat_excess(out, y)
+    assert float(e[..., :, :8].min()) > 0.0                   # charged on the flat half ...
+    assert float(e[..., :, 24:].max()) == 0.0                 # ... not on the textured one
+    smooth = y.clone()
+    smooth[..., 16:] = y[..., 16:].mean()                     # smoother than the target is not excess
+    assert float(flat_excess(smooth, y).sum()) == 0.0
+    assert float(flat_excess(out, y, tau=0.0).sum()) == 0.0   # tau 0 calls nothing flat
+    base = float(pair_loss(out, y, x))                        # off by default
+    assert base == float(pair_loss(out, y, x, flat_weight=0.0))
+    one, two = float(pair_loss(out, y, x, flat_weight=1.0)), float(pair_loss(out, y, x, flat_weight=2.0))
+    assert base < one < two and two - one == pytest.approx(one - base, rel=1e-4)   # linear in the weight
+
+
+def test_texture_loss_charges_smoothing_only_where_the_target_has_texture():
+    import pytest
+    import torch
+    from harness.model.train import flat_excess, pair_loss, std_mismatch, texture_deficit
+    g = torch.Generator().manual_seed(1)
+    y = torch.full((1, 3, 16, 32), 6.0)
+    y[..., 16:] += torch.rand(1, 3, 16, 16, generator=g)       # a flat half beside a textured half
+    x = y.clone()
+    assert float(texture_deficit(y, y).sum()) == 0.0           # the target itself is never charged
+    smooth = y.clone()
+    smooth[..., 16:] = y[..., 16:].mean()                      # the textured half smoothed away
+    d = texture_deficit(smooth, y)
+    assert float(d[..., :, 24:].min()) > 0.1                   # charged where the target has texture ...
+    assert float(d[..., :, :8].max()) == 0.0                   # ... not on the flat half
+    assert float(flat_excess(smooth, y).sum()) == 0.0          # smoothing is never flat excess
+    boost = y.clone()
+    boost[..., 16:] = 6.0 + 2.0 * (y[..., 16:] - 6.0)          # more texture than the target is not a deficit
+    assert float(texture_deficit(boost, y).sum()) == 0.0
+    noisy = y + 0.02 * torch.randn(y.shape, generator=g)       # texture everywhere
+    e, t = std_mismatch(noisy, y)
+    assert torch.equal(e, flat_excess(noisy, y)) and torch.equal(t, texture_deficit(noisy, y))
+    assert float(e[..., :, :8].min()) > 0.0 and float((e * t).sum()) == 0.0   # the halves never share a pixel
+    base = float(pair_loss(smooth, y, x))                      # off by default
+    assert base == float(pair_loss(smooth, y, x, texture_weight=0.0))
+    one, two = float(pair_loss(smooth, y, x, texture_weight=1.0)), float(pair_loss(smooth, y, x, texture_weight=2.0))
+    assert base < one < two and two - one == pytest.approx(one - base, rel=1e-4)   # linear in the weight
 
 
 def test_eval_raw_scores_a_checkpoint_on_held_out_tiles(tmp_path):
@@ -371,3 +530,15 @@ def test_eval_raw_scores_a_checkpoint_on_held_out_tiles(tmp_path):
         assert s["beats"] == 0 and s["loses"] == 0, (m, s)
     blind = evaluate(ck, blind=True, source="test-raws", n=2, tile=32, seed=0, root=tmp_path, device="cpu", log=None)
     assert blind["blind"] and blind["records"] == rep["records"] and "withheld" in to_markdown(blind)
+
+
+def test_the_cosine_anneals_over_whichever_budget_runs_out_first():
+    from harness.model.train import WARMUP, lr_at
+    lr, steps = 2e-4, 30000
+    assert lr_at(0, steps, lr, spent=0.9) == pytest.approx(lr / WARMUP)          # the warmup stays step-based
+    assert lr_at(WARMUP, steps, lr) == pytest.approx(lr)
+    assert lr_at(steps, steps, lr) == pytest.approx(0.05 * lr)
+    mid = lr_at(WARMUP + 100, steps, lr, spent=0.5)                               # the clock ahead of the steps
+    assert mid == pytest.approx(lr * (0.05 + 0.95 * 0.5))
+    assert lr_at(WARMUP + 100, steps, lr, spent=1.0) == pytest.approx(0.05 * lr)  # a run its --minutes stop ends annealed
+    assert lr_at(steps - 10, steps, lr, spent=0.1) < lr_at(steps // 2, steps, lr, spent=0.1)   # the steps ahead

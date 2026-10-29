@@ -110,3 +110,51 @@ def test_eval_raw_is_wired_into_the_cli():
     a = p.parse_args(["model", "eval-raw", "--ckpt", "x.pt", "--blind", "--n", "4"])
     assert a.func.__name__ == "cmd_eval_raw" and a.blind and a.n == 4 and a.out is None
     assert a.source == "raw-pixls-us" and a.tile == 256 and a.seed == 0 and a.save_tiles == 8
+    assert a.noise == "residual" and not a.no_frontier
+    r = p.parse_args(["model", "rescore", "--dir", "a", "b", "--noise", "hp", "--no-frontier"])
+    assert r.func.__name__ == "cmd_rescore" and r.dir == ["a", "b"] and r.noise == "hp" and r.no_frontier
+    with pytest.raises(SystemExit):
+        p.parse_args(["model", "eval-raw", "--ckpt", "x.pt", "--noise", "nope"])
+
+
+def test_score_keeps_the_high_pass_verdict_and_wants_a_frontier_of_its_reading(raw_root):
+    from harness.model.frontier import ladder
+    samples = render_set(build_set(SOURCE, n=3, tile=64, seed=1, root=raw_root, log=None))
+    rep = score(samples, lambda s: s["x"])
+    assert rep["noise"] == "residual" and set(rep["gates"]) == {"capture", "capture_hp"}
+    assert all(set(r["hp"]) == {"input", "output", "truth"} for r in rep["tiles"])
+    assert "capture_hp" not in score(samples, lambda s: s["x"], "hp")["gates"]
+    with pytest.raises(ValueError, match="scored under noise 'hp', not 'residual'"):
+        score(samples, lambda s: s["x"], "residual", ladder(samples, "hp", lams=(0.0, 1.0)))
+
+
+def test_rescore_reproduces_the_report_from_its_stored_outputs(raw_root, tmp_path, monkeypatch):
+    pytest.importorskip("torch")
+    import json
+    from types import SimpleNamespace
+
+    from harness.model import apply
+    from harness.model.cli import cmd_rescore
+    from harness.model.heldout import OUTPUTS_FILE, evaluate, rescore
+    monkeypatch.setattr(apply, "load_model", lambda ckpt, device=None, bf16=False: SimpleNamespace(step=3))
+    monkeypatch.setattr(apply, "restore_frames",
+                        lambda b, frames, white_level=1.0, capture=None: gaussian_filter(frames, (0, 0.8, 0.8, 0)))
+    out = tmp_path / "rep"
+    rep = evaluate("x.pt", blind=True, source=SOURCE, n=3, tile=64, seed=1, root=raw_root, log=None, out=out,
+                   save_tiles=0)
+    assert np.load(out / OUTPUTS_FILE)["outputs"].shape == (3, 64, 64, 3)
+    assert rep["noise"] == "residual" and {"capture", "capture_hp", "frontier"} <= set(rep["gates"])
+    assert rep["gates"]["frontier"]["match"]["tiles"] == 3 and "oracle linear frontier" in to_markdown(rep)
+    (out / "heldout.json").write_text(json.dumps(rep), encoding="utf-8")
+    again = rescore(out, root=raw_root, log=None)                    # no checkpoint, no GPU: the stored tiles
+    for k in ("n", "noise", "metrics", "gates", "tiles", "step", "records"):
+        assert json.dumps(again[k]) == json.dumps(rep[k]), k
+    hp = rescore(out, noise="hp", frontier=False, root=raw_root, log=None)
+    assert hp["noise"] == "hp" and set(hp["gates"]) == {"capture"} and "noise read as `hp`" in to_markdown(hp)
+    monkeypatch.setenv("HARNESS_DATA_ROOT", str(raw_root))
+    assert cmd_rescore(argparse.Namespace(dir=[str(out)], noise="hp", no_frontier=True)) == 0
+    assert json.loads((out / "heldout_before_rescore.json").read_text(encoding="utf-8"))["noise"] == "residual"
+    assert json.loads((out / "heldout.json").read_text(encoding="utf-8"))["noise"] == "hp"
+    (out / OUTPUTS_FILE).unlink()
+    with pytest.raises(FileNotFoundError, match="no stored outputs"):
+        rescore(out, root=raw_root, log=None)

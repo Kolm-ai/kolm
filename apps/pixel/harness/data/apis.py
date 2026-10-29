@@ -7,6 +7,7 @@ import base64
 import html as _html
 import os
 import re
+from pathlib import Path
 from typing import Callable
 from urllib.parse import quote, urlencode
 
@@ -315,12 +316,18 @@ def dataverse_dataset(c: Collector, source: Source) -> list[FileSpec]:
 def gcs_bucket(c: Collector, source: Source) -> list[FileSpec]:
     """Every object under `prefix` of the public bucket `bucket` (gs://hdrplusdata is one), through the
     storage JSON API's anonymous listing: `pattern` is a regex on the object name, `limit` stops the walk
-    once that many objects are listed. Size and MD5 (base64 in the API, hex here) come with the listing;
-    objects download as plain https://storage.googleapis.com/<bucket>/<object>. Paths drop the prefix."""
+    once that many objects are listed, `names_file` is a text file of the exact paths (one per line, without the
+    prefix) to keep, for a pick no regex states short enough (each HDR+ burst's own reference frame). Size and
+    MD5 (base64 in the API, hex here) come with the listing; objects download as plain
+    https://storage.googleapis.com/<bucket>/<object>. Paths drop the prefix."""
     p = source.params
     bucket, prefix = str(p["bucket"]), str(p.get("prefix", ""))
     pat = re.compile(str(p.get("pattern", ".*")), re.I)
     limit = int(p.get("limit") or 0)
+    names = None
+    if p.get("names_file"):
+        names = {ln.strip().lstrip("/") for ln in Path(str(p["names_file"])).read_text(encoding="utf-8").splitlines()}
+        names.discard("")
     specs: list[FileSpec] = []
     token = None
     while True:
@@ -334,6 +341,8 @@ def gcs_bucket(c: Collector, source: Source) -> list[FileSpec]:
                 continue
             md5 = base64.b64decode(it["md5Hash"]).hex() if it.get("md5Hash") else None
             rel = name[len(prefix):] if prefix and name.startswith(prefix) else name
+            if names is not None and rel.lstrip("/") not in names:
+                continue
             specs.append(FileSpec(url=f"{GCS}/{bucket}/{quote(name)}", path=rel.lstrip("/"),
                                   size=int(it["size"]), md5=md5))
             if limit and len(specs) >= limit:

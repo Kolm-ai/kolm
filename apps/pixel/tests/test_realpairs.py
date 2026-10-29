@@ -15,8 +15,8 @@ from scipy.ndimage import rotate
 from harness.data import label as L
 from harness.data.label import Item, list_items, scene_of
 from harness.data.realpairs import (HDRPLUS, RAWNIND, Pair, align,
-                                    build_set, capture_of, compare, compare_markdown, gain, hdrplus_pairs, load_set,
-                                    match_pair, noise_law, overlap, phase_shift, rawnind_iso, rawnind_pairs,
+                                    build_set, capture_of, compare, compare_markdown, gain, hdrplus_pairs,
+                                    input_fits, load_set, match_of, match_pair, noise_law, overlap, phase_shift, rawnind_iso, rawnind_pairs,
                                     rows_path, set_path, summarise, tile_rows)
 from harness.metrics import STILL_METRICS
 from harness.model.data import UNKNOWN_CAPTURE, capture_descriptor, split_of
@@ -67,12 +67,51 @@ def test_align_refines_and_rejects_rotation_or_another_scene():
     x, y, _ = _pair(rng, (-7, 4))
     al = align(x, y)
     assert al["shift"] == (-7, 4) and al["aligned"] and al["corr"] > 0.95 and al["quadrant_spread"] <= 1.0
-    assert len(al["quadrants"]) == 4
+    assert len(al["quadrants"]) == 4 and al["quadrants_held"] == 4
     rotated = np.clip(rotate(y, 3.0, reshape=False, order=1), 0, 1)
     assert not align(x, rotated)["aligned"]
     other, _, _ = _pair(np.random.default_rng(3), (0, 0))
     bad = align(x, other)
     assert not bad["aligned"] and bad["corr"] < 0.5
+
+
+def test_a_black_or_clipped_quadrant_holds_no_position():
+    """A quadrant black in both frames (noise only) or clipped in both has a phase peak that is noise; the
+    quadrants that hold a position decide, and too few of them is no alignment."""
+    rng = np.random.default_rng(5)
+    x, y, _ = _pair(rng, (3, 2))
+    x[:96, :128] = _capture(np.zeros((96, 128, 3)), rng)
+    y[3:99, 2:130] = _capture(np.zeros((96, 128, 3)), rng)
+    x[96:, 128:], y[99:, 130:] = 1.0, 1.0
+    al = align(x, y)
+    assert al["shift"] == (3, 2) and al["quadrants_held"] == 2 and al["quadrant_spread"] <= 1.0 and al["aligned"]
+    x[:96, 128:], y[3:99, 130:] = 1.0, 1.0
+    few = align(x, y)
+    assert few["shift"] == (3, 2) and few["quadrants_held"] == 1 and not few["aligned"]
+
+
+def test_an_input_cut_or_turned_against_its_reference_is_brought_to_its_frame(tmp_path):
+    """A reference a few rows shorter than its input (a merge that dropped edge rows) or turned a quarter (an
+    orientation tag read differently) is still the input's pair: the input is centre-cut, or turned and cut, to
+    the reference's frame, the cut's leftover offset is the alignment's, and the reference is never touched."""
+    rng = np.random.default_rng(6)
+    x, y, _ = _pair(rng, (2, 1), h=244)
+    cut = y[4:]
+    (xf, fit), = input_fits(x, cut)
+    assert fit == {"turn": 0, "crop": [2, 0]} and xf.shape == cut.shape
+    assert align(xf, cut)["shift"] == (0, 1) and align(xf, cut)["aligned"]
+    turned = np.rot90(cut, 1)
+    assert [f["turn"] for _, f in input_fits(x, turned)] == [1, 3]
+    imgs = {"in.dng": x, "ref.dng": turned}
+    p = Pair("fake", "s", "ref.dng", "in.dng", "train")
+    m, xm, _, ym = match_of(p, tmp_path, 1, lambda path, scale: (imgs[path.name], 14))
+    assert m["fit"] == {"turn": 1, "crop": [0, 2], "shape_in": [244, 256]} and ym is turned
+    assert xm.shape == turned.shape and m["align"]["aligned"] and m["align"]["corr"] > 0.9
+    imgs["ref.dng"] = y
+    assert "fit" not in match_of(p, tmp_path, 1, lambda path, scale: (imgs[path.name], 14))[0]
+    imgs["ref.dng"] = y[20:]
+    with pytest.raises(ValueError, match="shapes differ"):
+        match_of(p, tmp_path, 1, lambda path, scale: (imgs[path.name], 14))
 
 
 def test_gain_and_noise_law_recover_what_the_capture_was_made_with():
@@ -110,19 +149,21 @@ def test_rawnind_iso_reads_the_file_name():
 def test_clean_include_scene_and_holdout_keys(tmp_path, monkeypatch):
     from PIL import Image
     monkeypatch.setattr(L, "_manifest_clean", lambda: {
-        "src": {"include": ["*_GT_ISO*"], "scene": RAWNIND_SCENE, "holdout": ["held*"]}})
+        "src": {"include": ["*_GT_ISO*"], "scene": RAWNIND_SCENE, "holdout": ["held*", "UNK_TEST_heldC"]}})
     d = tmp_path / "raw" / "src"
     d.mkdir(parents=True)
     names = ["Bayer_sceneA_GT_ISO100_sha1=a.png", "Bayer_sceneA_ISO3200_sha1=b.png",
-             "X-Trans_TEST_heldB_GT_ISO200_sha1=c.png", "other/plain_4k.png"]
+             "X-Trans_TEST_heldB_GT_ISO200_sha1=c.png", "other/plain_4k.png", "Bayer_UNK_TEST_heldC_GT_ISO100_sha1=d.png"]
     for n in names:
         (d / n).parent.mkdir(parents=True, exist_ok=True)
         Image.fromarray(np.zeros((8, 8, 3), np.uint8)).save(d / n)
     items = list_items("src", tmp_path)
-    assert sorted(i.file for i in items) == [names[0], names[2]]            # include keeps the GT raws only
+    assert sorted(i.file for i in items) == sorted([names[0], names[2], names[4]])  # include keeps the GT raws
     assert scene_of(Item("src", names[0])) == scene_of(Item("src", names[1])) == "sceneA"
     assert scene_of(Item("src", names[2])) == "heldB"                        # the TEST_ prefix is not the scene
     assert scene_of(Item("src", names[3])) == "other/plain.png"              # no match: the path rule
+    assert scene_of(Item("src", names[4])) == "UNK_TEST_heldC"               # an unknown sensor's prefix stays
+    assert split_of(Item("src", names[4])) == "test"                         # and the holdout names that key
     assert split_of(Item("src", names[2])) == "test" and split_of(Item("src", names[0])) in ("train", "val")
     assert split_of(Item("src", names[0])) == split_of(Item("src", names[1]))  # the GT and its sweep split together
 
@@ -140,18 +181,22 @@ def test_rawnind_pairs_from_the_index_and_the_reserve(tmp_path, monkeypatch):
 
     a_gt = [f"Bayer_sceneA_GT_ISO100_sha1={k}.arw" for k in ("bb", "aa")]
     a_noisy = ["Bayer_sceneA_ISO6400_sha1=cc.arw", "Bayer_sceneA_ISO800_sha1=dd.arw", "Bayer_sceneA_ISO200_sha1=gone.arw"]
+    a_other = ["Bayer_sceneA_GT_ISO100_sha1=00.xmp", "Bayer_sceneA_ISO6400_sha1=01.jpg"]   # listed, on disk, not raws
     t_gt, t_noisy = ["Bayer_TEST_sceneT_GT_ISO100_sha1=ee.cr2"], ["Bayer_TEST_sceneT_ISO400_sha1=ff.cr2"]
     r_gt, r_noisy = ["X-Trans_sceneR_GT_ISO200_sha1=gg.raf"], ["X-Trans_sceneR_ISO3200_sha1=hh.raf"]
-    index = {"Bayer": {"sceneA": entry("sceneA", a_gt, a_noisy), "sceneT": entry("sceneT", t_gt, t_noisy, test_reserve=True),
+    index = {"Bayer": {"sceneA": entry("sceneA", a_gt + a_other[:1], a_noisy + a_other[1:]), "sceneT": entry("sceneT", t_gt, t_noisy, test_reserve=True),
                        "sceneM": entry("sceneM", ["Bayer_sceneM_GT_ISO100_sha1=zz.arw"], ["Bayer_sceneM_ISO800_sha1=yy.arw"])},
              "X-Trans": {"sceneR": entry("sceneR", r_gt, r_noisy, unknown_sensor=True)}}
     (base / "dataset.yaml").write_text(yaml.safe_dump(index), encoding="utf-8")
     (base / "test_reserve.yaml").write_text(yaml.safe_dump({"test_reserve": ["sceneR"]}), encoding="utf-8")
     (base / "permissions.txt").write_text("sceneA: CC0, by A. Author\nsceneT: CC BY 4.0, by T\n", encoding="utf-8")
-    for f in a_gt + a_noisy[:2] + t_gt + t_noisy + r_gt + r_noisy:
+    for f in a_gt + a_noisy[:2] + a_other + t_gt + t_noisy + r_gt + r_noisy:
         (base / f).write_bytes(b"")
-    logged = []
-    pairs = rawnind_pairs(tmp_path, log=logged.append)
+    with pytest.raises(ValueError, match="sceneR") as e:   # the reserve the manifest misses: no pairs at all
+        rawnind_pairs(tmp_path)
+    assert "sceneT" not in str(e.value)
+    monkeypatch.setattr(L, "_manifest_clean", lambda: {RAWNIND: {"scene": RAWNIND_SCENE, "holdout": ["sceneT", "sceneR"]}})
+    pairs = rawnind_pairs(tmp_path)
     assert [(p.scene, p.ref_file, p.in_file) for p in pairs] == [
         ("sceneA", a_gt[1], a_gt[0]), ("sceneA", a_gt[1], a_noisy[0]), ("sceneA", a_gt[1], a_noisy[1]),
         ("sceneT", t_gt[0], t_noisy[0]), ("sceneR", r_gt[0], r_noisy[0])]       # sceneM has no GT on disk
@@ -160,7 +205,6 @@ def test_rawnind_pairs_from_the_index_and_the_reserve(tmp_path, monkeypatch):
     assert a.meta == {"cfa": "Bayer", "unknown_sensor": False, "ref_iso": 100.0} and pairs[0].iso == 100.0
     assert pairs[3].split == "test" and pairs[3].licence == "CC BY 4.0, by T"
     assert pairs[4].split == "test" and pairs[4].meta["unknown_sensor"] and pairs[4].licence == ""
-    assert len(logged) == 1 and "sceneR" in logged[0] and "sceneT" not in logged[0]  # the reserve the manifest misses
 
 
 def test_hdrplus_pairs_take_the_newest_merge_and_the_reference_frame(tmp_path, monkeypatch):
@@ -282,7 +326,7 @@ def test_evaluate_real_scores_the_cached_set_with_the_measured_capture(tmp_path,
         seen.append(capture)
         return frames
 
-    monkeypatch.setattr(apply, "load_model", lambda ckpt, device=None: SimpleNamespace(step=3))
+    monkeypatch.setattr(apply, "load_model", lambda ckpt, device=None, bf16=False: SimpleNamespace(step=3))
     monkeypatch.setattr(apply, "restore_frames", fake_restore)
     rep = evaluate("x.pt", source="fake", n=4, tile=64, seed=0, root=tmp_path, log=None, real=True, scale=1)
     assert rep["real"] and rep["preset"] == "real" and rep["scale"] == 1 and rep["n"] == 4 and rep["step"] == 3

@@ -177,13 +177,14 @@ def cmd_realpairs(args) -> int:
     rc = 0
     for source in args.sources:
         try:
-            rs = build_set(source, args.n, args.tile, args.scale, args.seed, splits=tuple(args.splits), log=print)
+            rs = build_set(source, args.n, args.tile, args.scale, args.seed, splits=tuple(args.splits), log=print,
+                           subpix=args.subpix)
         except (ValueError, FileNotFoundError) as ex:
             print(f"{source}: {ex}")
             rc = 1
             continue
         print(summarise(rs))
-        path = set_path(source, rs.seed, rs.n, rs.tile, rs.scale)
+        path = set_path(source, rs.seed, rs.n, rs.tile, rs.scale, subpix=args.subpix)
         print(f"  set: {path}\n  rows: {rows_path(path)}")
         if args.compare:
             from .label import read_labels
@@ -195,6 +196,135 @@ def cmd_realpairs(args) -> int:
             print(md, end="")
             print(f"  report: {p}")
     return rc
+
+
+def cmd_realstore(args) -> int:
+    """The real-pair training store (realstore.py): every pair of the chosen splits decoded once at the clean scale,
+    aligned and gain-matched, as memmappable arrays the sampler draws tiles from."""
+    from .realstore import RealStore, build_store
+    rc = 0
+    for source in args.sources:
+        try:
+            tally = build_store(source, tuple(args.splits), args.scale, workers=args.workers, log=print,
+                                background=args.background)
+        except (ValueError, FileNotFoundError) as ex:
+            print(f"{source}: {ex}")
+            rc = 1
+            continue
+        print(f"  {tally['stored']} stored, {tally['rejected']} rejected, {tally['failed']} scene(s) failed, "
+              f"{tally['already']} were there, {tally['bytes'] / 1e9:.1f} GB, {tally['seconds']:.0f} s")
+        if tally["failed"] or tally["full"]:
+            rc = 1   # a scene that failed whole, or one the disk floor stopped, is built by the next run: not done
+        for split in args.splits:
+            try:
+                print(f"  {RealStore([source], split, tile=args.tile).summary()}")
+            except ValueError as ex:
+                print(f"  {ex}")
+    return rc
+
+
+def cmd_burststore(args) -> int:
+    """The burst store (burststore.py): each HDR+ burst's other frames on disk, decoded at the real store's scale,
+    fitted and registered to the burst's merge (a whole-frame shift and a grid of local ones), for the burst layer."""
+    from .burststore import BurstStore, build_store
+    try:
+        tally = build_store(splits=tuple(args.splits), workers=args.workers, window=args.window, log=print,
+                            background=args.background)
+    except (ValueError, FileNotFoundError) as ex:
+        print(f"burst store: {ex}")
+        return 1
+    for split in args.splits:
+        try:
+            print(f"  {BurstStore(split, tile=args.tile).summary()}")
+        except (ValueError, FileNotFoundError) as ex:
+            print(f"  {ex}")
+    return 1 if tally["failed"] or tally["full"] else 0
+
+
+def cmd_subpix(args) -> int:
+    """The residual the integer shift leaves on every stored real pair (realstore.measure_store, data.subpix), written
+    into each pair's JSON, for a store written before write_scene measured it."""
+    from .realstore import measure_store
+    rc = 0
+    for source in args.sources:
+        try:
+            tally = measure_store(source, workers=args.workers, log=print, background=args.background,
+                                  again=args.again)
+        except (ValueError, FileNotFoundError) as ex:
+            print(f"{source}: {ex}")
+            rc = 1
+            continue
+        if tally["failed"]:
+            rc = 1
+    return rc
+
+
+def cmd_decoded(args) -> int:
+    """The decoded clean-image store (decodedstore.py): every plain-file item of the chosen sources and split
+    decoded once at its clean scale, as the array the training sampler would compute; with --prune, the stored
+    arrays no current item of the sources keys removed instead, and with --compact, the stored float32 arrays
+    float16 holds rewritten as float16 (no decoding either way; --compact for a store written before 2026-10-29)."""
+    from ..model.data import split_of
+    from . import data_root
+    from .decodedstore import compact_store, decoded_key, fill_store, prune_store
+    from .label import list_items
+    if args.prune:
+        root = data_root()
+        keep = {s: {k for it in list_items(s) if (k := decoded_key(it, root))} for s in args.sources}
+        t = prune_store(keep, root, log=print)
+        print(f"  {t['pruned']} stale arrays removed of {t['files']}, {t['busy']} busy (mapped by another process; "
+              f"run again), {t['freed'] / 1e9:.1f} GB freed"
+              + (f"; left alone (no current key): {', '.join(t['skipped'])}" if t["skipped"] else ""))
+    if args.compact:
+        t = compact_store(sources=args.sources, workers=args.workers, background=args.background, log=print)
+        print(f"  {t['compacted']} compacted, {t['already']} were float16, {t['kept']} kept as float32 (past "
+              f"float16), {t['busy']} busy (mapped by another process; run again), {t['other']} not stored images, "
+              f"{t['freed'] / 1e9:.1f} GB freed, {t['seconds']:.0f} s")
+    if args.prune or args.compact:
+        return 0
+    items = [it for s in args.sources for it in list_items(s) if split_of(it) == args.split]
+    if not items:
+        print(f"no items for split {args.split!r} in {args.sources}")
+        return 1
+    tally = fill_store(items, workers=args.workers, background=args.background, log=print)
+    print(f"  {tally['stored']} stored, {tally['already']} were there, {tally['left_out']} left out, "
+          f"{len(tally['rejected'])} rejected, {tally['bytes'] / 1e9:.1f} GB, {tally['seconds']:.0f} s")
+    full = sum(why == "store_full" for why in tally["rejected"].values())
+    if full:
+        print(f"  {full} not decoded: the drive is at the store's free-space floor (HARNESS_DECODED_RESERVE_GB)")
+    for k, why in sorted(tally["rejected"].items()):
+        if why != "store_full":
+            print(f"  rejected {k}: {why}")
+    return 0
+
+
+def cmd_audit(args) -> int:
+    """The clean-target audit (targetaudit.py): every item of the chosen sources, all splits, read once for the halo
+    its clean image carries; then per source the readings' spread and what its `clean.max_halo` keeps."""
+    import numpy as np
+    from .label import clean_settings, list_items
+    from .targetaudit import audit_items, filter_targets, read_audit
+    items = [it for s in args.sources for it in list_items(s)]
+    if not items:
+        print(f"no items in {args.sources}")
+        return 1
+    tally = audit_items(items, workers=args.workers, background=args.background, log=print)
+    print(f"  {tally['read']} read, {tally['already']} were read, {len(tally['rejected'])} rejected, "
+          f"{tally['seconds']:.0f} s")
+    for k, why in sorted(tally["rejected"].items()):
+        print(f"  rejected {k}: {why}")
+    _, report = filter_targets(items)
+    for s in args.sources:
+        v = np.array([r["halo"] for r in read_audit(s).values() if r.get("halo") is not None])
+        line = f"  {s}: {v.size} readings"
+        if v.size:
+            line += ", " + ", ".join(f"p{q} {np.percentile(v, q):.4f}" for q in (25, 50, 75, 90))
+        mx = clean_settings(s).get("max_halo")
+        if mx is not None and s in report:
+            r = report[s]
+            line += f"; max_halo {mx}: {r['kept']} kept, {r['over']} over, {r['unaudited']} not audited"
+        print(line)
+    return 0
 
 
 def add_parser(sub) -> None:
@@ -245,7 +375,7 @@ def add_parser(sub) -> None:
     lb.set_defaults(func=cmd_label)
 
     rp = ds.add_parser("realpairs", help="real capture/reference pairs: aligned, gain-matched tiles with label rows")
-    rp.add_argument("--sources", nargs="+", default=["rawnind", "hdr-plus-burst"], help="rawnind and/or hdr-plus-burst")
+    rp.add_argument("--sources", nargs="+", default=["rawnind", "hdr-plus-burst"], help="real-pair sources: rawnind, hdr-plus-burst, si-hdr")
     rp.add_argument("--n", type=int, default=64, help="tiles in the set (a function of source, seed, n, tile, scale)")
     rp.add_argument("--tile", type=int, default=256)
     rp.add_argument("--scale", type=int, help="working scale (default: the manifest's clean scale)")
@@ -253,4 +383,51 @@ def add_parser(sub) -> None:
     rp.add_argument("--splits", nargs="+", default=["val", "test"], help="scene splits the pairs come from")
     rp.add_argument("--compare", action="store_true", help="real rows' metric quantiles against the synthetic label rows'")
     rp.add_argument("--labels", help="synthetic label shard directory for --compare (default <data root>/labels)")
+    rp.add_argument("--subpix", action="store_true",
+                    help="targets and the camera's photo moved by each pair's sub-pixel residual (data.subpix): a set "
+                         "of its own on the plain set's tiles")
     rp.set_defaults(func=cmd_realpairs)
+
+    st = ds.add_parser("realstore", help="real capture/reference pairs as a training store: every pair decoded once")
+    st.add_argument("--sources", nargs="+", default=["rawnind", "hdr-plus-burst"], help="real-pair sources: rawnind, hdr-plus-burst, si-hdr")
+    st.add_argument("--splits", nargs="+", default=["train"], help="scene splits to store (train for training, val for a real validation set)")
+    st.add_argument("--scale", type=int, help="working scale (default: the manifest's pair scale; one store per source)")
+    st.add_argument("--workers", type=int, default=8, help="scenes decoded at once")
+    st.add_argument("--background", action="store_true", help="below normal priority, to run beside a training run")
+    st.add_argument("--tile", type=int, default=256, help="tile size the summary reports draws for")
+    st.set_defaults(func=cmd_realstore)
+
+    bs = ds.add_parser("burststore", help="HDR+ bursts' other frames registered to their merges, for the burst layer")
+    bs.add_argument("--splits", nargs="+", default=["val"], help="scene splits to store (train, val)")
+    bs.add_argument("--window", type=int, help="px of the merge each burst's frames are kept for (a window the scene's "
+                                               "name places; default the whole frame)")
+    bs.add_argument("--workers", type=int, default=4, help="bursts registered at once")
+    bs.add_argument("--background", action="store_true", help="below normal priority, to run beside a training run")
+    bs.add_argument("--tile", type=int, default=256, help="tile size the summary reports draws for")
+    bs.set_defaults(func=cmd_burststore)
+
+    sx = ds.add_parser("subpix", help="the sub-pixel residual of every stored real pair, written into its JSON")
+    sx.add_argument("--sources", nargs="+", default=["rawnind", "hdr-plus-burst"], help="real-pair sources: rawnind, hdr-plus-burst, si-hdr")
+    sx.add_argument("--workers", type=int, default=4, help="pairs measured at once")
+    sx.add_argument("--background", action="store_true", help="below normal priority, to run beside a training run")
+    sx.add_argument("--again", action="store_true", help="measure the pairs measured before as well")
+    sx.set_defaults(func=cmd_subpix)
+
+    dc = ds.add_parser("decoded", help="clean images decoded once for the training sampler (derived/decoded)")
+    dc.add_argument("--sources", nargs="+", required=True, help="clean sources, as model train --sources names them")
+    dc.add_argument("--split", default="train", help="scene split to store (train: the one the stream draws from)")
+    dc.add_argument("--workers", type=int, default=8, help="items decoded at once")
+    dc.add_argument("--background", action="store_true", help="below normal priority, to run beside a training run")
+    dc.add_argument("--compact", action="store_true",
+                    help="no decoding: rewrite the stored float32 arrays float16 holds as float16 (what a decode "
+                         "stores since 2026-10-29), so a store written before takes half the drive")
+    dc.add_argument("--prune", action="store_true",
+                    help="no decoding: remove the stored arrays no current item keys (what a changed decode setting, "
+                         "decoder or raw file leaves behind); before --compact when both are given")
+    dc.set_defaults(func=cmd_decoded)
+
+    au = ds.add_parser("audit", help="clean targets read once for the halo they carry (derived/target_audit)")
+    au.add_argument("--sources", nargs="+", required=True, help="clean sources, as model train --sources names them")
+    au.add_argument("--workers", type=int, default=4, help="items read at once")
+    au.add_argument("--background", action="store_true", help="below normal priority, to run beside a training run")
+    au.set_defaults(func=cmd_audit)

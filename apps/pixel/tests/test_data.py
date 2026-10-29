@@ -355,6 +355,25 @@ def test_gcs_bucket_expander_pages_and_converts_md5():
     assert [s.path for s in gcs_bucket(Stub(), src)] == ["bursts/0006_a/payload_N000.dng"] and calls == [None]
 
 
+
+def test_gcs_bucket_keeps_only_the_named_paths(tmp_path):
+    from harness.data.apis import gcs_bucket
+    items = [{"name": f"full/bursts/b{i}/payload_N00{j}.dng", "size": "1"} for i in range(3) for j in range(3)]
+
+    class Stub:
+        def get_json(self, url, params=None, headers=None):
+            return {"items": items}
+
+    names = tmp_path / "names.txt"
+    names.write_text("\n".join(["bursts/b0/payload_N002.dng", "", "/bursts/b2/payload_N000.dng",
+                                 "bursts/b9/payload_N000.dng"]), encoding="utf-8")
+    src = Source(id="g", name="g", kind="dataset", access="api", url="u", expander="gcs_bucket",
+                 params={"bucket": "b", "prefix": "full/", "names_file": str(names)})
+    assert [s.path for s in gcs_bucket(Stub(), src)] == ["bursts/b0/payload_N002.dng", "bursts/b2/payload_N000.dng"]
+    src.params["pattern"] = "b2/"
+    assert [s.path for s in gcs_bucket(Stub(), src)] == ["bursts/b2/payload_N000.dng"]
+
+
 def test_expand_failures_are_ledgered_and_cleared(tmp_path):
     root = tmp_path / "data"
     c = Collector(root=root, log=lambda *_: None)
@@ -452,3 +471,13 @@ def test_listings_back_off_politely_and_honour_retry_after(tmp_path, monkeypatch
     with pytest.raises(requests.HTTPError):
         c.get_text("https://commons.wikimedia.org/w/api.php")
     assert len(sleeps) == C.LISTING_RETRIES - 1 and sleeps == sorted(sleeps) and max(sleeps) <= C.MAX_BACKOFF_S
+
+
+def test_downloads_stop_at_the_free_space_floor_and_resume_after(tmp_path, monkeypatch):
+    src = _local_source(tmp_path)
+    monkeypatch.setenv("HARNESS_COLLECT_RESERVE_GB", "1e9")       # a floor no drive clears
+    s1 = Collector(root=tmp_path / "data", log=lambda *_: None).fetch_source(src)
+    assert s1["done"] == 0 and s1["failed"] == 3 and all("disk reserve" in e for e in s1["errors"])
+    assert not (tmp_path / "data" / "raw" / "local" / "sub" / "f0.txt").exists()
+    monkeypatch.setenv("HARNESS_COLLECT_RESERVE_GB", "0")
+    assert Collector(root=tmp_path / "data", log=lambda *_: None).fetch_source(src)["done"] == 3

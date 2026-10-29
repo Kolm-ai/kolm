@@ -112,6 +112,46 @@ def test_list_items_lists_decodable_zip_members_and_keeps_previews_out(tmp_path)
     assert len({item_key(it) for it in items}) == len(items)  # every member is its own resume key
 
 
+def test_a_tar_lists_its_images_only_when_the_source_says_so_and_reads_members_in_place(tmp_path, monkeypatch):
+    import tarfile
+    from PIL import Image
+    d = _source(tmp_path, "uhd")
+    big = np.random.default_rng(5).integers(0, 256, (40, 60, 3), dtype=np.uint8)
+    blobs = {}
+    for fmt, kw in (("PNG", {}), ("JPEG", {"quality": 50}), ("JPEG2000", {"irreversible": False})):
+        buf = io.BytesIO()
+        Image.fromarray(big).save(buf, fmt, **kw)
+        blobs[fmt] = buf.getvalue()
+    with tarfile.open(d / "test.tar", "w") as t:
+        for name, data in (("test/b.png", blobs["PNG"]), ("test/a.jpg", blobs["JPEG"]), ("test/c.jp2", blobs["JPEG2000"]),
+                           ("../escape.png", blobs["PNG"]), ("test/notes.txt", b"x")):
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            t.addfile(info, io.BytesIO(data))
+    (d / "bad.tar").write_bytes(b"not a tar " * 100)
+    assert [it.file for it in list_items("uhd", tmp_path)] == ["bad.tar"]   # an archive's images are its previews
+    monkeypatch.setattr(L, "_manifest_clean", lambda: {"uhd": {"archive_images": True, "scale": 2,
+                                                               "low_quality_scale": 4}})
+    items = list_items("uhd", tmp_path)
+    assert [(it.file, it.is_hdr) for it in items] == [
+        ("bad.tar", False), ("test.tar::../escape.png", False), ("test.tar::test/a.jpg", False),
+        ("test.tar::test/b.png", False), ("test.tar::test/c.jp2", False)]
+    assert split_member("test.tar::test/a.jpg") == ("test.tar", "test/a.jpg")
+    bad, escape, jpg, png, jp2 = items
+    dec = decode_item(png, tmp_path)
+    assert dec.domain == "srgb8" and dec.scale == 2
+    assert np.allclose(dec.img, L.box_downsample(srgb_to_linear(big / 255.0), 2))
+    assert decode_item(jpg, tmp_path).scale == 4               # the member's own quantisation tables set its scale
+    dec = decode_item(jp2, tmp_path)                            # lossless JPEG 2000 (UHD-IQA's originals)
+    assert dec.domain == "srgb8" and dec.scale == 2
+    assert np.allclose(dec.img, L.box_downsample(srgb_to_linear(big / 255.0), 2))
+    assert decode_item(escape, tmp_path).img.shape == (20, 30, 3)
+    assert not (tmp_path / "raw" / "escape.png").exists()      # members are read, never extracted
+    errors = {}
+    load_items([bad], tmp_path, errors)
+    assert errors[bad].startswith("decode_error:ReadError")
+
+
 # ---- decoders --------------------------------------------------------------------------------------------------
 
 def test_exr_zip_members_decode_to_clean_linear_radiance(tmp_path):
@@ -163,6 +203,38 @@ def test_raw_decodes_linear_with_camera_white_balance_and_no_brightening(tmp_pat
     assert not (abs(r2 / g2 - 1.0) < 0.2 and abs(b2 / g2 - 1.0) < 0.2)   # another neutral: not grey any more
     assert np.allclose(two.img[8:-8, 8:-8], 2.0 * centre, rtol=0.02)  # linear: double the counts, double the value
     assert np.array_equal(zipped.img, one.img)
+
+
+def test_a_pixel_shift_merge_renders_as_its_camera_renders_the_single_shot(tmp_path, monkeypatch):
+    pytest.importorskip("rawpy")
+    sio = pytest.importorskip("scipy.io")
+    monkeypatch.setattr(L, "_manifest_clean", lambda: {
+        "ps": {"include": ["*_rggb.mat"], "companion": "ARW/{name}_1.dng", "scene": "shot_([0-9]+)_"}})
+    d = _source(tmp_path, "ps")
+    (d / "ARW").mkdir()
+    (d / "merged").mkdir()
+    # the raw test's neutral patch twice: as the companion's CFA, and as the merge's R, Gr, Gb, B at every site on
+    # its 14-bit scale, so only the companion's as-shot white balance turns the merge grey
+    neutral = (0.5, 1.0, 0.7)
+    cfa = np.full((64, 80), 12000.0)
+    cfa[0::2, 0::2] *= neutral[0]
+    cfa[1::2, 1::2] *= neutral[2]
+    (d / "ARW" / "shot_7_1.dng").write_bytes(_dng_bytes(cfa.astype(np.uint16), neutral))
+    site = 12000.0 * L.RGGB_WHITE / 65535 * np.array([neutral[0], 1.0, 1.0, neutral[2]])
+    sio.savemat(str(d / "merged" / "shot_7_rggb.mat"), {"rggb": np.tile(site, (60, 80, 1)).round().astype(np.int16)})
+    sio.savemat(str(d / "merged" / "bad_rggb.mat"), {"rggb": np.zeros((8, 8, 3), np.int16)})
+    assert [it.file for it in list_items("ps", tmp_path)] == ["merged/bad_rggb.mat", "merged/shot_7_rggb.mat"]
+    merge = decode_item(Item("ps", "merged/shot_7_rggb.mat", is_hdr=True), tmp_path)
+    shot = decode_item(Item("ps", "ARW/shot_7_1.dng", is_hdr=True), tmp_path)
+    assert merge.domain == "linear16" and merge.is_hdr and merge.img.dtype == np.float64
+    assert merge.img.shape == (60, 78, 3)             # the columns past the raw's visible area (80 - 2) are cut
+    assert scene_of(Item("ps", "merged/shot_7_rggb.mat")) == "7"
+    r, g, b = merge.img.reshape(-1, 3).mean(axis=0)
+    assert abs(g - 12000 / 65535) < 0.003 and abs(r / g - 1.0) < 0.01 and abs(b / g - 1.0) < 0.01
+    assert np.allclose(merge.img.reshape(-1, 3).mean(axis=0), shot.img[8:-8, 8:-8].reshape(-1, 3).mean(axis=0),
+                       rtol=0.02)
+    with pytest.raises(ValueError, match="pixel-shift"):
+        decode_item(Item("ps", "merged/bad_rggb.mat", is_hdr=True), tmp_path)
 
 
 def test_sixteen_bit_png_is_srgb16_and_tiff_falls_back_to_libraw_only_when_small(tmp_path):

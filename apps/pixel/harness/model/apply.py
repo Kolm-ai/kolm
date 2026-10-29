@@ -2,7 +2,8 @@
 
 Default conditioning is the mean restore target seen at calibration; `target_metrics` conditions on any
 other state (an edit). Frames up to MAX_SIDE run whole (the network is fully convolutional); larger ones
-are tiled with an overlap and a raised-cosine blend."""
+are tiled with an overlap and a raised-cosine blend. Inference runs in fp32 unless `bf16` is asked for: the
+network is residual, and a bf16 residual steps smooth gradients (banding)."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -26,9 +27,10 @@ class Bundle:
     cond_restore: np.ndarray
     step: int
     device: torch.device
+    bf16: bool = False
 
 
-def load_model(ckpt, device: str | None = None) -> Bundle:
+def load_model(ckpt, device: str | None = None, bf16: bool = False) -> Bundle:
     dev = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     ck = torch.load(Path(ckpt), map_location="cpu", weights_only=False)
     model = CondUNet(**ck["config"])
@@ -37,7 +39,7 @@ def load_model(ckpt, device: str | None = None) -> Bundle:
     for p in model.parameters():
         p.requires_grad_(False)
     return Bundle(model, Normaliser.from_state(ck["normaliser"]), np.array(ck["cond_restore"], dtype=np.float32),
-                  int(ck["step"]), dev)
+                  int(ck["step"]), dev, bf16)
 
 
 def _window(n: int, edge: int) -> np.ndarray:
@@ -52,9 +54,9 @@ def _window(n: int, edge: int) -> np.ndarray:
 def _run(b: Bundle, x: np.ndarray, cond: np.ndarray) -> np.ndarray:
     """One frame, (H, W, 3) log domain -> (H, W, 3) log domain."""
     t = torch.from_numpy(x).permute(2, 0, 1)[None].to(b.device)
-    t, (ph, pw) = pad_to(t, 8)
+    t, (ph, pw) = pad_to(t, 2 ** (b.model.n_levels - 1))     # each level halves the side
     c = torch.from_numpy(cond)[None].to(b.device)
-    with torch.autocast(b.device.type, dtype=torch.bfloat16, enabled=b.device.type == "cuda"):
+    with torch.autocast(b.device.type, dtype=torch.bfloat16, enabled=b.bf16 and b.device.type == "cuda"):
         y = b.model(t, c)
     y = y.float()[0].permute(1, 2, 0).cpu().numpy()
     return y[:y.shape[0] - ph or None, :y.shape[1] - pw or None]

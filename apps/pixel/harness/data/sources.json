@@ -901,6 +901,9 @@
     "config": "default",
     "split": "train"
    },
+   "clean": {
+    "max_halo": 0.044
+   },
    "notes": "catalog:tid2013. unofficial parquet mirror of the official RAR; terms: free for scientific use. Bound with --param limit=N (shards/files)."
   },
   {
@@ -918,6 +921,9 @@
     "dataset": "myzhao1999/kadid10k",
     "config": "default",
     "split": "train"
+   },
+   "clean": {
+    "max_halo": 0.044
    },
    "deriver": "fit_gates",
    "notes": "catalog:kadid-10k. images only; dmos.csv is inside the official zip (kadid10k-official). Bound with --param limit=N (shards/files). The datasets-server /rows image assets are JPEG re-encodes (q~75) and must not be used for halo measurement; the parquet shards hold the original PNG bytes."
@@ -980,18 +986,18 @@
    "name": "UHD-IQA",
    "kind": "dataset",
    "access": "api",
-   "url": "https://huggingface.co/datasets/V-NovaLtd/UHD-IQA-JPG",
+   "url": "https://huggingface.co/datasets/V-NovaLtd/UHD-IQA-J2K-Lossless",
    "license": "images CC0",
-   "size_bytes": 10700000000.0,
+   "size_bytes": 6214729728.0,
    "gives": "MOS 0-1",
-   "harness_use": "4K/UHD images with MOS 0-1 (CC0 images): resolution-gate realism check at display ppd",
-   "expander": "hf_parquet",
+   "harness_use": "4K/UHD images with MOS 0-1 (CC0 images): resolution-gate realism check at display ppd; clean targets (its 900 test images)",
+   "expander": "hf_hub_files",
    "params": {
-    "dataset": "V-NovaLtd/UHD-IQA-JPG",
-    "config": "default",
-    "split": "test"
+    "repo": "V-NovaLtd/UHD-IQA-J2K-Lossless",
+    "pattern": "\\.tar$"
    },
-   "notes": "catalog:uhd-iqa. 900-row test split is public; licence CC0 for images. Bound with --param limit=N (shards/files)."
+   "clean": {"scale": 2, "max_halo": 0.044, "archive_images": true},
+   "notes": "catalog:uhd-iqa. The full set (6,073 Pixabay photos, all CC0 per database.mmsp-kn.de/uhd-iqa-benchmark-database.html) is served from datasets.vqa.mmsp-kn.de, which closed every connection on 2026-10-28 and 2026-10-29 (TLS handshake cut, empty reply over HTTP): manual. V-Nova's Hub mirrors hold the 900-image test split as one uncompressed tar per codec, read in place (label.py's tar members with clean.archive_images). This is the lossless JPEG 2000 one (6.2 GB): its JPG mirror is a uniform quality-80 re-encode (41 dB from these pixels, 8 x 8 blocking still 4% over the clean grid at scale 2), while these, the originals (themselves JPEGs, blocking 31% at full size), are within 1% of a clean grid at scale 2. Display-referred, so audited and filtered like the Commons pictures; the MOS labels are not used."
   },
   {
    "id": "hf-koniq10k",
@@ -1837,9 +1843,10 @@
    "expander": "hf_hub_files",
    "params": {
     "repo": "guochengqian/PixelShift200",
-    "pattern": "\\.(ARW|arw|zip|tar)$"
+    "pattern": "\\.(ARW|arw|mat|zip|tar)$"
    },
-   "notes": "catalog:pixelshift200. XL; CC BY 4.0. Bound with --param limit=N (shards/files)."
+   "clean": {"scale": 2, "include": ["*_rggb.mat"], "companion": "PixelShift200_RawFiles/ARW/{name}_1.ARW", "scene": "pixelshift_([0-9]+)_", "holdout": ["5", "10", "13", "49", "98"]},
+   "notes": "catalog:pixelshift200. XL; CC BY 4.0. On disk (2026-10-28): the 655 files of PixelShift200_RawFiles/, 74.7 GB: 436 single-shot ARW (4 per scene, Sony ILCE-7RM3, 5320 x 7968 visible, flip 0), 109 RGGB merges (raw_rggb/*/pixelshift_N_rggb.mat, int16 5316 x 7996 x 4, black-subtracted, 16383 white, site (i, j) the raw's (i + 2, j + 2), checked against frame 1 to 0.3 DN) and 109 sRGB previews. Clean source: the merges only (include), rendered as LibRaw renders the scene's first ARW (companion; label._decode_rggb_mat: its as-shot white balance, the MAT's gains being the daylight ones), no demosaic, at scale 2; the dataset's 5 test scenes held out as split test. Bound pulls with --param limit=N."
   },
   {
    "id": "hf-sidd-dng-mirror",
@@ -1941,6 +1948,9 @@
     "include": [
      "results_*/*/merged.dng"
     ],
+    "exclude": [
+     "results_*/synthetic_*/*"
+    ],
     "scene": "^(?:bursts|results_[0-9]+)/([^/]+)/"
    },
    "deriver": "capture_stats",
@@ -1972,12 +1982,12 @@
      "CourtineDeVillersDebris",
      "D60-1",
      "Laura_Lemons_platformer",
-     "LucieB_board",
-     "LucieB_bw_drawing1",
-     "LucieB_bw_drawing2",
-     "LucieB_groceries",
-     "LucieB_painted_plants",
-     "LucieB_painted_wallpaper",
+     "UNK_TEST_LucieB_board",
+     "UNK_TEST_LucieB_bw_drawing1",
+     "UNK_TEST_LucieB_bw_drawing2",
+     "UNK_TEST_LucieB_groceries",
+     "UNK_TEST_LucieB_painted_plants",
+     "UNK_TEST_LucieB_painted_wallpaper",
      "MuseeL-Bobo",
      "MuseeL-Bobo-C500D",
      "MuseeL-Saint-Pierre-C500D",
@@ -1992,7 +2002,7 @@
      "ursulines-red"
     ]
    },
-   "notes": "catalog:rawnind. Clean source: the GT raws only (include), two per scene, at scale 2 (24 MP to 6 MP, the sensor's demosaic and residual noise below the pixel), a scene per name (the TEST_ prefix the reserve's files carry stripped), the 22 test-reserve scenes (dataset.yaml flags and test_reserve.yaml, 2026-10-28) held out of training as split \"test\"; the noisy raws are the inputs of the real pairs (harness/data/realpairs.py). Dataverse native API lists every file with size and MD5 (checked 2026-10-27). Bounded pulls: --param pattern='yaml$' for the two indexes; --param pattern='Bayer_2pilesofplates' --max-bytes 2e9 for one scene's sweep. Feeds a second camera family for noise_check once a per-ISO sweep is on disk."
+   "notes": "catalog:rawnind. Clean source: the GT raws only (include), two per scene, at scale 2 (24 MP to 6 MP, the sensor's demosaic and residual noise below the pixel), a scene per name (the TEST_ prefix the reserve's files carry stripped; an unknown sensor's files carry UNK_ before it, which stays in the key, so its six LucieB reserve scenes are held out as UNK_TEST_<name>: until 2026-10-29 the list named them without it and their 10 GT raws stayed in the train split), the 22 test-reserve scenes (dataset.yaml flags and test_reserve.yaml, 2026-10-28) held out of training as split \"test\"; the noisy raws are the inputs of the real pairs (harness/data/realpairs.py). Dataverse native API lists every file with size and MD5 (checked 2026-10-27). Bounded pulls: --param pattern='yaml$' for the two indexes; --param pattern='Bayer_2pilesofplates' --max-bytes 2e9 for one scene's sweep. Feeds a second camera family for noise_check once a per-ISO sweep is on disk."
   },
   {
    "id": "raw-pixls-us",
@@ -2033,7 +2043,7 @@
    "id": "snic",
    "name": "SNIC",
    "kind": "dataset",
-   "access": "api",
+   "access": "manual",
    "url": "https://doi.org/10.7910/DVN/SGHDCP",
    "license": "MIT",
    "size_bytes": 473360000000.0,
@@ -2044,7 +2054,7 @@
     "server": "https://dataverse.harvard.edu",
     "doi": "doi:10.7910/DVN/SGHDCP"
    },
-   "notes": "catalog:snic. Dataverse native API (Harvard) lists the files with MD5 (checked 2026-10-27). Each zip is one 38 GB unit, so the smallest useful pull is --param pattern='README|tab$' for the index, then one zip by name."
+   "notes": "catalog:snic. Dataverse native API (Harvard) lists the files with MD5 (checked 2026-10-27). Each zip is one 38 GB unit, so the smallest useful pull is --param pattern='README|tab$' for the index, then one zip by name. 2026-10-28: the dataset record lists (fileAccessRequest true), but every /api/access/datafile/<id> request, README and metadata.tab included, answers 403 to the collector, so the files are fetched by a person in a browser from the dataset page (doi:10.7910/DVN/SGHDCP) into raw/snic/, then checked against the record's MD5s; the expander stays for the listing."
   },
   {
    "id": "slanted-edge-raws",
@@ -2136,7 +2146,8 @@
    },
    "clean": {
     "scale": 2,
-    "low_quality_scale": 4
+    "low_quality_scale": 4,
+    "max_halo": 0.044
    },
    "notes": "Listing walked through the public action API (generator=categorymembers + imageinfo/extmetadata), one request per 50 files, the collector's per-host throttle applies. Bound with --max-bytes and --param limit=N; --param 'licences=^cc0' for a CC0-only pull. Budgeted in DEGRADATION_PLAN.md section 3.",
    "kind": "dataset",
@@ -2158,12 +2169,56 @@
     "max_bytes_each": 30000000,
     "page_size": 50
    },
+   "clean": {
+    "scale": 2,
+    "low_quality_scale": 4,
+    "max_halo": 0.044
+   },
    "notes": "Same API walk as wikimedia-featured-pictures; always bound with --max-bytes (the full category is ~2 TB) and --param limit=N. The listing itself costs one request per 50 files, so limit first, then budget.",
    "kind": "dataset",
    "access": "api",
    "expander": "wikimedia_category",
    "license": "per file (LicenseShortName): CC0, public domain, CC BY, CC BY-SA kept and recorded as the first path component; NC, ND and GFDL-only files skipped",
    "harness_use": "clean photographic corpus for the degradation labels and the recovered layer (DEGRADATION_PLAN.md section 3): expert-reviewed, mostly 10-50 MP camera originals with EXIF; attribution per file in index/*.json"
+  },
+  {
+   "id": "si-hdr",
+   "name": "SI-HDR (181 HDR scenes: raw exposure stacks, merged HDR references, simulated camera inputs)",
+   "kind": "dataset",
+   "access": "direct",
+   "url": "https://www.repository.cam.ac.uk/handle/1810/340049",
+   "license": "CC BY 4.0 (dc.rights on the Apollo record, doi:10.17863/CAM.87333; read 2026-10-28)",
+   "size_bytes": 24476459727.0,
+   "gives": "181 scenes, each a RAW exposure stack (raw.zip, 21.5 GB), the merged HDR reference (reference.zip, 1.5 GB) and two simulated single-exposure camera images (input.zip, 1.5 GB); Hanji, Mantiuk, Eilertsen, Hajisharif and Unger, SIGGRAPH 2022",
+   "harness_use": "linear HDR references with the real raw stacks they were merged from: highlight recovery and dynamic range (the tone gates), and real clipped-capture/reference pairs",
+   "clean": {"scale": 1, "pair_scale": 2, "scene": "sihdr/[a-z]+/([0-9]+)", "exclude": ["input.zip*", "raw.zip::*.cr2", "readme.md", "reconstructions*"], "holdout": ["001", "007", "010", "039", "064", "076", "109", "113", "118", "121", "136", "164", "166", "168", "170", "171", "175", "177"]},
+   "files": [
+    {
+     "url": "https://api.repository.cam.ac.uk/server/api/core/bitstreams/2c24c90f-1a7d-45cd-bda6-79c656b5445f/content",
+     "path": "README.md",
+     "md5": "83b7a99276c46096f9515c2bb5e55c8a",
+     "size": 4162
+    },
+    {
+     "url": "https://api.repository.cam.ac.uk/server/api/core/bitstreams/3e871fb5-0cb9-4376-913d-5f5e5006a5c4/content",
+     "path": "reference.zip",
+     "md5": "866df7c870e2fe2d5558a99e9e9e14dd",
+     "size": 1491596813
+    },
+    {
+     "url": "https://api.repository.cam.ac.uk/server/api/core/bitstreams/4476363e-f77f-42b5-92f9-cc721c1f252e/content",
+     "path": "input.zip",
+     "md5": "141bc0603b273ec1b4f989fb2a18b4a0",
+     "size": 1520318985
+    },
+    {
+     "url": "https://api.repository.cam.ac.uk/server/api/core/bitstreams/3317aac1-0d53-4f07-a59d-34411e6210e0/content",
+     "path": "raw.zip",
+     "md5": "abdc9e92e432eaa0e0511b6588ddb9af",
+     "size": 21464539767
+    }
+   ],
+   "notes": "Files and MD5s from the DSpace 7 REST API of the Apollo repository (api.repository.cam.ac.uk/server/api/core/items/c02ccdde-db20-4acd-8941-7816ef6b7dc7/bundles). reconstructions.zip (12.8 GB, the outputs of six published methods) is left out: other models' outputs, evaluation baselines at most. Sizes are the API's sizeBytes."
   }
  ]
 }

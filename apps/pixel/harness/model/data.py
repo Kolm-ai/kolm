@@ -24,12 +24,14 @@ from pathlib import Path
 import numpy as np
 
 from ..data import data_root
+from ..data.decodedstore import decode_clean, decoded_path, read_decoded, write_decoded
 from ..data.degrade import DegradeParams, Distributions, degrade, prepare_tile, sample_params, tile_shading
 from ..data.label import PARQUET_SOURCES, Item, clean_settings, list_items, load_items, scene_of, skip_reason
 from ..data.tilemetrics import tile_metrics
 from ..metrics import STILL_METRICS
 from ..io import save_png
 from ..colorspace import srgb_to_linear
+from .deadleaves import DEAD_LEAVES, dead_leaves
 
 P_RESTORE = 0.7
 P_IDENTITY = 0.15        # the pair is (clean, clean): without it the v2 model removed 30 % of the texture energy of a clean input
@@ -191,19 +193,45 @@ def export_clean_refs(sources: list[str], root: Path | None = None, log=print) -
             save_png(d / f"{it.row}.png", np.clip(img, 0.0, 1.0))
 
 
+def row_image(it: Item, root: Path) -> np.ndarray:
+    """A parquet row's clean image: its PNG export (made on first use), linear float32."""
+    from PIL import Image
+    p = Path(root) / "derived" / CLEAN_DIR / it.source / f"{it.row}.png"
+    if not p.exists():
+        export_clean_refs([it.source], root, log=lambda *_: None)
+    with Image.open(p) as im:
+        return srgb_to_linear(np.asarray(im.convert("RGB"), dtype=np.float64) / 255.0).astype(np.float32)
+
+
 class TileSource:
     """Clean tiles of one split: items listed once, decoded images cached per process (LRU under a byte budget,
-    since a 2k HDRI is 25 MB and a 50 MP picture at clean scale 2 is 160 MB)."""
+    since a 2k HDRI is 25 MB and a 50 MP picture at clean scale 2 is 160 MB). With `store` a plain-file item comes
+    from the decoded store (data.decodedstore) when it is there, memmapped, and is stored when it is not: the same
+    array either way (float16 where float16 holds it), so the stream does not change, only its decode cost. With `audit` the items are
+    the clean-target audit's (data.targetaudit.filter_targets: a source with a `clean.max_halo` keeps only its
+    audited pictures at or below it), the per-source report in `audit_report`."""
     def __init__(self, sources: list[str], split: str, tile: int, root: Path | None = None,
-                 cache_bytes: float = CACHE_BYTES, tiles_per_image: int = 1):
+                 cache_bytes: float = CACHE_BYTES, tiles_per_image: int = 1, weights: dict[str, float] | None = None,
+                 store: bool = False, audit: bool = False):
         self.root = Path(root) if root else data_root()
+        self.store, self._store_writes = bool(store), bool(store)
+        self.store_hits = self.store_misses = 0
         self.tile, self.split, self.tiles_per_image = tile, split, tiles_per_image
         self._cur: Item | None = None
         self._left = 0
         self.dropped: dict[Item, str] = {}   # items whose file the decoder rejected, with the skip_reason
         self.items = [it for s in sources for it in list_items(s, self.root) if split_of(it) == split]
+        self.audit_report: dict[str, dict] = {}
+        if audit:
+            from ..data.targetaudit import filter_targets
+            self.items, self.audit_report = filter_targets(self.items, self.root)
         if not self.items:
             raise ValueError(f"no items for split {split!r} in {sources}")
+        self._w = None                        # per-item draw weight, the item's source's (1 for a source not named)
+        if weights:
+            self._w = np.array([float(weights.get(it.source, 1.0)) for it in self.items])
+            if (self._w < 0).any() or self._w.sum() <= 0:
+                raise ValueError(f"source weights must be non-negative with a positive sum: {weights}")
         self._cache: OrderedDict[Item, np.ndarray] = OrderedDict()
         self._max_bytes, self._bytes = float(cache_bytes), 0
 
@@ -212,19 +240,31 @@ class TileSource:
             self._cache.move_to_end(it)
             return self._cache[it]
         if it.row >= 0:
-            from PIL import Image
-            p = self.root / "derived" / CLEAN_DIR / it.source / f"{it.row}.png"
-            if not p.exists():
-                export_clean_refs([it.source], self.root, log=lambda *_: None)
-            with Image.open(p) as im:
-                img = srgb_to_linear(np.asarray(im.convert("RGB"), dtype=np.float64) / 255.0)
+            img = row_image(it, self.root)
+        elif self.store:
+            img = self._from_store(it)
         else:
-            img = load_items([it], self.root)[it]
-        img = img.astype(np.float32)
+            img = decode_clean(it, self.root)
         self._cache[it] = img
         self._bytes += img.nbytes
         while self._bytes > self._max_bytes and len(self._cache) > 1:
             self._bytes -= self._cache.popitem(last=False)[1].nbytes
+        return img
+
+    def _from_store(self, it: Item) -> np.ndarray:
+        """The item's stored array, or its decode, stored for the next reader. A failed write (a full disk) turns
+        writing off for this process with one warning; reading goes on."""
+        p = decoded_path(it, self.root)
+        img = read_decoded(p)
+        if img is not None:
+            self.store_hits += 1
+            return img
+        img = decode_clean(it, self.root)
+        self.store_misses += 1
+        if p is not None and self._store_writes and not write_decoded(p, img):
+            self._store_writes = False
+            warnings.warn(f"decoded store: writing {p} failed, this process decodes without storing from here on",
+                          RuntimeWarning, stacklevel=2)
         return img
 
     def draws_on(self, img: np.ndarray) -> int:
@@ -232,6 +272,20 @@ class TileSource:
         tiles_per_image. Small references give one draw, a big picture amortises its decode over many."""
         h, w = img.shape[:2]
         return max(1, min(self.tiles_per_image, (h * w) // (self.tile * self.tile * TILE_AREAS_PER_DRAW)))
+
+    def pick(self, rng: np.random.Generator) -> Item:
+        """A random item: uniform, or with probability proportional to its source's weight."""
+        if self._w is None:
+            return self.items[int(rng.integers(len(self.items)))]
+        return self.items[int(rng.choice(len(self.items), p=self._w / self._w.sum()))]
+
+    def shares(self) -> dict[str, float]:
+        """Each source's probability of supplying the next fresh draw (its items' weights over the total)."""
+        w = self._w if self._w is not None else np.ones(len(self.items))
+        out: dict[str, float] = {}
+        for it, v in zip(self.items, w):
+            out[it.source] = out.get(it.source, 0.0) + float(v)
+        return {k: v / w.sum() for k, v in out.items()}
 
     def random_tile(self, rng: np.random.Generator) -> tuple[np.ndarray, Item, int, int]:
         """A random tile; with tiles_per_image > 1 consecutive draws stay on one decoded image (the stream's
@@ -241,7 +295,7 @@ class TileSource:
             if not self.items:
                 raise ValueError("every item failed to decode")
             fresh = self._left <= 0 or self._cur is None
-            it = self.items[int(rng.integers(len(self.items)))] if fresh else self._cur
+            it = self.pick(rng) if fresh else self._cur
             try:
                 img = self.image(it)
             except Exception as e:  # noqa: BLE001 - recorded with its reason; a MemoryError here is the file's size
@@ -262,7 +316,10 @@ class TileSource:
         that ended the tenth run at step 4200 from a loader worker; a torn download): it leaves this process's list
         with its skip_reason in `dropped`, and a RuntimeWarning names it in the run's log."""
         self.dropped[it] = skip_reason(e)
-        self.items.remove(it)
+        k = self.items.index(it)
+        del self.items[k]
+        if self._w is not None:
+            self._w = np.delete(self._w, k)
         if self._cur == it:
             self._cur, self._left = None, 0
         warnings.warn(f"{it.source}/{it.file} dropped from the sampler: {self.dropped[it]}", RuntimeWarning, stacklevel=2)
@@ -297,14 +354,28 @@ def capture_of_params(p: DegradeParams) -> np.ndarray:
 
 
 def cond_vector(norm: Normaliser, s: dict, known: bool = True) -> np.ndarray:
-    """A sample's full conditioning: the target's normalised metrics, then the input's capture descriptor."""
-    cap = capture_of_params(s["a"]) if known else UNKNOWN_CAPTURE
+    """A sample's full conditioning: the target's normalised metrics, then the input's capture descriptor (a real
+    pair's measured one under "capture", a rendered pair's from its parameters; UNKNOWN_CAPTURE when withheld)."""
+    cap = (s["capture"] if "capture" in s else capture_of_params(s["a"])) if known else UNKNOWN_CAPTURE
     return np.concatenate([norm(s["metrics"]), cap]).astype(np.float32)
 
 
 def make_sample(src: TileSource, dists: Distributions, rng: np.random.Generator, ss: int = 1) -> dict:
     """One rendered pair with its bookkeeping; the conditioning is the raw metric dict."""
     tile, it, y0, x0 = src.random_tile(rng)
+    return _rendered(tile, it, y0, x0, dists, rng, ss)
+
+
+def dead_leaves_sample(tile: int, dists: Distributions, rng: np.random.Generator, ss: int = 1) -> dict:
+    """One rendered pair on a procedural colour dead-leaves tile (deadleaves.py): its item is (DEAD_LEAVES, seed),
+    the seed reproducing the tile."""
+    seed = int(rng.integers(1 << 62))
+    clean = dead_leaves(np.random.default_rng(seed), tile)
+    return _rendered(clean, Item(DEAD_LEAVES, str(seed)), 0, 0, dists, rng, ss)
+
+
+def _rendered(tile: np.ndarray, it: Item, y0: int, x0: int, dists: Distributions, rng: np.random.Generator,
+              ss: int) -> dict:
     a, b, restore = draw_pair(rng, dists)
     sa, sb = int(rng.integers(1 << 62)), int(rng.integers(1 << 62))
     xa, xb, m = render_pair(tile, a, b, sa, sb, it.is_hdr, ss)
@@ -313,9 +384,10 @@ def make_sample(src: TileSource, dists: Distributions, rng: np.random.Generator,
 
 
 def fixed_set(sources: list[str], split: str, n: int, tile: int, seed: int, root: Path | None = None,
-              ss: int = 1, log=print) -> list[dict]:
-    """n reproducible samples (seeded by split, n, tile and seed): the validation set and the calibration draw."""
-    src, dists = TileSource(sources, split, tile, root), Distributions.load(root)
+              ss: int = 1, log=print, audit: bool = False) -> list[dict]:
+    """n reproducible samples (seeded by split, n, tile and seed): the validation set and the calibration draw. With
+    `audit` the clean items are the target audit's (TileSource)."""
+    src, dists = TileSource(sources, split, tile, root, audit=audit), Distributions.load(root)
     rng = np.random.default_rng(_h("fixed", split, n, tile, seed))
     out = []
     for i in range(n):
@@ -325,22 +397,75 @@ def fixed_set(sources: list[str], split: str, n: int, tile: int, seed: int, root
     return out
 
 
+def real_sample(store, rng: np.random.Generator) -> dict:
+    """One stored real pair's tile (data.realstore.RealStore) as a restore sample: the capture is the input, the
+    gain-matched reference the target, the conditioning the reference's own metrics (as render_pair conditions a
+    restore on its target), the measured noise law the capture descriptor in place of rendered parameters, and a
+    random rotation and flip on both since a few hundred scenes are drawn from for hours."""
+    s = store.random_tile(rng)
+    x, y = s["x"], s["y"]
+    k = int(rng.integers(4))
+    if k:
+        x, y = np.rot90(x, k), np.rot90(y, k)
+    if rng.random() < 0.5:
+        x, y = x[:, ::-1], y[:, ::-1]
+    x, y = np.ascontiguousarray(x), np.ascontiguousarray(y)
+    return {"x": x, "y": y, "metrics": tile_metrics(y, y), "restore": True, "capture": s["capture"], "real": True,
+            "pair": s["pair"], "y0": s["y0"], "x0": s["x0"], "clipped": s["clipped"]}
+
+
+def real_fixed_set(sources: list[str], split: str, n: int, tile: int, seed: int, root: Path | None = None,
+                   subpix: bool = False) -> list[dict]:
+    """n reproducible real-pair samples of a stored split: the real validation set. With `subpix` the targets are
+    read at each pair's sub-pixel residual (RealStore's subpix); the tiles are the same either way."""
+    from ..data.realstore import RealStore
+    store = RealStore(list(sources), split, root, tile, subpix=subpix)
+    rng = np.random.default_rng(_h("fixed-real", split, n, tile, seed))
+    return [real_sample(store, rng) for _ in range(n)]
+
+
 class PairStream:
-    """Infinite iterator of (x, y, cond) float32 tensors in the log domain, for one loader worker."""
+    """Infinite iterator of (x, y, cond, restore, real) in the log domain, for one loader worker: rendered
+    pairs of the clean sources (drawn by `weights`, uniform without), and with probability `p_real` a tile of the
+    stored real pairs of `real` (data.realstore); of the rendered pairs a share `p_dead_leaves` is drawn on a
+    procedural colour dead-leaves tile (deadleaves.py) in place of a source tile. `real` says the sample is a stored
+    real pair (train's --shift-real searches its registration); `audit` draws the clean items the target audit
+    keeps (TileSource); `subpix_real` reads each real pair's reference at its sub-pixel residual (RealStore)."""
     def __init__(self, sources: list[str], tile: int, normaliser: Normaliser, seed: int, root: Path | None = None,
-                 ss: int = 1):
+                 ss: int = 1, real: tuple[str, ...] = (), p_real: float = 0.0, weights: dict[str, float] | None = None,
+                 p_dead_leaves: float = 0.0, decoded_store: bool = True, audit: bool = False,
+                 subpix_real: bool = False):
+        self.audit, self.subpix_real = bool(audit), bool(subpix_real)
         self.sources, self.tile, self.norm, self.seed, self.root, self.ss = sources, tile, normaliser, seed, root, ss
+        self.decoded_store = bool(decoded_store)
+        self.real, self.p_real, self.weights = tuple(real), float(p_real), weights
+        self.p_dead_leaves = float(p_dead_leaves)
+        if self.p_real and not self.real:
+            raise ValueError("p_real > 0 needs real sources")
+        if not 0.0 <= self.p_dead_leaves <= 1.0:
+            raise ValueError(f"p_dead_leaves is a probability, got {p_dead_leaves}")
 
     def __iter__(self):
         import torch
         from torch.utils.data import get_worker_info
         wi = get_worker_info()
         wid = wi.id if wi else 0
-        src = TileSource(self.sources, "train", self.tile, self.root, tiles_per_image=TILES_PER_IMAGE)
+        src = TileSource(self.sources, "train", self.tile, self.root, tiles_per_image=TILES_PER_IMAGE,
+                         weights=self.weights, store=self.decoded_store, audit=self.audit)
+        store = None
+        if self.real and self.p_real > 0:
+            from ..data.realstore import RealStore
+            store = RealStore(list(self.real), "train", self.root, self.tile, subpix=self.subpix_real)
         dists = Distributions.load(self.root)
         rng = np.random.default_rng(_h("stream", self.seed, wid))
         while True:
-            s = make_sample(src, dists, rng, self.ss)
+            if store is not None and rng.random() < self.p_real:
+                s = real_sample(store, rng)
+            elif self.p_dead_leaves > 0 and rng.random() < self.p_dead_leaves:
+                s = dead_leaves_sample(self.tile, dists, rng, self.ss)
+            else:
+                s = make_sample(src, dists, rng, self.ss)
             x = torch.from_numpy(encode(s["x"])).permute(2, 0, 1).contiguous()
             y = torch.from_numpy(encode(s["y"])).permute(2, 0, 1).contiguous()
-            yield x, y, torch.from_numpy(cond_vector(self.norm, s, rng.random() < P_CAPTURE_KNOWN)), bool(s["restore"])
+            c = torch.from_numpy(cond_vector(self.norm, s, rng.random() < P_CAPTURE_KNOWN))
+            yield x, y, c, bool(s["restore"]), bool(s.get("real", False))

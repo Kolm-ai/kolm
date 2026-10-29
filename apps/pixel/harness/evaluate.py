@@ -55,7 +55,7 @@ def evaluate(world: World, candidate: np.ndarray, out_dir, candidate_name: str =
         cand["rendered_fraction"] = cand["undeclared_invention_fraction"] = None
     if preference:
         cand.update(preference.get("metrics", {}))
-    gates = run_gates(world.claim["gates"], cand, world.camera_metrics)
+    gates = run_gates(world.claim["gates"], cand, world.camera_metrics, world.truth_metrics)
     delivery = None
     spec = world.display.delivery
     if spec:

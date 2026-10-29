@@ -1,6 +1,7 @@
 """Metric registry and the one entry point: measure_all(frames, truth, scene, display)."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -16,14 +17,20 @@ class MetricInfo:
     higher_is_better: bool
     tie_margin: float
     scope: str  # still | video | invention | provenance | display | human
+    # scored by distance to the truth's own value when one is given: more resolution or texture than the scene
+    # holds is sharpening or invented detail, not a win, so |camera - truth| - |candidate - truth| is the margin
+    to_truth: bool = False
+    # no candidate can do better than the truth's own value; False where a restoration can legitimately pass it
+    # (a denoiser's shadow SNR and the dynamic-range steps that SNR separates exceed a noisy reference's)
+    truth_bound: bool = True
 
 
 REGISTRY: dict[str, MetricInfo] = {
-    "mtf50_cpp": MetricInfo(True, 0.02, "still"),
-    "texture_hf_fidelity": MetricInfo(True, 0.03, "still"),
-    "shadow_snr_db": MetricInfo(True, 1.0, "still"),
+    "mtf50_cpp": MetricInfo(True, 0.02, "still", to_truth=True),
+    "texture_hf_fidelity": MetricInfo(True, 0.03, "still", to_truth=True),
+    "shadow_snr_db": MetricInfo(True, 1.0, "still", truth_bound=False),
     "highlight_loss_fraction": MetricInfo(False, 0.01, "still"),
-    "dr_steps": MetricInfo(True, 0.5, "still"),
+    "dr_steps": MetricInfo(True, 0.5, "still", truth_bound=False),
     "delta_e_mean": MetricInfo(False, 0.5, "still"),
     "delta_e_max": MetricInfo(False, 1.0, "still"),
     "edge_overshoot": MetricInfo(False, 0.01, "still"),
@@ -47,13 +54,28 @@ STILL_METRICS = [m for m, i in REGISTRY.items() if i.scope == "still"]
 VIDEO_METRICS = [m for m, i in REGISTRY.items() if i.scope == "video"]
 
 
-def verdict(name: str, candidate: float, camera: float) -> tuple[str, float]:
-    """'beats' | 'ties' | 'loses' and the signed margin (positive = candidate better)."""
+def _known(x) -> bool:
+    return x is not None and math.isfinite(float(x))
+
+
+def verdict(name: str, candidate: float, camera: float, truth: float | None = None) -> tuple[str, float]:
+    """'beats' | 'ties' | 'loses' and the signed margin (positive = candidate better). A to_truth metric with the
+    truth's value given is judged by distance to it; without one, by the direction alone."""
     info = REGISTRY[name]
-    diff = candidate - camera if info.higher_is_better else camera - candidate
+    if info.to_truth and _known(truth):
+        diff = abs(camera - truth) - abs(candidate - truth)
+    else:
+        diff = candidate - camera if info.higher_is_better else camera - candidate
     if abs(diff) <= info.tie_margin:
         return "ties", float(diff)
     return ("beats" if diff > 0 else "loses"), float(diff)
+
+
+def at_truth(name: str, camera: float, truth: float | None) -> bool:
+    """The camera within the tie margin of the truth's own value on a truth-bound metric: no candidate can beat
+    it there, so a tie is the most any candidate can do."""
+    info = REGISTRY[name]
+    return info.truth_bound and _known(truth) and _known(camera) and abs(camera - truth) <= info.tie_margin
 
 
 def still_metrics(frame: np.ndarray, truth: np.ndarray, scene: Scene, k: int) -> dict[str, float]:

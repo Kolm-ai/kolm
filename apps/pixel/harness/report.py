@@ -23,7 +23,7 @@ def metric_rows(cand: dict, cam: dict, truth: dict) -> dict[str, dict]:
     for m in cand:
         c, k = cand.get(m), cam.get(m)
         if m in REGISTRY and c is not None and k is not None:
-            vd, margin = verdict(m, c, k)
+            vd, margin = verdict(m, c, k, truth.get(m))
         else:
             vd, margin = "n/a", None
         rows[m] = {"candidate": c, "camera": k, "truth": truth.get(m), "verdict": vd, "margin": margin}
