@@ -24,6 +24,38 @@ without them those items are recorded as skipped with a reason, never a crash), 
 imageio-ffmpeg: mp4 in or out; `.npy` masters and PNG frame folders work without them), `dev` (pytest). The data root (ledgered sources, labels, checkpoints: tens of GB) lives outside
 the repo: `HARNESS_DATA_ROOT=D:\lens-harness-data` on the GPU box; unset, it is `./data`, which git ignores.
 
+## Restore a photo
+
+The finished model is a release directory (`python -m harness model export`): `model.safetensors`, the EMA weights,
+and `config.json`, which carries the network, the metric normaliser, the default restore conditioning, the blind
+noise reading it was calibrated with and the weights' SHA-256, checked on load. Its model card states where it beats
+the best-case camera and where it does not: [releases/kolm-pixel-v15.md](releases/kolm-pixel-v15.md).
+
+```bash
+pip install -e ".[model,decode]"
+python -m harness photo IMG_0001.DNG more_raws/ --ckpt D:\lens-harness-data\release\pixel-v15 --out restored --original
+```
+
+Each input writes `<stem>.tif` (16-bit sRGB), `<stem>.jpg` (preview) and `<stem>.json` (the decode, the capture
+descriptor and the noise law behind it, the DNG's own NoiseProfile beside it when it has one, timings); `--original`
+adds the unrestored decode at the same exposure, `--linear` the 32-bit float linear frame, `--ev auto` lifts the
+exposure of the encoded files (never darkens). A raw decodes through LibRaw as training's real pairs were decoded
+and its noise law is read blind from the frame ([harness/data/blindnoise.py](harness/data/blindnoise.py)); a raw
+whose law does not fit, and any other image, is restored with no descriptor; `--capture capture.json` states the law
+instead. `--scale 2` restores at half resolution, the decode training's real pairs and their held-out verdicts use;
+the default keeps every pixel (the blind reading carries a variance factor of 1.70 there, measured on 40 train pairs
+decoded at full resolution; capture-eval's capture gates pass at scale 1 in all three modes, but no camera or
+frontier verdict covers it). On the RTX 5090, beside a training run, a 50-megapixel Pixel 8 Pro raw restores in 33 to 44 s
+and a 26-megapixel Sony ZV-E10 II raw in 18 to 22 s; `--device cpu` works, slowly.
+
+A release from a run, its capture-descriptor check and its card:
+
+```bash
+python -m harness model export D:\lens-harness-data\models\recovered_v15\best.pt D:\lens-harness-data\release\pixel-v15 --name kolm-pixel-v15
+python -m harness capture-eval --ckpt D:\lens-harness-data\release\pixel-v15 --out capture_eval_s1 --scale 1   # measured, blind-read and no descriptor on held-out real pairs
+python -m harness model card D:\lens-harness-data\release\pixel-v15 --capture-eval capture_eval_s2 capture_eval_s1 --calibration blindnoise_calib.json blindnoise_calib_s1.json
+```
+
 ## Self-test
 
 ```bash
@@ -362,11 +394,14 @@ harness/gate.py         ordered checks, stop on first fail
 harness/report.py       report.json + report.md
 harness/preference.py   blinded manifests, Bradley–Terry fit
 harness/evaluate.py     world build + candidate evaluation
-harness/cli.py          demo | run | render | preference | data | model
+harness/cli.py          demo | run | render | preference | data | model | photo | capture-eval
+harness/photo.py        the product: a raw or photo in, the restored 16-bit TIFF and JPEG out
+harness/tiff.py         16-bit and 32-bit float RGB TIFF writer
 harness/data/           manifest, parallel resumable collector, expanders (HF, Zenodo, Wikimedia Commons, ...), derivers, gate fitting, labeller
 harness/data/reference/ sourced CSVs: sensors, lenses, displays, vision thresholds
 harness/data/catalog/   122 human-rated image/video datasets and what each can calibrate
-harness/model/          the recovered layer: on-the-fly pairs from the sampler, conditioned UNet, trainer, inference, held-out raw evaluation
-$HARNESS_DATA_ROOT/     raw/<source>/..., ledger.jsonl, derived/*.json, derived/heldout/, derived/realpairs/<source>/, labels/, models/<run>/ (outside the repo)
+harness/model/          the recovered layer: on-the-fly pairs from the sampler, conditioned UNet, trainer, inference, held-out raw evaluation, release export, model card, capture-descriptor evaluation
+releases/               each release's model card (its weights live under $HARNESS_DATA_ROOT/release/<name>/)
+$HARNESS_DATA_ROOT/     raw/<source>/..., ledger.jsonl, derived/*.json, derived/heldout/, derived/realpairs/<source>/, labels/, models/<run>/, release/<name>/ (outside the repo)
 tests/                  physics sanity, metric sensitivity, pipeline
 ```

@@ -293,6 +293,12 @@ def add_parser(sub) -> None:
     c.add_argument("--out", help="also write the markdown here")
     c.set_defaults(func=cmd_compare)
 
+    from .export import add_parser as add_export_parser
+    add_export_parser(ms)
+
+    from .card import add_parser as add_card_parser
+    add_card_parser(ms)
+
 
 def _noise_args(p) -> None:
     from ..data.tilemetrics import NOISE_MODES

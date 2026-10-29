@@ -139,6 +139,10 @@ def main(argv=None) -> int:
     add_data_parser(sub)
     from .model.cli import add_parser as add_model_parser
     add_model_parser(sub)
+    from .photo import add_parser as add_photo_parser
+    add_photo_parser(sub)
+    from .model.captureeval import add_parser as add_capture_eval_parser
+    add_capture_eval_parser(sub)
 
     args = p.parse_args(argv)
     return args.func(args)

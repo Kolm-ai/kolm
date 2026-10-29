@@ -31,8 +31,10 @@ class Bundle:
 
 
 def load_model(ckpt, device: str | None = None, bf16: bool = False) -> Bundle:
+    """A training checkpoint (.pt) or a release directory (export.py), its EMA weights on `device`."""
     dev = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-    ck = torch.load(Path(ckpt), map_location="cpu", weights_only=False)
+    from .export import is_release, read_release
+    ck = read_release(ckpt) if is_release(ckpt) else torch.load(Path(ckpt), map_location="cpu", weights_only=False)
     model = CondUNet(**ck["config"])
     model.load_state_dict(ck["ema"])
     model.to(dev).eval()
