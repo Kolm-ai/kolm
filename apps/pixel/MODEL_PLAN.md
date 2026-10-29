@@ -937,12 +937,18 @@ v18 is three runs of one recipe that differ only in the seed, 24 hours each on t
   | Start | GPU work |
   |---|---|
   | 10-30 06:12 | v17 ended; scored at 06:17, and the recipe picked |
-  | 10-30 06:18 | the burst run on v17 (240 min), then its evaluation |
-  | 10-30 about 10:25 | the baselines through the gates and SIDD validation (about 1 h) |
-  | 10-30 about 11:40 | v18s0, then its scoring (about 25 min) |
-  | 10-31 about 12:10 | v18s1 |
-  | 11-01 about 12:40 | v18s2 |
-  | 11-02 about 13:10 | the comparison and the release seed |
+  | 10-30 06:18 | the burst run on v17 failed on its first step (see below) |
+  | 10-30 06:30 | the burst run on v17 again (240 min), then its evaluation |
+  | 10-30 about 10:40 | the baselines through the gates and SIDD validation (about 1 h) |
+  | 10-30 about 11:55 | v18s0, then its scoring (about 25 min) |
+  | 10-31 about 12:25 | v18s1 |
+  | 11-01 about 12:55 | v18s2 |
+  | 11-02 about 13:25 | the comparison and the release seed |
+
+- **The burst run's first try (10-30 06:18).**
+  - `BurstNet(single)` keeps the single-frame network as `model.single`. The run scored that network alone at step 0 and then moved it to the CPU, which moved the burst model's own body there, so the first step failed on two devices. The retries would have failed the same way: no last.pt yet.
+  - The chain was stopped before its retries reached the evaluation, so the v18 queue kept waiting. The step-0 reference is now scored where it is (`79423a54`), with tests that a run moves no module and that two steps run on the GPU.
+  - The run went again at 06:30 from `.tmp/frozen_burst17b`: `frozen_burst17` (0e8a76d5) with that one file changed. The crashed try's logs are in `burst_v17/crashed_1030`.
 
 - **Other splits, and why not.**
   - One 72-hour run gives no spread.
