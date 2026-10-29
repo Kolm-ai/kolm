@@ -212,8 +212,9 @@ def add_parser(sub) -> None:
                         "Re<P Y*> / <|Y|^2> from 1, what the MTF50 and texture gates read (losses.transfer_loss; "
                         "default 0, off)")
     t.add_argument("--overshoot-weight", type=float,
-                   help="weight of the edge-overshoot term: edge_overshoot as a share of the step over the windows "
-                        "that hold an edge (losses.overshoot_loss; default 0, off)")
+                   help="weight of the edge-overshoot term: how far the output's local range of log luminance "
+                        "passes the target's, over the windows that hold an edge (losses.overshoot_loss; default 0, "
+                        "off)")
     t.add_argument("--pyramid-weight", type=float,
                    help="weight of the residual-pyramid term: the L1 of the residual's 2 to 16 px block means, where "
                         "banding, shading and blotches keep their size (losses.pyramid_loss; default 0, off)")

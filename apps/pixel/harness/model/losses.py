@@ -240,19 +240,21 @@ def transfer_loss(pred: torch.Tensor, y: torch.Tensor, lo: float = TRANSFER_LO_C
 OVERSHOOT_HALF = 4        # metrics.natural.HALF_WINDOW: px each side of the window
 OVERSHOOT_MIN_STEP = 0.1  # metrics.natural.MIN_STEP: linear-luminance step a window needs to hold an edge
 OVERSHOOT_CLIP = 0.98     # metrics.natural.CLIP_GUARD
-OVERSHOOT_GAIN_SIGMA = 8.0   # tilemetrics.GAIN_SIGMA_PX: the local gain divided out before the windows
 PYRAMID_SCALES = (2, 4, 8, 16)   # block sides in px; tilemetrics.SHADING_BLOCK is 16
 # The term charges an output that passes the target's local range and nothing that sits inside it, so under the
-# output's own residual noise its cheapest descent is to pull the bright side of every edge window down and the dark
-# side up: a tone shift, not a sharper restoration. At v15's own output on real val tiles its mean gradient on 0.5 to
-# 0.999 luminance was 100 to 200 times the L1's; v16 (the gain divided out under no gradient, as the metric does)
-# lost 5 % of tone at 0.2 to 0.5 and 20 to 25 % on clipped white, which the gain-matched gates never see. Taking the
-# gain with its gradient only moves the pull: tone off 0.5 to 0.999, onto clipped white. From the seventeenth run the
-# gradient flows through the output's detail finer than OVERSHOOT_TONE_SIGMA alone (the value is unchanged): it can
-# lower a halo or a noise spike against its neighbours, and moves no level coarser than that, which is the L1's. On
-# dead leaves plus noise 1 px cut the pull on every band above 0.1 six times (2 px: three) and lowered an unsharp
-# halo as fast as the full gradient.
-OVERSHOOT_TONE_SIGMA = 1.0
+# output's own residual noise it can be paid by moving the output's level instead of its detail. v16 read the windows
+# on linear luminance with the local gain divided out under no gradient, as the metric does: at v15's output on real
+# val tiles its mean gradient on 0.5 to 0.999 luminance was 100 to 200 times the L1's, and v16 lost 5 % of tone at
+# 0.2 to 0.5 and 20 to 25 % on clipped white, which the gain-matched gates never see (taking the gain with its
+# gradient only moved the pull onto clipped white). From the seventeenth run the windows read the range of the log
+# luminance through an OVERSHOOT_SIGMA px Gaussian: a gain is a shift of the log, so a range has no level and nothing
+# is divided out, and a window's gradient (+ at the output's maximum, - at its minimum) sums to zero over the encoded
+# channels, so no level moves at any scale. What is left is the window's own contrast, which noise lifts and the
+# descent compresses; the blur reads the range with the noise averaged down. On dead leaves under a fixed residual
+# noise of 0.5 to 2 % at 0.5, Adam on the L1 plus the term over a gain per luminance octave settles, with v16's form
+# at 1.5, 32 to 67 % dark at 0.25 and 39 to 81 % at 1; with this form at 0.75, 0.6 to 1.6 % and 1.3 to 4.7 %, while
+# its pull on an unsharp halo's amplitude is 1.1 to 1.8 times v16's.
+OVERSHOOT_SIGMA = 1.5
 
 
 def _gauss(t: torch.Tensor, sigma: float) -> torch.Tensor:
@@ -266,31 +268,24 @@ def _gauss(t: torch.Tensor, sigma: float) -> torch.Tensor:
 
 def overshoot_loss(pred: torch.Tensor, y: torch.Tensor, half: int = OVERSHOOT_HALF,
                    min_step: float = OVERSHOOT_MIN_STEP, clip: float = OVERSHOOT_CLIP,
-                   tone_sigma: float | None = OVERSHOOT_TONE_SIGMA) -> torch.Tensor:
-    """metrics.natural.edge_overshoot_pair as a loss: on the gates' luminance (clipped linear), the output's local
-    gain against the target's at OVERSHOOT_GAIN_SIGMA divided out (as tilemetrics.gain_matched, under no gradient),
-    the gradient taken through the output's detail finer than `tone_sigma` px alone (None: through all of it, as the
-    sixteenth run had it), then per pixel and axis a (2 half + 1) px window gives
-    the target's step and how far the output's maximum or minimum passes the target's, over the step; the mean over
-    the batch's windows that hold an edge (step >= min_step) inside the clip guard, where the metric takes their
-    median. Zero for the identity and for any output inside the target's local range, so a perfect restoration is
-    still the optimum. The mean also charges what a blur carries into a window from beyond it (a 1 px Gaussian on
-    dead leaves reads 0.025, the metric's median 0): it holds an edge from both sides, softening as well as ringing."""
+                   sigma: float = OVERSHOOT_SIGMA) -> torch.Tensor:
+    """metrics.natural.edge_overshoot_pair's windows as a loss: per pixel and axis a (2 half + 1) px window that holds
+    an edge in the target (a step of the gates' luminance >= min_step inside the clip guard) charges how far the
+    output's range of log luminance passes the target's, over the target's, both read through a `sigma` px Gaussian;
+    the mean over the batch's edge windows, where the metric takes their median. Zero for the identity and for any
+    output inside the target's local contrast; it rises with a halo as the metric does, and also charges what a blur
+    carries into a window from beyond it (a 1 px Gaussian on dead leaves reads 0.02, the metric's median 0)."""
     lp, ly = _luma(pred), _luma(y)
-    gain = (_gauss(ly, OVERSHOOT_GAIN_SIGMA) / _gauss(lp, OVERSHOOT_GAIN_SIGMA).clamp_min(1e-9)).detach()
-    if tone_sigma:
-        base = _gauss(lp, tone_sigma)
-        lp = lp + (base.detach() - base)
-    lp = lp * gain
+    qp, qy = (_gauss(torch.log(t + 1.0 / LOG_GAIN), sigma) for t in (lp, ly))
     size = 2 * half + 1
     total, count = lp.new_zeros(()), lp.new_zeros(())
     for ks, pad in (((1, size), (0, half)), ((size, 1), (half, 0))):
         def hi(a):
             return F.max_pool2d(a[:, None], ks, stride=1, padding=pad)[:, 0]
-        rmax, rmin, pmax, pmin = hi(ly), -hi(-ly), hi(lp), -hi(-lp)
-        step = rmax - rmin
-        keep = ((step >= min_step) & (rmax < clip) & (rmin > 1.0 - clip)).to(lp.dtype)
-        over = torch.relu(torch.maximum(pmax - rmax, rmin - pmin)) / step.clamp_min(1e-9)
+        lmax, lmin = hi(ly), -hi(-ly)
+        keep = ((lmax - lmin >= min_step) & (lmax < clip) & (lmin > 1.0 - clip)).to(lp.dtype)
+        step = hi(qy) + hi(-qy)
+        over = torch.relu(hi(qp) + hi(-qp) - step) / step.clamp_min(1e-9)
         total, count = total + (over * keep).sum(), count + keep.sum()
     return total / count.clamp_min(1.0)
 

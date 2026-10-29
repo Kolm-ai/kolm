@@ -12,7 +12,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from harness.model.data import CAPTURE_DIM, COND_DIM, LOG_GAIN, METRIC_COND_DIM, encode
-from harness.model.losses import (MS_WEIGHTS, OVERSHOOT_TONE_SIGMA, SSIM_C1, TRANSFER_BIN_CPP, best_shift, ms_ssim,
+from harness.model.losses import (MS_WEIGHTS, SSIM_C1, TRANSFER_BIN_CPP, best_shift, ms_ssim,
                                   ssim_levels, overshoot_loss, pyramid_loss, ssim_loss, to_display, transfer_bands,
                                   transfer_loss)
 from harness.model.net import CondUNet, noise_map
@@ -245,44 +245,26 @@ def _leaves(seed=0, n=128):
     return np.clip(dead_leaves(np.random.default_rng(seed), n), 0.0, 1.0) * 0.8
 
 
-def _edge_windows_mean(d, r, half=4):
-    """edge_overshoot_pair's windows, their mean where it takes the median"""
-    from scipy.ndimage import maximum_filter1d, minimum_filter1d
-    from harness.colorspace import luminance
-    d, r = luminance(d), luminance(r)
-    vals = []
-    for ax in (0, 1):
-        rmax, rmin = (f(r, 2 * half + 1, axis=ax, mode="nearest") for f in (maximum_filter1d, minimum_filter1d))
-        dmax, dmin = (f(d, 2 * half + 1, axis=ax, mode="nearest") for f in (maximum_filter1d, minimum_filter1d))
-        step = rmax - rmin
-        keep = (step >= 0.1) & (rmax < 0.98) & (rmin > 0.02)
-        vals.append(np.maximum(np.maximum(dmax - rmax, rmin - dmin) / np.maximum(step, 1e-9), 0.0)[keep])
-    return float(np.concatenate(vals).mean())
-
-
-def test_overshoot_loss_is_the_edge_overshoot_windows_mean_and_zero_at_identity():
-    """The term reads what edge_overshoot reads (on the gain-matched output), as the mean over the edge windows, and
-    tracks the metric's median under unsharp masking. The mean also charges what a blur carries into a window from
-    beyond it, where the median of a mostly clean set of windows reads 0: it holds an edge from both sides."""
+def test_overshoot_loss_tracks_edge_overshoot_and_is_zero_at_identity():
+    """The term rises with a halo as edge_overshoot does. Its mean over the edge windows also charges what a blur
+    carries into a window from beyond it, where the median of a mostly clean set of windows reads 0."""
     from scipy.ndimage import gaussian_filter
     from harness.colorspace import luminance
     from harness.data.tilemetrics import gain_matched
     from harness.metrics.natural import edge_overshoot_pair, unsharp
     y = _leaves()
     assert float(overshoot_loss(_t(y), _t(y))) == 0.0
-    last = 0.0
+    last, last_metric = 0.0, 0.0
     for gain in (0.1, 0.4, 1.0):
         d = np.clip(unsharp(y, gain, 1.0), 0.0, None)
         dg = gain_matched(np.clip(d, 0, 1), luminance(np.clip(d, 0, 1)), luminance(y))
-        v = float(overshoot_loss(_t(d), _t(y)))
-        assert v == pytest.approx(_edge_windows_mean(dg, y), abs=2e-3)
-        assert v == pytest.approx(edge_overshoot_pair(dg, y), rel=0.15) and v > last
-        last = v
+        v, m = float(overshoot_loss(_t(d), _t(y))), edge_overshoot_pair(dg, y)
+        assert v > last and m > last_metric
+        last, last_metric = v, m
     d = gaussian_filter(y, (1.0, 1.0, 0))
     dg = gain_matched(d, luminance(d), luminance(y))
     assert edge_overshoot_pair(dg, y) == 0.0
-    v = float(overshoot_loss(_t(d), _t(y)))
-    assert v == pytest.approx(_edge_windows_mean(dg, y), abs=2e-3) and v > 0.01
+    assert float(overshoot_loss(_t(d), _t(y))) > 0.01
 
 
 def test_overshoot_loss_gradient_lowers_a_halo():
@@ -295,31 +277,25 @@ def test_overshoot_loss_gradient_lowers_a_halo():
     assert float(overshoot_loss(pred.detach() - 0.05 * pred.grad / pred.grad.abs().max(), _t(y))) < float(loss)
 
 
-def test_overshoot_loss_gradient_moves_detail_not_tone():
-    """On the target plus zero-mean noise, every pull the term makes on a luminance band is a bias, not a repair. Taken
-    through all of the output (the sixteenth run) its descent darkens every band above 0.1 with most of its gradient's
-    weight; taken through the detail finer than tone_sigma alone the value is unchanged, the gradient carries no level
-    at all, and the pull on the bands is a fraction of that."""
+def test_overshoot_loss_gradient_moves_no_level():
+    """On the target plus zero-mean noise, every pull the term makes is a bias, not a repair. Each window's gradient
+    sums to zero over the encoded channels, so it carries no level at all and next to nothing at 8 px; what is left
+    is a window's own contrast. v16's form (linear luminance, the gain divided out under no gradient) read a level
+    of 0.73 of its gradient's weight, 0.73 at 8 px and a pull of 0.8 on the bands above 0.1."""
+    from scipy.ndimage import gaussian_filter
     y = _leaves(1)
     rng = np.random.default_rng(2)
     d = np.clip(y + 0.01 * np.sqrt(y / 0.5) * rng.standard_normal(y.shape), 1e-4, 0.97)
     lum = d @ np.array([0.2126, 0.7152, 0.0722])
     band = (lum >= 0.1) & (lum < 0.97)
-    vals, dc, pull = {}, {}, {}
-    for ts in (None, OVERSHOOT_TONE_SIGMA):
-        lin = torch.as_tensor(d).permute(2, 0, 1)[None].float().requires_grad_()
-        loss = overshoot_loss(torch.log1p(LOG_GAIN * lin), _t(y), tone_sigma=ts)
-        loss.backward()
-        g = lin.grad[0].permute(1, 2, 0).numpy().astype(np.float64)
-        vals[ts] = float(loss.detach())
-        dc[ts] = float(g.sum()) / float(np.abs(g).sum())
-        along = (d * g).sum(axis=2)
-        pull[ts] = float(along[band].sum()) / float(np.abs(along[band]).sum())
-    ts = OVERSHOOT_TONE_SIGMA
-    assert vals[ts] == pytest.approx(vals[None], rel=1e-6) and vals[None] > 0
-    assert abs(dc[ts]) < 1e-3
-    assert pull[None] > 0.5
-    assert pull[ts] < pull[None] / 4
+    pred = _t(d).requires_grad_()
+    loss = overshoot_loss(pred, _t(y))
+    loss.backward()
+    assert float(loss) > 0
+    g = pred.grad[0].numpy().astype(np.float64).sum(axis=0)
+    assert abs(g.sum()) / np.abs(g).sum() < 1e-5
+    assert np.abs(gaussian_filter(g, 8.0)).sum() / np.abs(g).sum() < 0.2
+    assert g[band].sum() / np.abs(g[band]).sum() < 0.5
 
 
 def test_pyramid_loss_charges_a_blotch_and_shading_more_than_noise_of_the_same_size():
