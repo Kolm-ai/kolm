@@ -906,10 +906,14 @@ v18 is three runs of one recipe that differ only in the seed, 24 hours each on t
 - **What stays fixed: `--val-seed 0`.**
   - The calibration draw (the normaliser) and the synthetic and real validation draws.
   - So every run chooses best.pt on one validation set, never on held-out.
-- **Recipe: v17's or v15's, picked when v17 is scored (about 06:40 on 10-30).**
+- **Recipe: v15's, picked at 06:17 on 10-30, when v17 was scored.**
   - v17's if it passes the tone gate wherever v15 does and keeps every gate v15 passes.
   - Otherwise v15's: v17's flags without `--resample smooth`, `--overshoot-weight` and `--pyramid-weight`.
   - `.tmp/v18_pick_recipe.sh` makes the pick unattended once v17 is scored (`v18_gate_check.py v15 v17`) and writes it to `.tmp/v18_recipe`; the queue waits for it.
+  - v17 kept 103 of the gates v15 passes and lost 24: the first failure in an ordered gate set, plus the gates after it that it no longer reached.
+    - The failures: lighting_materials on raw.pixls.us (known and blind) and on HDR+'s blind set against the frontier; denoise, and micro_detail against the camera, on HDR+'s known set; tone_color against the frontier on RawNIND's sub-pixel blind set.
+    - On raw.pixls.us blind, v17's shading RMSE is 0.0103, against v15's 0.0062 and the input's 0.0044, past the 0.005 tie.
+  - v15 fails 10 gates v17 passes: denoise on RawNIND's blind set, micro_detail on its sub-pixel known set, resolution on SI-HDR's blind set, and artifacts against the camera on HDR+'s blind set (with the three camera gates after it).
   - The shape stays at about 120M (base 64, mults 1,2,4,8, blocks 2,3,6,8, 12 mid blocks). This run asks what more steps on real data buy, not what size does.
 - **Data: the real stores as they stand at launch, plus v17's clean sources and weights.**
 
@@ -932,13 +936,13 @@ v18 is three runs of one recipe that differ only in the seed, 24 hours each on t
 
   | Start | GPU work |
   |---|---|
-  | 10-30 06:15 | v17 ends; scored by 06:40 |
-  | 10-30 06:40 | the burst run on v17 (240 min), then its evaluation |
-  | 10-30 about 10:45 | the baselines through the gates and SIDD validation (about 1 h), once their weights are pulled; otherwise after v18s2 |
-  | 10-30 about 12:00 | v18s0, then its scoring (about 25 min) |
-  | 10-31 about 12:30 | v18s1 |
-  | 11-01 about 13:00 | v18s2 |
-  | 11-02 about 13:30 | the comparison and the release seed |
+  | 10-30 06:12 | v17 ended; scored at 06:17, and the recipe picked |
+  | 10-30 06:18 | the burst run on v17 (240 min), then its evaluation |
+  | 10-30 about 10:25 | the baselines through the gates and SIDD validation (about 1 h) |
+  | 10-30 about 11:40 | v18s0, then its scoring (about 25 min) |
+  | 10-31 about 12:10 | v18s1 |
+  | 11-01 about 12:40 | v18s2 |
+  | 11-02 about 13:10 | the comparison and the release seed |
 
 - **Other splits, and why not.**
   - One 72-hour run gives no spread.
@@ -946,7 +950,7 @@ v18 is three runs of one recipe that differ only in the seed, 24 hours each on t
   - Three at once would not fit: each takes 10.5 GB of GPU memory and 12 loader workers, one run already holds the GPU at 97 %, and RAM is tight.
 - **Stop rules.**
   - A seed that dies four times is reported as dead, and the queue goes on to the next.
-  - After v18s0 is scored, the queue checks it against v17 report by report (`.tmp/v18_gate_check.py`). If v18s0 fails a gate that v17 passes, the queue stops before v18s1 and waits for `.tmp/v18_go`. Three times the steps should not lose a gate; if they do, the cause is found before two more days go in.
+  - After v18s0 is scored, the queue checks it report by report against v17 and against v15, whose recipe it trains (`.tmp/v18_gate_check.py`; neither run's passes contain the other's). If v18s0 fails a gate either passes, the queue stops before v18s1 and waits for `.tmp/v18_go`. Three times the steps should not lose a gate; if they do, the cause is found before two more days go in.
 - **Scoring, per seed.**
   - `score_run_v17.sh`, from `frozen_eval17`, so the scores read against v15's and v17's:
     - the demo and raw.pixls.us sets, known and blind;
