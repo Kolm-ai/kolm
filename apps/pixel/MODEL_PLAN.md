@@ -938,17 +938,21 @@ v18 is three runs of one recipe that differ only in the seed, 24 hours each on t
   |---|---|
   | 10-30 06:12 | v17 ended; scored at 06:17, and the recipe picked |
   | 10-30 06:18 | the burst run on v17 failed on its first step (see below) |
-  | 10-30 06:30 | the burst run on v17 again (240 min), then its evaluation |
-  | 10-30 about 10:40 | the baselines through the gates and SIDD validation (about 1 h) |
-  | 10-30 about 11:55 | v18s0, then its scoring (about 25 min) |
-  | 10-31 about 12:25 | v18s1 |
-  | 11-01 about 12:55 | v18s2 |
-  | 11-02 about 13:25 | the comparison and the release seed |
+  | 10-30 06:30 | the burst run on v17 again; it spilled out of GPU memory and ran at 1 img/s (see below) |
+  | 10-30 06:45 | the burst run on v17 with gradient checkpointing (240 min), then its evaluation |
+  | 10-30 about 10:55 | the baselines through the gates and SIDD validation (about 1 h) |
+  | 10-30 about 12:10 | v18s0, then its scoring (about 25 min) |
+  | 10-31 about 12:40 | v18s1 |
+  | 11-01 about 13:10 | v18s2 |
+  | 11-02 about 13:40 | the comparison and the release seed |
 
 - **The burst run's first try (10-30 06:18).**
   - `BurstNet(single)` keeps the single-frame network as `model.single`. The run scored that network alone at step 0 and then moved it to the CPU, which moved the burst model's own body there, so the first step failed on two devices. The retries would have failed the same way: no last.pt yet.
   - The chain was stopped before its retries reached the evaluation, so the v18 queue kept waiting. The step-0 reference is now scored where it is (`79423a54`), with tests that a run moves no module and that two steps run on the GPU.
   - The run went again at 06:30 from `.tmp/frozen_burst17b`: `frozen_burst17` (0e8a76d5) with that one file changed. The crashed try's logs are in `burst_v17/crashed_1030`.
+  - That try did not fit on the card. Batch 16 of four-frame bursts at 256 px held 28.5 GB on the card and 9 GB more in shared system memory, where the Windows driver puts what does not fit instead of failing. It ran at 1 img/s; v17 alone ran at 56. It raised no error, so the script's fallback, gradient checkpointing on a failed try, never started.
+  - It was stopped at step 50 (06:45), which started that fallback by hand: 11.3 img/s in 12.7 GB, and the same loss at step 50 (0.3756), so the run is the same run, 11 times faster. At 0.7 steps a second the 240 minutes hold about 10,000 steps of the 60,000 cap. The stopped try's log is `crashed_1030/train_log_try1_spilled.jsonl`.
+  - The trainers now cap their allocator at the card's free memory at start, less 1 GB (`train.hold_to_card`). The free memory is read from nvidia-smi, because under Windows' WDDM `mem_get_info` sees only its own process. A run that does not fit then raises at once and its retry comes next. Runs frozen before the change (the burst run, v18) do not have it; v18 trains v15's model at batch 16, which v17 ran in 17 GB.
 
 - **Other splits, and why not.**
   - One 72-hour run gives no spread.
