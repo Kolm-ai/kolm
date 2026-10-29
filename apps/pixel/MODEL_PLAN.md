@@ -916,6 +916,7 @@ v18 is three runs of one recipe that differ only in the seed, 24 hours each on t
 
   - **UHD-IQA joins** (`hf-uhd-iqa`, CC0) at weight 1: 845 decoded, 593 kept by the target audit (`max_halo` 0.044; 555 train, 38 val). It adds to the synthetic validation draw, so v18's validation losses do not read against v17's. And v18 against v17 measures the budget and UHD-IQA together. The release is judged on the gates and against the baselines, not against v17.
   - **The Commons quality images stay out.** Their audit is nearly done (7,700 of 8,557 read, none rejected), but D: is below the decoded store's 300 GB floor, so they cannot be decoded before the launch. They join a later run once the store has room.
+  - **Not in v18, still open:** a halo cut for SI-HDR (its references read p75 0.072 and p90 0.25 on the audit, against the 0.044 cut; about 4 % of real draws), and RawNIND's quadrant alignment re-estimated on a denoised copy.
   - **Never in training:** raw.pixls.us (held-out), RawNIND's test_reserve and holdout scenes, the real-pair val and test scenes, SIDD, and generated images.
 - **Budget: 24 hours a seed (`--minutes 1440 --steps 300000`).**
   - At v17's rate (about 56 images a second at batch 16, 3.5 steps a second), 24 hours is about 300,000 steps and 4.8M tiles of 256 px.
