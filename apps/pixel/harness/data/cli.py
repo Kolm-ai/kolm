@@ -229,7 +229,7 @@ def cmd_burststore(args) -> int:
     from .burststore import BurstStore, build_store
     try:
         tally = build_store(splits=tuple(args.splits), workers=args.workers, window=args.window, log=print,
-                            background=args.background)
+                            background=args.background, frames_root=args.frames_root)
     except (ValueError, FileNotFoundError) as ex:
         print(f"burst store: {ex}")
         return 1
@@ -404,6 +404,9 @@ def add_parser(sub) -> None:
     bs.add_argument("--workers", type=int, default=4, help="bursts registered at once")
     bs.add_argument("--background", action="store_true", help="below normal priority, to run beside a training run")
     bs.add_argument("--tile", type=int, default=256, help="tile size the summary reports draws for")
+    bs.add_argument("--frames-root", type=Path, help="a second data root whose raw/<source> holds burst frames "
+                                                      "(frames pulled to another drive); the store stays under the "
+                                                      "data root")
     bs.set_defaults(func=cmd_burststore)
 
     sx = ds.add_parser("subpix", help="the sub-pixel residual of every stored real pair, written into its JSON")

@@ -178,23 +178,31 @@ def window_of(scene: str, shape: tuple[int, int], side: int) -> list[int]:
 
 # ---- writing ---------------------------------------------------------------------------------------------------
 
-def burst_frames(source: str, ref_in_file: str, root: Path) -> list[str]:
-    """The burst's frames on disk other than its reference frame (posix, relative to <root>/raw/<source>), the
-    nearest to the reference first (ties: the later frame)."""
-    base = Path(root) / "raw" / source
-    d = (base / ref_in_file).parent
+def frame_bases(source: str, root: Path, frames_root: Path | None = None) -> list[Path]:
+    """Where a source's burst frames may lie: <root>/raw/<source>, then <frames_root>/raw/<source> (frames pulled
+    to another drive); a frame is read from the first that holds it."""
+    out = [Path(root) / "raw" / source]
+    if frames_root is not None and Path(frames_root).resolve() != Path(root).resolve():
+        out.append(Path(frames_root) / "raw" / source)
+    return out
+
+
+def burst_frames(source: str, ref_in_file: str, root: Path, frames_root: Path | None = None) -> list[str]:
+    """The burst's frames on disk other than its reference frame (posix, relative to the raw source directory of
+    frame_bases), the nearest to the reference first (ties: the later frame)."""
     k_ref = frame_index(ref_in_file) or 0
-    out = []
-    for f in d.glob("payload_N*.dng"):
-        rel = f.relative_to(base).as_posix()
-        k = frame_index(rel)
-        if rel != ref_in_file and k is not None:
-            out.append((abs(k - k_ref), -k, rel))
-    return [r for _, _, r in sorted(out)]
+    out = {}
+    for base in frame_bases(source, root, frames_root):
+        for f in (base / ref_in_file).parent.glob("payload_N*.dng"):
+            rel = f.relative_to(base).as_posix()
+            k = frame_index(rel)
+            if rel != ref_in_file and k is not None:
+                out.setdefault(rel, (abs(k - k_ref), -k, rel))
+    return [r for _, _, r in sorted(out.values())]
 
 
 def write_burst(source: str, pair_meta: dict, root: Path, window: int | None = None, decode=decode_raw,
-                log=None) -> list[dict]:
+                log=None, frames_root: Path | None = None) -> list[dict]:
     """One burst: each of its frames on disk without a JSON decoded, fitted to the merge as the reference frame
     was, registered (align, local_grid), measured for its gain and written, the array first and the JSON last. The
     merge is the real store's ref.npy. With `window` only the part of the frame a `window` px window of the merge
@@ -203,7 +211,8 @@ def write_burst(source: str, pair_meta: dict, root: Path, window: int | None = N
     root = Path(root)
     scene, ref_in = pair_meta["scene"], pair_meta["in_file"]
     d = store_dir(source, root) / key_of(scene)
-    todo = [f for f in burst_frames(source, ref_in, root) if not frame_json(source, scene, f, root).exists()]
+    todo = [f for f in burst_frames(source, ref_in, root, frames_root)
+            if not frame_json(source, scene, f, root).exists()]
     if not todo:
         return []
     _check_room(d, 0)
@@ -212,7 +221,7 @@ def write_burst(source: str, pair_meta: dict, root: Path, window: int | None = N
                            mmap_mode="r"), dtype=np.float32)
     turn = int((pair_meta.get("fit") or {}).get("turn", 0))
     win = window_of(scene, y.shape[:2], int(window)) if window else None
-    base = root / "raw" / source
+    bases = frame_bases(source, root, frames_root)
     scale = int(pair_meta["scale"])
     k_ref = frame_index(ref_in)
     out = []
@@ -221,7 +230,7 @@ def write_burst(source: str, pair_meta: dict, root: Path, window: int | None = N
         meta = {"source": source, "scene": scene, "in_file": f, "ref_in_file": ref_in, "split": pair_meta["split"],
                 "frame": frame_index(f), "ref_frame": k_ref, "scale": scale, "licence": pair_meta.get("licence", "")}
         try:
-            x, bits = decode(base / f, scale)
+            x, bits = decode(next((b / f for b in bases if (b / f).exists()), bases[0] / f), scale)
             fits = [(xf, fit) for xf, fit in input_fits(np.asarray(x, dtype=np.float32), y) if fit["turn"] == turn]
             if not fits:
                 raise ValueError(f"no fit of the frame {tuple(x.shape)} to the merge {tuple(y.shape)} at the "
@@ -266,9 +275,9 @@ def write_burst(source: str, pair_meta: dict, root: Path, window: int | None = N
 
 
 def _burst_task(args: tuple) -> tuple[str, list[dict], str]:
-    source, meta, root, window = args
+    source, meta, root, window, frames_root = args
     try:
-        return meta["scene"], write_burst(source, meta, Path(root), window), ""
+        return meta["scene"], write_burst(source, meta, Path(root), window, frames_root=frames_root), ""
     except StoreFull as ex:
         return meta["scene"], [], f"{StoreFull.__name__}: {ex}"
     except Exception as ex:  # noqa: BLE001 - one burst's failure is logged, the rest go on
@@ -293,7 +302,7 @@ def reference_pairs(source: str, splits: tuple[str, ...], root: Path) -> list[di
 
 def build_store(source: str = HDRPLUS, splits: tuple[str, ...] = ("val",), root: Path | None = None,
                 workers: int = 1, window: int | None = None, log=print, background: bool = False,
-                decode=decode_raw) -> dict:
+                decode=decode_raw, frames_root: Path | None = None) -> dict:
     """Every burst of `splits` with a reference pair in the real store and frames on disk to store, `workers`
     processes at once (one when `decode` is not the raw decoder). Returns the tally: bursts, frames stored and
     rejected, bursts that failed whole, why it stopped short (`full`), bytes, seconds."""
@@ -301,16 +310,17 @@ def build_store(source: str = HDRPLUS, splits: tuple[str, ...] = ("val",), root:
     log = log or (lambda *a: None)
     refs = reference_pairs(source, splits, root)
     todo = [m for m in refs if any(not frame_json(source, m["scene"], f, root).exists()
-                                   for f in burst_frames(source, m["in_file"], root))]
+                                   for f in burst_frames(source, m["in_file"], root, frames_root))]
     log(f"{source}: {len(refs)} burst(s) of splits {', '.join(splits)} in the real store, {len(todo)} with frames to "
-        f"store, window {window or 'none'}, {workers} worker(s)")
+        f"store, window {window or 'none'}, {workers} worker(s)"
+        + (f", frames also under {frames_root}" if frames_root else ""))
     metas, failed, full = [], 0, ""
     t0 = time.perf_counter()
-    tasks = [(source, m, str(root), window) for m in todo]
+    tasks = [(source, m, str(root), window, str(frames_root) if frames_root else None) for m in todo]
     if workers <= 1 or decode is not decode_raw:
         if background:
             _lower_priority()
-        results = ((m["scene"], *_run_one(source, m, root, window, decode, log)) for m in todo)
+        results = ((m["scene"], *_run_one(source, m, root, window, decode, log, frames_root)) for m in todo)
     else:
         pool = mp.get_context("spawn").Pool(workers, initializer=_lower_priority if background else None)
         results = pool.imap_unordered(_burst_task, tasks)
@@ -346,9 +356,10 @@ def build_store(source: str = HDRPLUS, splits: tuple[str, ...] = ("val",), root:
     return tally
 
 
-def _run_one(source: str, meta: dict, root: Path, window: int | None, decode, log) -> tuple[list[dict], str]:
+def _run_one(source: str, meta: dict, root: Path, window: int | None, decode, log,
+             frames_root: Path | None = None) -> tuple[list[dict], str]:
     try:
-        return write_burst(source, meta, root, window, decode, log), ""
+        return write_burst(source, meta, root, window, decode, log, frames_root), ""
     except StoreFull as ex:
         return [], f"{StoreFull.__name__}: {ex}"
     except Exception as ex:  # noqa: BLE001
