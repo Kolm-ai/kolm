@@ -887,3 +887,69 @@ v16 is queued behind v15: `.tmp/v16_after_v15.sh` starts it once v15 is scored. 
   - `harness/__init__.py` turns WMI queries off on Windows, so `platform` answers from `sys.getwindowsversion()` (the same uname on this machine).
   - Loaders take `harness.loader_context()`, a spawn context whose Process class lives in `harness`. A worker unpickles that class first, so it imports `harness` before torch.
   - v15d trains on it. Tests: `tests/test_platform_wmi.py`.
+
+## 19. The long run: three seeds on the full real stores (v18)
+
+v18 is three runs of one recipe that differ only in the seed, 24 hours each on the one GPU, back to back. `.tmp/v18_seeds.sh` queues them behind the burst run on v17 and the baseline scoring (11.3). They train from `.tmp/frozen_v18`, the harness at 73758442.
+
+- **Why three seeds.**
+  - A held-out gate that passes on one run can pass by the draw: the initial weights and the order of the stream.
+  - So a claim holds only if every seed passes it, and every score is reported with its spread.
+- **What varies: `--seed 0`, `1`, `2`.**
+  - The initial weights: `torch.manual_seed(seed)` runs before the network is built. Before 73758442 nothing seeded them.
+  - The training stream: the PairStream at seed + step.
+- **What stays fixed: `--val-seed 0`.**
+  - The calibration draw (the normaliser) and the synthetic and real validation draws.
+  - So every run chooses best.pt on one validation set, never on held-out.
+- **Recipe: v17's or v15's, picked when v17 is scored (about 06:40 on 10-30).**
+  - v17's if it passes the tone gate wherever v15 does and keeps every gate v15 passes.
+  - Otherwise v15's: v17's flags without `--resample smooth`, `--overshoot-weight` and `--pyramid-weight`.
+  - The pick is written to `.tmp/v18_recipe`; the queue waits for it.
+  - The shape stays at about 120M (base 64, mults 1,2,4,8, blocks 2,3,6,8, 12 mid blocks). This run asks what more steps on real data buy, not what size does.
+- **Data: the real stores as they stand at launch, plus v17's clean sources and weights.**
+
+  | Store | Stored | v17 drew (train split) |
+  |---|---|---|
+  | HDR+ | 3,641 scenes | 3,126 pairs |
+  | RawNIND | 287 scenes | 2,196 pairs |
+  | SI-HDR | 164 scenes | 435 pairs |
+
+  - **UHD-IQA joins** (`hf-uhd-iqa`, CC0) at weight 1: 845 decoded, 593 kept by the target audit (`max_halo` 0.044; 555 train, 38 val). It adds to the synthetic validation draw, so v18's validation losses do not read against v17's. And v18 against v17 measures the budget and UHD-IQA together. The release is judged on the gates and against the baselines, not against v17.
+  - **The Commons quality images stay out.** Their audit is nearly done (7,700 of 8,557 read, none rejected), but D: is below the decoded store's 300 GB floor, so they cannot be decoded before the launch. They join a later run once the store has room.
+  - **Never in training:** raw.pixls.us (held-out), RawNIND's test_reserve and holdout scenes, the real-pair val and test scenes, SIDD, and generated images.
+- **Budget: 24 hours a seed (`--minutes 1440 --steps 300000`).**
+  - At v17's rate (about 56 images a second at batch 16, 3.5 steps a second), 24 hours is about 300,000 steps and 4.8M tiles of 256 px.
+  - That is three times v17's 480 minutes (about 100,000 steps).
+  - The cosine runs to the floor over whichever limit is reached first.
+  - Each seed gets up to four tries, each resuming from last.pt; `--minutes` is summed across resumes.
+- **Order and timing (est).**
+
+  | Start | GPU work |
+  |---|---|
+  | 10-30 06:15 | v17 ends; scored by 06:40 |
+  | 10-30 06:40 | the burst run on v17 (240 min), then its evaluation |
+  | 10-30 about 10:45 | the baselines through the gates and SIDD validation (about 1 h), once their weights are pulled; otherwise after v18s2 |
+  | 10-30 about 12:00 | v18s0, then its scoring (about 25 min) |
+  | 10-31 about 12:30 | v18s1 |
+  | 11-01 about 13:00 | v18s2 |
+  | 11-02 about 13:30 | the comparison and the release seed |
+
+- **Other splits, and why not.**
+  - One 72-hour run gives no spread.
+  - Three 72-hour runs take nine days.
+  - Three at once would not fit: each takes 10.5 GB of GPU memory and 12 loader workers, one run already holds the GPU at 97 %, and RAM is tight.
+- **Stop rules.**
+  - A seed that dies four times is reported as dead, and the queue goes on to the next.
+  - After v18s0 is scored, the queue checks it against v17 report by report (`.tmp/v18_gate_check.py`). If v18s0 fails a gate that v17 passes, the queue stops before v18s1 and waits for `.tmp/v18_go`. Three times the steps should not lose a gate; if they do, the cause is found before two more days go in.
+- **Scoring, per seed.**
+  - `score_run_v17.sh`, from `frozen_eval17`, so the scores read against v15's and v17's:
+    - the demo and raw.pixls.us sets, known and blind;
+    - the three real-pair sets, known and blind;
+    - the sub-pixel sets.
+  - SIDD validation, blind (`model baseline sidd --ckpt`). SIDD is sRGB phone crops and the model trains on linear data, so it is out of the model's domain: it is reported, not a gate.
+  - Then `model compare --runs v15,v17,v18s0,v18s1,v18s2,nafnet,restormer,scunet`.
+- **What is claimed.**
+  - A gate passes for v18 only if it passes on all three seeds.
+  - Each score is given as the median of the three, with the min and max.
+  - The release is the seed with the best validation loss, not the best held-out score. It goes through export, capture-eval and the model card (section 12), and the burst layer is then trained on it.
+- **Disk.** Each seed keeps two checkpoints of 1.9 GB plus its reports and their tiles, about 15 GB for all three. D: has 191 GB free.
