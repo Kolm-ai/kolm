@@ -9,11 +9,12 @@ import numpy as np
 import pytest
 from scipy.ndimage import gaussian_filter
 
+from harness.colorspace import luminance
 from harness.data.label import Item, load_items
 from harness.metrics import STILL_METRICS
 from harness.model.data import capture_of_params, restore_target
-from harness.model.heldout import (build_set, demo_camera_params, exposure_policy, load_set, render_set, score,
-                                   set_path, to_markdown)
+from harness.model.heldout import (TONE_MARGIN, build_set, demo_camera_params, exposure_policy, load_set, render_set,
+                                   score, set_path, to_markdown, tone_gains, tone_gate)
 
 SOURCE = "test-raws"
 
@@ -103,6 +104,32 @@ def test_score_ties_the_identity_and_never_loses_to_the_target(raw_root):
     assert "| mtf50_cpp |" in md and "withheld" in md and "broken.png" in md and "beats the simulated capture" in md
 
 
+def test_tone_gate_fails_a_darkened_band_the_gain_matched_gates_never_see(raw_root):
+    """v16 kept every gain-matched gate while losing 5 % of tone at 0.2 to 0.5 and a fifth of clipped white: the
+    tone gate reads each band's gain against the target's and holds the output to the input's."""
+    ramp = np.repeat(np.linspace(0.0, 1.2, 128)[None, :, None], 3, axis=2).repeat(32, axis=0)   # every band
+    g = tone_gains(ramp, ramp)
+    assert set(g) == {"0.05-0.2", "0.2-0.5", "0.5-0.9", "0.9-0.999", "0.999+"} and all(v == 1.0 for v in g.values())
+    dark = np.where(luminance(ramp)[..., None] >= 0.2, 0.9 * ramp, ramp)
+    g = tone_gains(dark, ramp)
+    assert g["0.05-0.2"] == pytest.approx(1.0) and g["0.2-0.5"] == pytest.approx(0.9) and g["0.999+"] == pytest.approx(0.9)
+    rows = [{"tone": {"input": tone_gains(ramp, ramp), "output": tone_gains(o, ramp)}} for o in (dark,) * 4]
+    t = tone_gate(rows)
+    assert t["overall"] == "FAIL at tone" and t["bands"]["0.2-0.5"]["tiles"] == 4
+    fails = {c["metric"] for c in t["gates"][0]["checks"] if c["status"] == "fail"}
+    assert fails == {"tone 0.2-0.5", "tone 0.5-0.9", "tone 0.9-0.999", "tone 0.999+"}
+    near = [{"tone": {"input": r["tone"]["input"], "output": tone_gains(ramp * (1 - TONE_MARGIN / 2), ramp)}}
+            for r in rows]
+    assert tone_gate(near)["overall"] == "PASS"                     # within the margin
+    assert tone_gate(rows[:3])["overall"].startswith("INCOMPLETE")  # too few tiles to judge a band
+    samples = render_set(build_set(SOURCE, n=3, tile=64, seed=1, root=raw_root, log=None))
+    rep = score(samples, lambda s: s["x"])
+    assert all(r["tone"]["input"] == r["tone"]["output"] for r in rep["tiles"])
+    assert "tone" in rep["gates"] and "| band | input | model | tiles |" in to_markdown(
+        {**rep, "ckpt": "x.pt", "step": 1, "blind": True, "source": SOURCE, "seed": 1, "tile": 64, "scale": 1,
+         "preset": "best_case_earth", "ss": 1, "seconds": 0.0, "records": [], "skipped": {}})
+
+
 def test_eval_raw_is_wired_into_the_cli():
     from harness.model.cli import add_parser
     p = argparse.ArgumentParser()
@@ -121,7 +148,7 @@ def test_score_keeps_the_high_pass_verdict_and_wants_a_frontier_of_its_reading(r
     from harness.model.frontier import ladder
     samples = render_set(build_set(SOURCE, n=3, tile=64, seed=1, root=raw_root, log=None))
     rep = score(samples, lambda s: s["x"])
-    assert rep["noise"] == "residual" and set(rep["gates"]) == {"capture", "capture_hp"}
+    assert rep["noise"] == "residual" and set(rep["gates"]) == {"capture", "capture_hp", "tone"}
     assert all(set(r["hp"]) == {"input", "output", "truth"} for r in rep["tiles"])
     assert "capture_hp" not in score(samples, lambda s: s["x"], "hp")["gates"]
     with pytest.raises(ValueError, match="scored under noise 'hp', not 'residual'"):
@@ -150,7 +177,7 @@ def test_rescore_reproduces_the_report_from_its_stored_outputs(raw_root, tmp_pat
     for k in ("n", "noise", "metrics", "gates", "tiles", "step", "records"):
         assert json.dumps(again[k]) == json.dumps(rep[k]), k
     hp = rescore(out, noise="hp", frontier=False, root=raw_root, log=None)
-    assert hp["noise"] == "hp" and set(hp["gates"]) == {"capture"} and "noise read as `hp`" in to_markdown(hp)
+    assert hp["noise"] == "hp" and set(hp["gates"]) == {"capture", "tone"} and "noise read as `hp`" in to_markdown(hp)
     monkeypatch.setenv("HARNESS_DATA_ROOT", str(raw_root))
     assert cmd_rescore(argparse.Namespace(dir=[str(out)], noise="hp", no_frontier=True)) == 0
     assert json.loads((out / "heldout_before_rescore.json").read_text(encoding="utf-8"))["noise"] == "residual"

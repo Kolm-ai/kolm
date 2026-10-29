@@ -242,6 +242,17 @@ OVERSHOOT_MIN_STEP = 0.1  # metrics.natural.MIN_STEP: linear-luminance step a wi
 OVERSHOOT_CLIP = 0.98     # metrics.natural.CLIP_GUARD
 OVERSHOOT_GAIN_SIGMA = 8.0   # tilemetrics.GAIN_SIGMA_PX: the local gain divided out before the windows
 PYRAMID_SCALES = (2, 4, 8, 16)   # block sides in px; tilemetrics.SHADING_BLOCK is 16
+# The term charges an output that passes the target's local range and nothing that sits inside it, so under the
+# output's own residual noise its cheapest descent is to pull the bright side of every edge window down and the dark
+# side up: a tone shift, not a sharper restoration. At v15's own output on real val tiles its mean gradient on 0.5 to
+# 0.999 luminance was 100 to 200 times the L1's; v16 (the gain divided out under no gradient, as the metric does)
+# lost 5 % of tone at 0.2 to 0.5 and 20 to 25 % on clipped white, which the gain-matched gates never see. Taking the
+# gain with its gradient only moves the pull: tone off 0.5 to 0.999, onto clipped white. From the seventeenth run the
+# gradient flows through the output's detail finer than OVERSHOOT_TONE_SIGMA alone (the value is unchanged): it can
+# lower a halo or a noise spike against its neighbours, and moves no level coarser than that, which is the L1's. On
+# dead leaves plus noise 1 px cut the pull on every band above 0.1 six times (2 px: three) and lowered an unsharp
+# halo as fast as the full gradient.
+OVERSHOOT_TONE_SIGMA = 1.0
 
 
 def _gauss(t: torch.Tensor, sigma: float) -> torch.Tensor:
@@ -254,19 +265,23 @@ def _gauss(t: torch.Tensor, sigma: float) -> torch.Tensor:
 
 
 def overshoot_loss(pred: torch.Tensor, y: torch.Tensor, half: int = OVERSHOOT_HALF,
-                   min_step: float = OVERSHOOT_MIN_STEP, clip: float = OVERSHOOT_CLIP) -> torch.Tensor:
+                   min_step: float = OVERSHOOT_MIN_STEP, clip: float = OVERSHOOT_CLIP,
+                   tone_sigma: float | None = OVERSHOOT_TONE_SIGMA) -> torch.Tensor:
     """metrics.natural.edge_overshoot_pair as a loss: on the gates' luminance (clipped linear), the output's local
-    gain against the target's at OVERSHOOT_GAIN_SIGMA divided out (under no gradient, as tilemetrics.gain_matched),
-    then per pixel and axis a (2 half + 1) px window gives the target's step and how far the output's maximum or
-    minimum passes the target's, over the step; the mean over the batch's windows that hold an edge (step >=
-    min_step) inside the clip guard, where the metric takes their median. Zero for the identity and for any output
-    inside the target's local range, so a perfect restoration is still the optimum. The mean also charges what a
-    blur carries into a window from beyond it (a 1 px Gaussian on dead leaves reads 0.025, the metric's median 0):
-    it holds an edge from both sides, softening as well as ringing."""
+    gain against the target's at OVERSHOOT_GAIN_SIGMA divided out (as tilemetrics.gain_matched, under no gradient),
+    the gradient taken through the output's detail finer than `tone_sigma` px alone (None: through all of it, as the
+    sixteenth run had it), then per pixel and axis a (2 half + 1) px window gives
+    the target's step and how far the output's maximum or minimum passes the target's, over the step; the mean over
+    the batch's windows that hold an edge (step >= min_step) inside the clip guard, where the metric takes their
+    median. Zero for the identity and for any output inside the target's local range, so a perfect restoration is
+    still the optimum. The mean also charges what a blur carries into a window from beyond it (a 1 px Gaussian on
+    dead leaves reads 0.025, the metric's median 0): it holds an edge from both sides, softening as well as ringing."""
     lp, ly = _luma(pred), _luma(y)
-    with torch.no_grad():
-        g = _gauss(ly, OVERSHOOT_GAIN_SIGMA) / _gauss(lp, OVERSHOOT_GAIN_SIGMA).clamp_min(1e-9)
-    lp = lp * g
+    gain = (_gauss(ly, OVERSHOOT_GAIN_SIGMA) / _gauss(lp, OVERSHOOT_GAIN_SIGMA).clamp_min(1e-9)).detach()
+    if tone_sigma:
+        base = _gauss(lp, tone_sigma)
+        lp = lp + (base.detach() - base)
+    lp = lp * gain
     size = 2 * half + 1
     total, count = lp.new_zeros(()), lp.new_zeros(())
     for ks, pad in (((1, size), (0, half)), ((size, 1), (half, 0))):

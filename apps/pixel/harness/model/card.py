@@ -18,9 +18,10 @@ import re
 from pathlib import Path
 
 CARD = "MODEL_CARD.md"
-GATE_SETS = ("capture", "camera", "frontier")
+GATE_SETS = ("capture", "camera", "frontier", "tone")
 GATE_NAMES = {"capture": "the real capture (input)", "camera": "the camera's own photo",
-              "frontier": "the oracle linear frontier (the best linear filter fitted on the target)"}
+              "frontier": "the oracle linear frontier (the best linear filter fitted on the target)",
+              "tone": "the input's tone per target luminance band (not gain-matched; reports before v17 have none)"}
 # licence text that limits use of what is trained on the source; matched case-insensitively on the manifest's licence
 RESTRICTED = re.compile(r"non-?commercial|\bNC\b|research|scientific|no formal licen|none stated|unknown", re.I)
 
@@ -159,8 +160,8 @@ def render(release: Path, run: Path | None = None, capture_evals: list[Path] = (
             "reached). The gate sets compare against " + "; ".join(f"**{k}**: {v}" for k, v in GATE_NAMES.items())
             + ". \"known\" conditions on the measured noise law (on the raw-pixls-us sets, the demo camera's), "
             "\"blind\" on no descriptor; \"-\" is a gate set the set has no reference for.", "",
-            "| set | what | tiles | capture | camera | frontier | first failing check per gate set |",
-            "|---|---|---:|---|---|---|---|"]
+            "| set | what | tiles | " + " | ".join(GATE_SETS) + " | first failing check per gate set |",
+            "|---|---|---:|" + "---|" * len(GATE_SETS) + "---|"]
     for r in rows:
         fails = [f"{k}: {r['gates'][k]['first_fail']}" for k in GATE_SETS
                  if k in r["gates"] and r["gates"][k]["first_fail"]]

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from harness.model.compare import METRICS, cells, collect, to_markdown
+from harness.model.compare import GATES, METRICS, cells, collect, to_markdown
 
 
 def _rep(step, edge, frontier_edge=None):
@@ -35,9 +35,9 @@ def test_collect_orders_runs_by_version_and_skips_kept_reports(tmp_path):
 
 def test_cells_pair_the_output_with_the_frontier_only_where_the_report_has_one():
     old, new = cells(_rep(5, 0.0207)), cells(_rep(6, 0.0207, 0.0))
-    e = 4 + METRICS.index("edge_overshoot")
+    e = 1 + len(GATES) + METRICS.index("edge_overshoot")
     assert old[:4] == ["5", "fail: artifacts", "PASS", "-"] and old[e] == "0.0207"
     assert new[3] == "PASS" and new[e] == "0.0207 / 0"
-    assert new[4 + METRICS.index("shadow_snr_db")] == "0.5"   # matched, so the output's alone
+    assert new[1 + len(GATES) + METRICS.index("shadow_snr_db")] == "0.5"   # matched, so the output's alone
     md = to_markdown({"heldout_known": {"v14b": _rep(6, 0.0207, 0.0)}})
     assert "## heldout_known" in md and "| v14b | 6 | fail: artifacts | PASS | PASS |" in md

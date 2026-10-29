@@ -142,7 +142,7 @@ def cmd_rescore(args) -> int:
         (d / "heldout.md").write_text(to_markdown(rep), encoding="utf-8")
         g = rep["gates"]
         print(f"{d}: capture {g['capture']['overall']}" + "".join(
-            f" | {k} {g[k]['overall']}" for k in ("capture_hp", "camera", "frontier") if k in g))
+            f" | {k} {g[k]['overall']}" for k in ("capture_hp", "camera", "frontier", "tone") if k in g))
     return 0
 
 

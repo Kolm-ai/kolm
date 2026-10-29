@@ -15,7 +15,7 @@ from pathlib import Path
 RUN_DIR = "recovered_"   # <models>/recovered_<run>/heldout_*/heldout.json
 METRICS = ("shadow_snr_db", "mtf50_cpp", "texture_hf_fidelity", "edge_overshoot", "banding_score", "periodicity",
            "shading_rmse", "delta_e_mean", "landmark_error_px")
-GATES = ("capture", "camera", "frontier")
+GATES = ("capture", "camera", "frontier", "tone")
 
 
 def _run_key(run: str) -> tuple:
@@ -65,8 +65,8 @@ def cells(rep: dict) -> list[str]:
 
 def to_markdown(table: dict[str, dict[str, dict]]) -> str:
     lines = ["# Held-out reports by run", "",
-             "Per report set, a row per run: its gate verdicts against the capture, the camera's own photo and the "
-             "oracle linear frontier, and its medians, as output / frontier at the run's own shadow SNR where the "
+             "Per report set, a row per run: its gate verdicts against the capture, the camera's own photo, the "
+             "oracle linear frontier and on tone (heldout.tone_gate), and its medians, as output / frontier at the run's own shadow SNR where the "
              "report has a frontier (lower is better but for mtf50 and texture, judged by distance to the truth)."]
     head = "| run | step | " + " | ".join(GATES) + " | " + " | ".join(METRICS) + " |"
     rule = "|---|---:|" + "---|" * len(GATES) + "---:|" * len(METRICS)

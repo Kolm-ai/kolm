@@ -12,8 +12,8 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from harness.model.data import CAPTURE_DIM, COND_DIM, LOG_GAIN, METRIC_COND_DIM, encode
-from harness.model.losses import (MS_WEIGHTS, SSIM_C1, TRANSFER_BIN_CPP, best_shift, ms_ssim, ssim_levels,
-                                  overshoot_loss, pyramid_loss, ssim_loss, to_display, transfer_bands,
+from harness.model.losses import (MS_WEIGHTS, OVERSHOOT_TONE_SIGMA, SSIM_C1, TRANSFER_BIN_CPP, best_shift, ms_ssim,
+                                  ssim_levels, overshoot_loss, pyramid_loss, ssim_loss, to_display, transfer_bands,
                                   transfer_loss)
 from harness.model.net import CondUNet, noise_map
 from harness.model.train import CLIP_LOG, CLIP_WEIGHT, WARMUP, lr_at, pair_loss
@@ -293,6 +293,33 @@ def test_overshoot_loss_gradient_lowers_a_halo():
     loss.backward()
     assert torch.isfinite(pred.grad).all() and float(pred.grad.abs().sum()) > 0
     assert float(overshoot_loss(pred.detach() - 0.05 * pred.grad / pred.grad.abs().max(), _t(y))) < float(loss)
+
+
+def test_overshoot_loss_gradient_moves_detail_not_tone():
+    """On the target plus zero-mean noise, every pull the term makes on a luminance band is a bias, not a repair. Taken
+    through all of the output (the sixteenth run) its descent darkens every band above 0.1 with most of its gradient's
+    weight; taken through the detail finer than tone_sigma alone the value is unchanged, the gradient carries no level
+    at all, and the pull on the bands is a fraction of that."""
+    y = _leaves(1)
+    rng = np.random.default_rng(2)
+    d = np.clip(y + 0.01 * np.sqrt(y / 0.5) * rng.standard_normal(y.shape), 1e-4, 0.97)
+    lum = d @ np.array([0.2126, 0.7152, 0.0722])
+    band = (lum >= 0.1) & (lum < 0.97)
+    vals, dc, pull = {}, {}, {}
+    for ts in (None, OVERSHOOT_TONE_SIGMA):
+        lin = torch.as_tensor(d).permute(2, 0, 1)[None].float().requires_grad_()
+        loss = overshoot_loss(torch.log1p(LOG_GAIN * lin), _t(y), tone_sigma=ts)
+        loss.backward()
+        g = lin.grad[0].permute(1, 2, 0).numpy().astype(np.float64)
+        vals[ts] = float(loss.detach())
+        dc[ts] = float(g.sum()) / float(np.abs(g).sum())
+        along = (d * g).sum(axis=2)
+        pull[ts] = float(along[band].sum()) / float(np.abs(along[band]).sum())
+    ts = OVERSHOOT_TONE_SIGMA
+    assert vals[ts] == pytest.approx(vals[None], rel=1e-6) and vals[None] > 0
+    assert abs(dc[ts]) < 1e-3
+    assert pull[None] > 0.5
+    assert pull[ts] < pull[None] / 4
 
 
 def test_pyramid_loss_charges_a_blotch_and_shading_more_than_noise_of_the_same_size():

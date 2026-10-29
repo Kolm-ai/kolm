@@ -56,7 +56,7 @@ from ..data import data_root
 from ..data.degrade import P_EXPOSE_FOR_PEAK, PEAK_FILL, PEAK_PERCENTILE, DegradeParams, expose_for_peak_stops
 from ..data.label import clean_settings, list_items, load_items
 from ..data.tilemetrics import noise_metrics, self_metrics, tile_metrics
-from ..gate import overall, run_gates
+from ..gate import CheckResult, GateResult, overall, run_gates
 from ..metrics import STILL_METRICS, verdict
 from .data import _h, capture_of_params, render_pair, restore_target
 from .frontier import cached_ladder
@@ -67,6 +67,17 @@ HELDOUT_DIR = "heldout"   # <data_root>/derived/heldout/<source>/s<seed>_n<n>_t<
 DEMO_PRESET = "best_case_earth"
 OUTPUTS_FILE = "outputs.npz"   # beside heldout.json: the restored tiles, float32 (n, tile, tile, 3)
 NOISE_KEYS = ("shadow_snr_db", "dr_steps")
+# Tone by the target's luminance band. Every tile metric above is gain-matched, and highlight loss reads "-" on real
+# pairs, so an output that darkens a band passes them all: v16 lost 5 % of tone at 0.2 to 0.5 and 20 to 25 % on
+# clipped white unseen. A tile's gain in a band is the output's mean luminance over the target's pixels in the band
+# over the target's own mean there, on a band with TONE_MIN_PX of them; the set's, the median over such tiles. The
+# tone gate wants the output's gain no further from 1 than the input's, within TONE_MARGIN in log, on each band
+# measured on TONE_MIN_TILES tiles or more: the input sits at the target's exposure, so its gain is what tone the
+# capture keeps and the model may only restore it.
+TONE_BANDS = ((0.05, 0.2), (0.2, 0.5), (0.5, 0.9), (0.9, 0.999), (0.999, np.inf))
+TONE_MIN_PX = 256
+TONE_MIN_TILES = 4
+TONE_MARGIN = 0.03
 
 
 def _g(name: str, *checks: tuple[str, str]) -> dict:
@@ -235,6 +246,49 @@ def _gates(spec: list[dict], cand: dict, base: dict, truth: dict, baseline: str)
     return {"overall": overall(res), "gates": [g.to_dict() for g in res]}
 
 
+def _band(lo: float, hi: float) -> str:
+    return f"{lo:g}+" if np.isinf(hi) else f"{lo:g}-{hi:g}"
+
+
+def tone_gains(img: np.ndarray, y: np.ndarray) -> dict[str, float]:
+    """per TONE_BANDS band with TONE_MIN_PX of the target's pixels in it, `img`'s gain there: its mean luminance over
+    those pixels over the target's"""
+    li, ly = luminance(img), luminance(y)
+    out = {}
+    for lo, hi in TONE_BANDS:
+        m = (ly >= lo) & (ly < hi)
+        if int(m.sum()) >= TONE_MIN_PX:
+            out[_band(lo, hi)] = float(li[m].mean() / ly[m].mean())
+    return out
+
+
+def tone_gate(rows: list[dict]) -> dict:
+    """The tone gate on score()'s rows (each with "tone": input and output tone_gains): per band the set's gains
+    ("bands": input, output, tiles), and a check per band on TONE_MIN_TILES tiles that the output's |log gain|
+    is at most the input's plus TONE_MARGIN; no such band is a skipped check."""
+    bands, checks = {}, []
+    for lo, hi in TONE_BANDS:
+        k = _band(lo, hi)
+        have = [r["tone"] for r in rows if k in r["tone"]["output"]]
+        if not have:
+            continue
+        gi, go = (float(np.median([t[side][k] for t in have])) for side in ("input", "output"))
+        bands[k] = {"input": gi, "output": go, "tiles": len(have)}
+        if len(have) < TONE_MIN_TILES:
+            continue
+        di, do = (abs(float(np.log(max(g, 1e-9)))) for g in (gi, go))
+        ok = do <= di + TONE_MARGIN
+        checks.append(CheckResult(f"tone {k}", "<=", di + TONE_MARGIN, do, di, "pass" if ok else "fail",
+                                  f"output at {go:.4g} of the target's gain, input {gi:.4g}: |log| {do:.4g} "
+                                  f"{'<=' if ok else '>'} {di:.4g} + {TONE_MARGIN:g}"))
+    if not checks:
+        checks.append(CheckResult("tone", "<=", None, None, None, "skip",
+                                  f"no band with {TONE_MIN_PX} target pixels on {TONE_MIN_TILES} tiles"))
+    statuses = {c.status for c in checks}
+    g = GateResult("tone", "fail" if "fail" in statuses else ("skip" if statuses == {"skip"} else "pass"), checks)
+    return {"overall": overall([g]), "gates": [g.to_dict()], "bands": bands}
+
+
 def score(samples: list[dict], restore, noise: str = "residual", frontier: dict | None = None) -> dict:
     """`restore(sample) -> linear tile` judged per sample against y: the input's, the output's, the truth's own
     (self_metrics(y)) and, where the sample has one, the camera photo's tile metrics; their medians over the set;
@@ -244,7 +298,8 @@ def score(samples: list[dict], restore, noise: str = "residual", frontier: dict 
     camera medians taken over the tiles that have a camera photo; `outputs` the restored tiles. `noise` is the
     shadow SNR and dynamic-range reading (tilemetrics.NOISE_MODES). Under "residual" each row also carries the
     high-pass reading of the input, output and truth ("hp"), and gates["capture_hp"] is CAPTURE_GATES with it.
-    With `frontier`, frontier.cached_ladder of these samples under the same reading, gates["frontier"] is
+    Each row's "tone" is the input's and output's tone_gains, gates["tone"] tone_gate on them (not gain-matched,
+    unlike every other gate). With `frontier`, frontier.cached_ladder of these samples under the same reading, gates["frontier"] is
     frontier.gates on the output."""
     if frontier is not None and frontier["noise"] != noise:
         raise ValueError(f"the frontier was scored under noise {frontier['noise']!r}, not {noise!r}")
@@ -252,7 +307,8 @@ def score(samples: list[dict], restore, noise: str = "residual", frontier: dict 
     for s in samples:
         out = np.asarray(restore(s), dtype=np.float64)
         r = {"input": tile_metrics(s["x"], s["y"], noise), "output": tile_metrics(out, s["y"], noise),
-             "truth": self_metrics(s["y"], noise)}
+             "truth": self_metrics(s["y"], noise),
+             "tone": {"input": tone_gains(s["x"], s["y"]), "output": tone_gains(out, s["y"])}}
         if s.get("camera") is not None:
             r["camera"] = tile_metrics(np.asarray(s["camera"], dtype=np.float64), s["y"], noise)
         if noise != "hp":
@@ -283,6 +339,7 @@ def score(samples: list[dict], restore, noise: str = "residual", frontier: dict 
         gates["camera"] = {**_gates(CAMERA_GATES, cm["output"], cm["camera"], cm["truth"], "camera"), "tiles": len(cam_rows)}
     if frontier is not None:
         gates["frontier"] = frontier_gates(frontier, [r["output"] for r in rows], [r["truth"] for r in rows])
+    gates["tone"] = tone_gate(rows)
     return {"n": len(rows), "noise": noise, "metrics": summary, "gates": gates, "tiles": rows, "outputs": outputs}
 
 
@@ -422,11 +479,21 @@ def to_markdown(rep: dict) -> str:
         for m, c in fr["metrics"].items():
             lines.append(f"| {m} | {_fmt(c['frontier'])} | {_fmt(c['output'])} | {_fmt(c['truth'])} | "
                          f"{c['verdict'] or '-'} |")
+    bands = (gates.get("tone") or {}).get("bands")
+    if bands:
+        lines += ["", f"Tone by the target's luminance band, not gain-matched as every metric above is: per tile the "
+                      f"band's mean luminance over the target's on the target's pixels in the band (on tiles with "
+                      f"{TONE_MIN_PX} of them), the median over the tiles; 1 is the target's tone. The tone gate wants "
+                      f"the model no further from 1 than the input, within {TONE_MARGIN:g} in log, on each band of "
+                      f"{TONE_MIN_TILES} tiles or more:", "",
+                  "| band | input | model | tiles |", "|---|---:|---:|---:|"]
+        lines += [f"| {k} | {_fmt(b['input'])} | {_fmt(b['output'])} | {b['tiles']} |" for k, b in bands.items()]
     for key, label in (("capture", f"against the {what}"),
                        ("capture_hp", f"against the {what}, noise read high-pass (legacy: the verdict reports "
                                       f"before v16 gave; it counts the target's own texture as noise)"),
                        ("camera", "against the camera's photo"),
-                       ("frontier", "against the oracle linear frontier")):
+                       ("frontier", "against the oracle linear frontier"),
+                       ("tone", "on tone (the band gains above)")):
         g = gates.get(key)
         if not g:
             continue
