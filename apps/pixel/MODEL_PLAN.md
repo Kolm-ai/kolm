@@ -973,7 +973,7 @@ v18 is three runs of one recipe that differ only in the seed, 24 hours each on t
   - Three at once would not fit: each takes 10.5 GB of GPU memory and 12 loader workers, one run already holds the GPU at 97 %, and RAM is tight.
 - **Stop rules.**
   - A seed that dies four times is reported as dead, and the queue goes on to the next.
-  - After v18s0 is scored, the queue checks it report by report against v17 and against v15, whose recipe it trains (`.tmp/v18_gate_check.py`; neither run's passes contain the other's). If v18s0 fails a gate either passes, the queue stops before v18s1 and waits for `.tmp/v18_go`. Three times the steps should not lose a gate; if they do, the cause is found before two more days go in.
+  - After v18s0 is scored, the queue judges it with the verdict (section 20.3) against v17 and against v15, whose recipe it trains (`.tmp/v18_gate_check.py`; until 30 October it counted cascaded gates, see 20.8). The queue stops before v18s1 and waits for `.tmp/v18_go` when v18s0 lacks one of their reports, or when its pooled reading against either is worse (the interquartile mean of margin / tie over every cell, its 90 % interval below 0). Worse cells alone do not stop it: with one seed a side no cell's interval holds seed variance, and seeds 1 and 2 are what measure it. The rule stops a run like v17, which reads worse against v15 (20.3).
 - **Scoring, per seed.**
   - `score_run_v17.sh`, from `frozen_eval17`, so the scores read against v15's and v17's:
     - the demo and raw.pixls.us sets, known and blind;
@@ -1118,10 +1118,10 @@ All three run with `CUDA_VISIBLE_DEVICES= PYTHONPATH=. HARNESS_DATA_ROOT=D:/lens
   - A public baseline is read by its name (nafnet, restormer, scunet), on the blind sets it is scored on.
 - **Results.**
 
-  | Candidate vs base | Worse cells | Better | Lower, inside the margin | Pooled IQM [95 %] | Improves | Verdict |
+  | Candidate vs base | Worse cells | Better | Lower, inside the margin | Pooled IQM [90 %] | Improves | Verdict |
   |---|---|---|---|---|---|---|
-  | v17 vs v15 | 14 | 6 | 11 | −0.165 [−0.179, −0.088] | 0.30 [0.28, 0.38] | worse |
-  | v16 vs v15 | 32 | 3 | | −0.257 [−0.346, −0.206] | 0.24 | worse |
+  | v17 vs v15 | 13 | 6 | 12 | −0.165 [−0.180, −0.088] | 0.30 [0.28, 0.38] | worse |
+  | v16 vs v15 | 32 | 3 | 12 | −0.257 [−0.345, −0.207] | 0.24 [0.22, 0.31] | worse |
 
   - v17 loses shadow SNR on the real sets (SI-HDR known −4.8 dB, blind −2.2) and the 0.5–0.9 tone band on raw.pixls.us. It wins MTF50 and texture on raw.pixls.us. Section 19's pick of v15's recipe stands.
   - v16 loses tone and shading everywhere, and colour and highlights on raw.pixls.us.
@@ -1200,7 +1200,7 @@ Every recipe change goes through five steps in order, and stops at the first tha
 
 On the blind held-out sets (70 cells each):
 
-| Baseline | Pooled IQM [95 %] | Improves | Worse cells | Verdict for v15 |
+| Baseline | Pooled IQM [90 %] | Improves | Worse cells | Verdict for v15 |
 |---|---|---|---|---|
 | NAFNet | +0.562 [+0.421, +0.656] | 0.77 | 4, all shadow SNR | better |
 | Restormer | +0.207 [+0.093, +0.239] | 0.64 | 8 | better |
@@ -1229,6 +1229,6 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
 
 ### 20.8 Waiting on a decision
 
-- **v18's stop rule.** Section 19's rule counts cascaded gates; the verdict (20.3) reads the same reports without the cascade's flips. Replacing the count with the verdict changes `.tmp/v18_gate_check.py`, and so the queue's behaviour, so it waits for a yes.
+- **v18's stop rule: decided on 30 October.** The verdict replaces the count of cascaded gates in `.tmp/v18_gate_check.py`; section 19 states the rule. It stops on the pooled reading, not on single cells. Tested on the reports there: a run against itself goes on, v17 against v15 stops, and a run missing reports stops.
 - **v18s1 and v18s2: replicates or variants.** As replicates of v18s0 (the plan), they give the seed spread every rule above needs. As variants they give more information per GPU-day but no spread. The plan keeps replicates.
 - **After v18: the debiased probe first.** Range 0 and texture 0, the one neutral recipe so far (20.1's last table), goes through 20.4 against a control branch on v15's recipe. It needs the schedule flag in train.py, written after v18 so the queued seeds' code does not change.
