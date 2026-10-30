@@ -15,7 +15,7 @@ The companion document is [DEGRADATION_PLAN.md](DEGRADATION_PLAN.md), which cove
 
    Fixing the definition is the user's call, and it comes before any amount of data or size.
 2. **Then information.** A single frame through a network that minimises error ties the capture's coherent detail at best. Only more information beats it:
-   - bursts: +1.5 to 2.5 dB on real data;
+   - bursts: +1.5 to 2.5 dB on real data, at 14 frames; at 3 to 4 frames the published gain is 0.2 to 0.65 dB (section 20.6);
    - the raw mosaic: +2.9 to 4.5 dB over processed input.
 
    This is where "beats the best-case camera" comes from. It is not parameter count.
@@ -36,6 +36,12 @@ The companion document is [DEGRADATION_PLAN.md](DEGRADATION_PLAN.md), which cove
    That is about 6.3B parameters in the product, or about 20.3B with the larger rendered base; nearly all of it sits in the declared layer. No faithful restorer in the literature gains from going past about 100M at our data scale. A 0.5–1.1B faithful network would see under a tenth of the samples published recipes use (section 3).
 6. **Data to add.** The first seven sources in section 6 total about 0.94 TB and fit in D:'s 1.33 TB free, but only once we decide whether the grown corpus is also decoded into the store (section 13). They bring real scenes for evaluation, bursts, demosaic ground truth without demosaicing, tripod-averaged ground truth, HDR scenes, and roughly 8× the clean content.
 7. **The ComfyUI install on this machine** already holds about 175 GB of Apache weights (and 21 GB of FLUX under a non-commercial licence) that the rendered layer and the generative baselines need, and the tools that train LoRAs on them. It is not a source of training images: generated images have no capture physics (section 16).
+8. **Every change is read before it is trained (section 20).**
+   - A CPU check reads what a loss teaches, against the incumbent's recipe.
+   - A curve fit says what more steps of a recipe buy.
+   - A scene-level verdict replaces the cascaded gate count.
+
+   A change past the check's screen gets a probe of about a tenth of a run, not a full run.
 
 ## 1. Where the model stands
 
@@ -980,3 +986,249 @@ v18 is three runs of one recipe that differ only in the seed, 24 hours each on t
   - Each score is given as the median of the three, with the min and max.
   - The release is the seed with the best validation loss, not the best held-out score. It goes through export, capture-eval and the model card (section 12), and the burst layer is then trained on it.
 - **Disk.** Each seed keeps two checkpoints of 1.9 GB plus its reports and their tiles, about 15 GB for all three. D: has 191 GB free.
+
+## 20. Fewer guesses: checks before and after a run (10-30)
+
+Up to v17 a recipe change was argued from what a term was meant to do, trained for eight hours and read off the count of cascaded gates. That is where the trial and error came from:
+- a term's side effects showed only after the run;
+- a run's length was picked without a forecast;
+- gate counts on 9 or 10 scenes read the draw as wins and losses.
+
+v16 and v17 each cost a full run to learn what a few CPU minutes now show. Three checks replace the guesses. None needs the GPU, so they run while v18 trains.
+
+| Check | When | Command (`python -X utf8 -m ...`) | Answers |
+|---|---|---|---|
+| Neutrality | before a loss change | `harness.model.neutrality <train's loss flags> --against incumbent.json` | whether the loss alone moves tone, shading or colour, against the incumbent's recipe |
+| Curves | before a longer run | `harness.model.curves <run> --to <steps>` | what more steps of the same recipe buy |
+| Verdict | after a run is scored | `harness.model.verdict <candidate> <base>` | which differences the held-out scenes resolve |
+
+All three run with `CUDA_VISIBLE_DEVICES= PYTHONPATH=. HARNESS_DATA_ROOT=D:/lens-harness-data`. Section 20.4 puts them in one order, the probe.
+
+### 20.1 Neutrality: what a loss teaches before a network learns it
+
+- **The idea.**
+  - L1 on the log encoding is minimised by the median, and a monotone map keeps the median (Gneiting 2011, "Making and evaluating point forecasts"). So at the truth plus zero-median noise, L1 pulls tone nowhere.
+  - A one-sided term on a statistic of a noisy image (a local range, a maximum, a standard deviation) is not neutral. Noise moves the statistic, and the term pays the output to undo it at low frequency, where the gates read tone and shading.
+- **The check (`harness/model/neutrality.py`).**
+  - Dead-leaves tiles: sharp edges, eight stops of values, no ISP.
+  - Heteroscedastic noise at s = 0.005, 0.01 and 0.02 (the sd at luminance 0.5). It goes on the output (what a network leaves) or on the target (a real pair's reference).
+  - Adam settles a smooth field under the recipe's `pair_loss`: block offsets at 8 to 32 px, a contrast gain per scale, a tone curve by octave and a gain per channel.
+  - The recipe's excess over L1 and gradients alone, on the same tiles and noise, is what the recipe itself teaches. Two to six minutes on the CPU.
+- **Backtest: the three recipes trained so far, at s = 0.02.**
+
+  | Recipe | Output: shading | Output: tone 0.2–0.5 | Output: tone 0.5–0.9 | Target: shading | Target: tone 0.2–0.5 |
+  |---|---|---|---|---|---|
+  | v15 | +0.0026 | −0.0036 | −0.0004 | +0.0075 | +0.0132 |
+  | v16 | +0.0050 | −0.0105 | −0.0065 | +0.0081 | −0.0053 |
+  | v17 | +0.0042 | −0.0076 | −0.0040 | +0.0081 | −0.0019 |
+
+  - **Absolute limits** (half of each gate's margin: shading 0.0025, tone 0.015 in log). All three fail at s = 0.02, v15 included, and all three pass at 0.01 and below. The absolute read does not separate them.
+  - **Paired against v15** (same tiles and noise, s up to 0.01). v16 moves the 0.2–0.5 and 0.5–0.9 bands 0.002 to 0.008 darker and v17 0.0015 to 0.006. Shading and colour move under 0.001. That is the held-out result's direction and its rank.
+  - **Size: the network amplifies.** Output side at s = 0.01, against the raw.pixls.us blind set's medians, all as changes from v15:
+
+    | Run | Proxy shading | Held-out shading | Proxy tone 0.2–0.5 | Held-out tone 0.2–0.5 | Proxy tone 0.5–0.9 | Held-out tone 0.5–0.9 |
+    |---|---|---|---|---|---|---|
+    | v16 | +0.0005 | +0.0156 | −0.0044 | −0.053 | −0.0049 | −0.182 |
+    | v17 | −0.0001 | +0.0041 | −0.0030 | −0.0135 | −0.0034 | −0.0505 |
+
+    The tone moves grow 4 to 37 times in training. The proxy's shading is too small at these levels to read (v17's has the wrong sign); its tone is not.
+  - **Hence `--against` and its limits (`RELATIVE`).** Tone and colour may move 0.001 in log, and shading 0.0005, at s up to 0.01.
+    - At the smallest factor seen (4), a 0.001 band move is a seventh of the tone margin on held-out. At the largest (37) it is more than the whole margin.
+    - So it is a screen. A change past it is probed (20.4) before it is trained on, and a change within it is not thereby safe.
+    - Two runs that differ by one family of terms set these factors. Each probe adds a point.
+- **Each term alone, against L1 and gradients alone, s = 0.02.**
+
+  | Term (weight) | Output: shading | Output: tone 0.2–0.5 / 0.5–0.9 | Target: shading | Target: tone 0.2–0.5 / 0.5–0.9 |
+  |---|---|---|---|---|
+  | range 3 | +0.0066 | −0.0177 / −0.0184 | +0.0002 | −0.0013 / −0.0016 |
+  | flat 1 | 0.0000 | 0.0000 / 0.0000 | 0.0000 | 0.0000 / 0.0000 |
+  | texture 1 | +0.0024 | +0.0052 / +0.0055 | +0.0163 | +0.0177 / +0.0154 |
+  | transfer 0.1 | 0.0000 | +0.0004 / +0.0004 | +0.0008 | +0.0025 / +0.0027 |
+  | overshoot 1.5 | +0.0047 | −0.0185 / −0.0177 | +0.0043 | −0.0144 / −0.0146 |
+  | overshoot 0.75 | +0.0034 | −0.0143 / −0.0134 | +0.0028 | −0.0110 / −0.0113 |
+  | pyramid 1 | +0.0051 | +0.0033 / +0.0033 | +0.0058 | −0.0042 / −0.0033 |
+
+  - **range 3** darkens the output's mid and high tones when noise is left in it. Noise widens the local range, and the term is one-sided. It does so already at s = 0.005 (−0.005).
+  - **texture 1** matches the output's local std to the target's.
+    - A noisy reference has more std, so on the target side the term pays the output to add contrast and brightness (+0.016 shading, +0.018 tone).
+    - On the output side it brightens a little. So in v15's recipe it partly cancels range's darkening: v15's near-neutral output side is two errors cancelling.
+  - **overshoot** darkens on both sides at every level. At half the weight it does about three quarters as much. This is v16's and v17's held-out tone and shading loss.
+  - **pyramid 1** adds shading on both sides (+0.005 to +0.006) and moves the shadows: 0.05–0.2 is +0.008 on the output side and −0.008 on the target side.
+  - **flat 1 and transfer 0.1** are neutral.
+- **The levels.** The real pairs' references measure s ≈ 0.002 to 0.014. SI-HDR's references carry at most a quarter of their input's variance. So the target side at 0.005 to 0.01 is what training sees, not a stress case.
+- **What it does not say.**
+  - Nothing about detail or noise removal: neutral is necessary, not sufficient.
+  - Dead leaves are not photographs. A term that reads neutral here can still be biased on a texture the leaves lack.
+- **Debiased candidates, against v15 (s up to 0.01).**
+
+  | Candidate (v15's recipe with) | Alone, worst up to s = 0.02 | Against v15, output side, tone 0.2–0.5 / 0.5–0.9 | Against v15, target side, tone 0.2–0.5 / 0.5–0.9 | Against v15, worst: tone, shading, colour | Screen |
+  |---|---|---|---|---|---|
+  | range 0 | not neutral: target shading +0.0154, tone +0.0161 | +0.0037 / +0.0013 | +0.0010 / +0.0003 | 0.0037, +0.0019, 0.0013 | probe first |
+  | texture 0 | not neutral: shading 0.0057, tone 0.0092 | −0.0040 / −0.0020 | −0.0048 / −0.0025 | 0.0048, +0.0015, 0.0013 | probe first |
+  | range 0 and texture 0 | **neutral**: shading 0.0008, tone 0.0027 | +0.0009 / +0.0001 | −0.0044 / −0.0024 | 0.0044, −0.0007, 0.0011 | probe first |
+  | v17's recipe (a repeat) | not neutral: shading 0.0081, tone 0.0076 | −0.0030 / −0.0034 | −0.0064 / −0.0051 | 0.0064, +0.0001, 0.0007 | probe first |
+
+  The changes against v15 are at s = 0.01, where each is largest. A negative shading change is less shading than v15's.
+  - **Taking out one of the pair exposes the other.**
+    - Without range, the recipe brightens (output +0.0037).
+    - Without texture, it darkens (output −0.0040, target −0.0048).
+    - So v15's near-neutral output side is the two terms cancelling at these levels. Nothing designed that cancellation, and it need not hold on photographs.
+  - **Without both, the recipe is neutral outright**, the first that is.
+    - Against v15, its output side moves under 0.001 in the two bands the calibration covers.
+    - Its target side is 0.0044 darker: v15's own brightening on noisy references, taken away.
+    - The screen is blind to direction by design: it measures the distance from what the held-out sets have validated. So it marks this change, too, for a probe.
+  - **v17's recipe repeats the earlier paired read** to the fourth decimal, so the check gives the same answer on the same setup.
+  - **So the first probe after v18 is range 0 and texture 0, against a control branch on v15's recipe.**
+    - Range was added against halos (v9) and texture for local contrast, so edge overshoot and texture may lose without them. The verdict reads both.
+    - If they lose, the next question is a neutral replacement for each, screened here before it gets a branch.
+    - Range 0 alone and texture 0 alone are each predicted to move tone, in opposite directions, so they come after.
+
+### 20.2 Curves: what more steps buy
+
+- **The law** ([Tissue et al. 2024](https://arxiv.org/abs/2408.11029)): L(s) = L0 + A·S1^−α − C·S2.
+  - S1 is the area under the learning rate; S2 is the annealing area.
+  - One fit to one run predicts the same recipe under another schedule: a longer cosine, or a constant trunk with a cooldown ([Hägele et al. 2024](https://arxiv.org/abs/2405.18392)).
+- **Backtest.** Fit on the first part of the run's real validation curve, then predict its end.
+
+  | Run (steps) | Last | Fit on 50 % | Fit on 75 % | Cosine to 150k | Cosine to 300k |
+  |---|---|---|---|---|---|
+  | v15 (45k) | 0.1687 | 0.1620 (−3.9 %) | 0.1667 (−1.2 %) | 0.1636 | 0.1624 |
+  | v17 (93k) | 0.3187 | −6.8 % | −2.2 % | 0.3166 | 0.3153 |
+
+- **Reading.**
+  - The fit is optimistic by 1 to 7 % on its own runs.
+  - It predicts that 300k steps buy 3.4 % (v15) and 0.9 % (v17) of real validation loss over the length each ran. That is no more than the fit's own error.
+  - So length alone is not the lever. v18's threefold steps are expected to move few held-out cells. This prediction is written before v18s0 ends, and the verdict of v18s0 against v15 tests it (20.3).
+- **Mid-run fits do not work.**
+  - At 40k of v18s0's 300k steps the rate has barely fallen (S2 ≈ 0), so the anneal term is not identified. The fit puts the run's end at 0.2134 against a last value of 0.2122.
+  - A forecast needs a run that has annealed. The probe's cooldown branches (20.4) give that in a tenth of a run.
+- **Rule.** Spend length only where the predicted gain exceeds the seed spread on the same draw. v18's three seeds measure that spread for the first time.
+
+### 20.3 Verdict: what the scenes resolve
+
+- **Why.**
+  - A gate passes on the median of 64 tiles from as few as 9 or 10 real scenes.
+  - The cascade stops a gate set at its first failure, so one flip of the draw reads as several lost gates. v17's 24 lost gates in section 19 include the gates after each first failure that it no longer reached.
+- **Method (`harness/model/verdict.py`).**
+  - Each (held-out set, metric) cell and each tone band is judged on its own, on the statistic the gates use.
+  - Scenes are resampled, not tiles: a paired bootstrap, over seeds too when a run is a list of seeds.
+  - A sign-flip randomisation test over scenes, exact up to 14 scenes.
+  - The outcome comes from two one-sided tests against the tie margin (Walker and Nowacki 2011): better, non-inferior, worse or undetermined. `lower` marks a resolved loss inside the margin.
+  - Pooled: the interquartile mean of margin / tie and the share of cells improved, each with a stratified bootstrap ([Agarwal et al. 2021](https://arxiv.org/abs/2108.13264)).
+  - A public baseline is read by its name (nafnet, restormer, scunet), on the blind sets it is scored on.
+- **Results.**
+
+  | Candidate vs base | Worse cells | Better | Lower, inside the margin | Pooled IQM [95 %] | Improves | Verdict |
+  |---|---|---|---|---|---|---|
+  | v17 vs v15 | 14 | 6 | 11 | −0.165 [−0.179, −0.088] | 0.30 [0.28, 0.38] | worse |
+  | v16 vs v15 | 32 | 3 | | −0.257 [−0.346, −0.206] | 0.24 | worse |
+
+  - v17 loses shadow SNR on the real sets (SI-HDR known −4.8 dB, blind −2.2) and the 0.5–0.9 tone band on raw.pixls.us. It wins MTF50 and texture on raw.pixls.us. Section 19's pick of v15's recipe stands.
+  - v16 loses tone and shading everywhere, and colour and highlights on raw.pixls.us.
+- **Rule.**
+  - A claim names its cells and needs at least 20 scenes behind each (`FEW_SCENES`).
+  - On 9 or 10 scenes, three seeds resolve only differences of about three standard errors. The verdict flags such cells.
+
+### 20.4 The probe: one change, a tenth of a run, a verdict
+
+Every recipe change goes through five steps in order, and stops at the first that fails.
+
+1. **One change at a time**, against the incumbent (today v15's recipe), so the verdict names its cause.
+2. **Neutrality against the incumbent** (`--against`).
+   - Within `RELATIVE`: go on.
+   - Past it: go on only as a probe, never straight to a full run on the term's argument.
+3. **Preflight.**
+   - The run's exact command for about 200 steps, with one validation, one save and one resume, under `train.hold_to_card`.
+   - The burst run's two failed starts on 10-30 would each have shown in the first minute: at 06:18 a module moved off the GPU, and at 06:30 the run spilled to system memory at 1 img/s.
+4. **A warmup-stable-decay probe.**
+   - A constant-rate trunk, then cooldown branches from one checkpoint, each 10 to 20 % of the trunk's steps.
+   - One branch per candidate plus a control branch on the incumbent's recipe, all on the same seed and stream.
+   - A cooldown from a constant-rate trunk matches a cosine of the same length ([Hägele et al. 2024](https://arxiv.org/abs/2405.18392)). So a branch reads as a finished run at a fraction of the cost, and the curve law fits the branches (20.2).
+   - At v18's rate (3.4 steps a second), a 24k-step trunk is about 2 hours, and a 4k-step branch with its scoring is about 45 minutes. Four candidates take about 5 hours, against 8 per candidate as full runs.
+   - It needs a schedule flag in train.py, added after v18.
+5. **The verdict decides.**
+   - Adopt when the pooled IQM interval is above 0 and no cell is worse.
+   - Tie when every cell is non-inferior; keep the simpler recipe.
+   - Otherwise drop.
+   - Seeds are paired across branches, and a claim in this plan needs three.
+
+### 20.5 Data: what to add, and how to weigh it (research, 10-30)
+
+- **Quantity flattens.** For learned reconstruction, gains taper after a few thousand training images: about 0.04 dB per doubling past about 6,000 ([Klug and Heckel 2022](https://arxiv.org/abs/2209.13435)).
+- **The noise model matters more than the count.**
+  - PMRID loses 39.76 → 36.87 dB when its noise parameters are halved ([Wang et al. 2020](https://arxiv.org/abs/2010.06935)).
+  - ELD ([Wei et al. 2020](https://arxiv.org/abs/2003.12751)) and LED ([Jin et al. 2023](https://arxiv.org/abs/2308.03448)) make the same point in low light.
+- **Real against synthetic.**
+  - Only 1:1 is published. CBDNet ([Guo et al. 2018](https://arxiv.org/abs/1807.04686)): 38.06 dB mixed, against 37.72 on real alone and 37.57 on synthetic alone.
+  - There is no published law for the share in restoration.
+- **How to weigh sources, best first.**
+  1. **In-run gradient alignment** of each source with the real validation set ([DoGE](https://arxiv.org/abs/2310.15393), [In-Run Data Shapley](https://arxiv.org/abs/2406.11011), [LESS](https://arxiv.org/abs/2402.04333)). About 1 % extra compute, read during the run; it can score the target audit's halo bins too.
+  2. **Online reweighting** ([Aioli](https://arxiv.org/abs/2411.05735), [ADO](https://arxiv.org/abs/2410.11820)). [FoundIR-v2](https://arxiv.org/abs/2512.09282) is the one restoration example (+1.0 to 1.5 dB). Weights are capped at 0.5 to 2 times the static mix.
+  3. **Proxy-model mixture search** ([RegMix](https://arxiv.org/abs/2407.01492), [Data Mixing Laws](https://arxiv.org/abs/2403.16952), [DoReMi](https://arxiv.org/abs/2305.10429), [Shukor et al. 2025](https://arxiv.org/abs/2507.09404)). Unproven for restoration, at 1 to 2.5 GPU-days.
+  4. **TRAK-style attribution.** Too costly at this size.
+- **Target quality: measure the dose, then cut.**
+  - JPEG-compressed targets cost 0.12 dB at quality 95 and 2.89 dB at 50 ([Ohtani et al. 2024](https://arxiv.org/abs/2409.00768)). [HQ-50K](https://arxiv.org/abs/2306.05390) filters its targets for the same reason.
+  - For the halo cut (0.044), the same: graded unsharp masking on clean targets in a probe, with the cut set where the curve bends, not by argument.
+- **Here.**
+  - The next data step is per-source gradient alignment logged during a run, and a check of the noise model against the real pairs, not more images.
+  - The Commons images join after v18 as planned, and (1) sets their weight.
+
+### 20.6 Burst: what three or four frames can buy (research, 10-30)
+
+- **Published gains at 3 to 4 real frames are 0.2 to 0.65 dB.** Section 2's 1.5 to 2.5 dB came from 14-frame super-resolution.
+  - DBSR ([Bhat et al. 2021](https://arxiv.org/abs/2101.10997)): +0.65 dB at 4 frames, +1.11 at 8, +1.35 at 14, and below a single frame at 2.
+  - [Karadeniz et al. 2020](https://arxiv.org/abs/2006.09845): +0.20 dB at 4.
+  - RawNeRF ([Mildenhall et al. 2021](https://arxiv.org/abs/2111.13679)): the multi-frame baselines lost.
+  - Our +0.5 dB at 2.75 frames on average sits in that range. The ideal for 2.75 frames is about +2 to 2.5 dB, an inference from [Godard et al. 2017](https://arxiv.org/abs/1712.05790), so the burst layer gets about a quarter of it.
+- **The truth caps the score.**
+  - HDR+'s merged.dng keeps its reference frame at a weight of at least 1/N and aligns to whole pixels ([Monod et al. 2021](https://arxiv.org/abs/2110.09354); [the dataset](https://hdrplusdata.org/dataset.html)).
+  - So the truth holds part of the input's noise, and a network that denoises past it reads as wrong.
+- **Two ways frames go to waste.**
+  - A bicubic half-pixel warp keeps 0.41 of the noise variance.
+  - A kernel-prediction network can learn to ignore the other frames ([Mildenhall et al. 2017](https://arxiv.org/abs/1712.02327)). Godard gained 1.5 dB by fusing at every level.
+- **Checks before the next burst run, cheapest first, none of them training.**
+  1. The gain by frame count on the validation bursts.
+  2. A classical merge fed to the single-frame network, against 24.2 dB (one frame) and 24.7 (the burst network). It is our own merge, since IPOL's is AGPL; [Wronski et al. 2019](https://arxiv.org/abs/1905.03277) is the design.
+  3. Whether the output's noise falls as σ/√N.
+  4. Synthetic bursts with a known truth.
+  5. An audit of merged.dng as a target.
+  6. An independent truth from held-out frames, on bursts of six or more: NTIRE 2026's Twilight Cowboy set ([Khalin et al. 2026](https://arxiv.org/abs/2608.09782)) and SIDD, after licence checks and a download OK.
+  7. The warp-noise audit.
+  8. A copies probe (one frame N times) and an other-burst probe: does the network use the frames at all?
+
+### 20.7 v15 against the public baselines (10-30)
+
+On the blind held-out sets (70 cells each):
+
+| Baseline | Pooled IQM [95 %] | Improves | Worse cells | Verdict for v15 |
+|---|---|---|---|---|
+| NAFNet | +0.562 [+0.421, +0.656] | 0.77 | 4, all shadow SNR | better |
+| Restormer | +0.207 [+0.093, +0.239] | 0.64 | 8 | better |
+| SCUNet | +0.160 [+0.086, +0.218] | 0.61 | 7 | better |
+
+Medians, shadow SNR in dB and MTF50 in cycles per pixel (the truth's MTF50 is 0.500):
+
+| Set | Input SNR | v15 SNR / MTF50 | NAFNet SNR / MTF50 | SCUNet SNR / MTF50 |
+|---|---|---|---|---|
+| raw.pixls.us blind | 26.0 | 22.9 / 0.345 | 29.8 / 0.168 | 27.5 / 0.209 |
+| HDR+ blind | 21.3 | 24.3 / 0.500 | 35.5 / 0.187 | 29.9 / 0.292 |
+| RawNIND blind | 15.0 | 24.7 / 0.366 | 34.2 / 0.145 | 29.8 / 0.177 |
+| RawNIND sub-pixel | 14.2 | 22.8 / 0.336 | 33.8 / 0.145 | 29.1 / 0.167 |
+| SI-HDR | 8.5 | 20.5 / 0.214 | 21.8 / 0.050 | 16.5 / 0.045 |
+
+SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet 40.21 (0.924), Restormer 39.93, SCUNet 35.11. SIDD is the baselines' home set and out of our model's domain.
+
+- **Reading.**
+  - v15 keeps detail, colour and tone; the baselines remove far more noise and smooth the detail away.
+  - v15 reads better pooled against each, on MTF50 (+0.12 to +0.31 cpp everywhere), texture and tone.
+  - It loses shadow SNR to NAFNet by 6.9 to 11.2 dB, and to SCUNet by 4.6 to 6.3 dB except on SI-HDR (+4.0 for v15).
+  - On raw.pixls.us blind, v15's shadow SNR (22.9 dB) is below the input's (26.0).
+- **So a state-of-the-art claim cannot be made today.**
+  - The gap is denoising strength at kept detail: shadow SNR toward NAFNet's while MTF50 stays near the truth's.
+  - The probes in 20.4 aim there first.
+
+### 20.8 Waiting on a decision
+
+- **v18's stop rule.** Section 19's rule counts cascaded gates; the verdict (20.3) reads the same reports without the cascade's flips. Replacing the count with the verdict changes `.tmp/v18_gate_check.py`, and so the queue's behaviour, so it waits for a yes.
+- **v18s1 and v18s2: replicates or variants.** As replicates of v18s0 (the plan), they give the seed spread every rule above needs. As variants they give more information per GPU-day but no spread. The plan keeps replicates.
+- **After v18: the debiased probe first.** Range 0 and texture 0, the one neutral recipe so far (20.1's last table), goes through 20.4 against a control branch on v15's recipe. It needs the schedule flag in train.py, written after v18 so the queued seeds' code does not change.
