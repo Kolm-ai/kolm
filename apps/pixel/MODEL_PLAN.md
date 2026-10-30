@@ -939,8 +939,8 @@ v18 is three runs of one recipe that differ only in the seed, 24 hours each on t
   | 10-30 06:12 | v17 ended; scored at 06:17, and the recipe picked |
   | 10-30 06:18 | the burst run on v17 failed on its first step (see below) |
   | 10-30 06:30 | the burst run on v17 again; it spilled out of GPU memory and ran at 1 img/s (see below) |
-  | 10-30 06:45 | the burst run on v17 with gradient checkpointing (240 min), then its evaluation |
-  | 10-30 about 10:55 | the baselines through the gates and SIDD validation (about 1 h) |
+  | 10-30 06:45 | the burst run on v17 with gradient checkpointing; it ended at 10:47 and was evaluated at 10:52 (see below) |
+  | 10-30 10:53 | the baselines through the gates and SIDD validation (about 1 h) |
   | 10-30 about 12:10 | v18s0, then its scoring (about 25 min) |
   | 10-31 about 12:40 | v18s1 |
   | 11-01 about 13:10 | v18s2 |
@@ -953,6 +953,13 @@ v18 is three runs of one recipe that differ only in the seed, 24 hours each on t
   - That try did not fit on the card. Batch 16 of four-frame bursts at 256 px held 28.5 GB on the card and 9 GB more in shared system memory, where the Windows driver puts what does not fit instead of failing. It ran at 1 img/s; v17 alone ran at 56. It raised no error, so the script's fallback, gradient checkpointing on a failed try, never started.
   - It was stopped at step 50 (06:45), which started that fallback by hand: 12.7 GB, and the same loss at step 50 (0.3756), so it is the same run. It ran at 11 img/s over its first 50 steps and 33 once warm, about 30 times the spilled try. At about 1.7 steps a second, validation included, the 240 minutes hold about 25,000 of the 60,000 steps. The stopped try's log is `crashed_1030/train_log_try1_spilled.jsonl`.
   - The trainers now cap their allocator at the card's free memory at start, less 1 GB (`train.hold_to_card`). The free memory is read from nvidia-smi, because under Windows' WDDM `mem_get_info` sees only its own process. A run that does not fit then raises at once and its retry comes next. Runs frozen before the change (the burst run, v18) do not have it; v18 trains v15's model at batch 16, which v17 ran in 17 GB.
+
+- **The burst run's result (10-30 10:52).**
+  - It trained 25,928 steps in 240 minutes. best.pt is step 22,000: synthetic validation loss 0.5379 with its frames, against 0.5524 from the reference frame alone. On the real validation bursts its frames take the loss from 0.2470 to 0.2258.
+  - It was scored on 64 tiles of the 45 validation bursts (evaluation only), against HDR+'s merge. With its frames it beats the v17 network on the same reference frame on six of nine metrics: shadow SNR by 0.5 dB (24.7 against 24.2; the noisy frame is 21.1), colour error, landmarks, shading and periodicity. It loses on edge overshoot (0.0082 against 0.0037, still under the frame's 0.0087) and on texture, and ties on banding.
+  - Section 2 put a burst's gain at 1.5 to 2.5 dB over one frame on real data; this one is 0.5. Its tiles average 2.75 frames, and HDR+'s own merge is the truth, which caps what any merge can show against it.
+  - Gates: tone passes. Capture, capture_hp and the frontier fail on banding alone (0.0208 against the frame's 0.0189, and 0.0153 for the frontier at its noise level), the one check the v17 network fails alone on these tiles.
+  - It is not released, because it sits on v17, which is not. The burst layer is trained again on v18's release seed.
 
 - **Other splits, and why not.**
   - One 72-hour run gives no spread.
