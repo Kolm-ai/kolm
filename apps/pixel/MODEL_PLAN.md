@@ -947,10 +947,8 @@ v18 is three runs of one recipe that differ only in the seed, 24 hours each on t
   | 10-30 06:30 | the burst run on v17 again; it spilled out of GPU memory and ran at 1 img/s (see below) |
   | 10-30 06:45 | the burst run on v17 with gradient checkpointing; it ended at 10:47 and was evaluated at 10:52 (see below) |
   | 10-30 10:53 | the baselines through the gates and SIDD validation (about 1 h) |
-  | 10-30 about 12:10 | v18s0, then its scoring (about 25 min) |
-  | 10-31 about 12:40 | v18s1 |
-  | 11-01 about 13:10 | v18s2 |
-  | 11-02 about 13:40 | the comparison and the release seed |
+  | 10-30 11:22 | v18s0; it ended at 11:26 on 10-31 and was scored at 11:37 |
+  | 10-31 11:40 | the stop rule held the queue before v18s1; stopped there at the user's call (11:56), for the probe (20.4) |
 
 - **The burst run's first try (10-30 06:18).**
   - `BurstNet(single)` keeps the single-frame network as `model.single`. The run scored that network alone at step 0 and then moved it to the CPU, which moved the burst model's own body there, so the first step failed on two devices. The retries would have failed the same way: no last.pt yet.
@@ -967,6 +965,22 @@ v18 is three runs of one recipe that differ only in the seed, 24 hours each on t
   - Gates: tone passes. Capture, capture_hp and the frontier fail on banding alone (0.0208 against the frame's 0.0189, and 0.0153 for the frontier at its noise level), the one check the v17 network fails alone on these tiles.
   - It is not released, because it sits on v17, which is not. The burst layer is trained again on v18's release seed.
 
+- **v18s0's result (10-31 11:37).**
+  - It trained 272,000 steps in 24 hours, about 3.15 a second with validation. best.pt is its last save, step 272,000.
+  - Synthetic validation loss: 0.4173 at 45,500 steps, 0.3829 at 150,000, 0.3664 at 272,000. Real validation loss: 0.2119 to 0.2010.
+  - Shadow SNR on the real validation draw stayed flat while the loss fell: 25.25, then 25.42 at 150,000, then 25.27 at 272,000.
+  - Against v15 (the same recipe, 8 hours): pooled IQM of margin / tie −0.042 [−0.070, −0.012], 0.40 of cells improved, so worse.
+    - 8 worse cells: shadow SNR on raw.pixls.us blind, RawNIND known and blind, and SI-HDR blind; edge overshoot on raw.pixls.us known and blind; landmarks on RawNIND known; periodicity.
+    - 11 better cells: MTF50 and texture on raw.pixls.us known and blind, periodicity, the 0.5–0.9 tone band, and colour error known.
+    - 33 of the 140 cells are undetermined.
+  - Against v17: +0.130 [+0.084, +0.173], better.
+  - SIDD validation, blind: 28.30 dB PSNR, against v15's 30.39 and v17's 29.80 (the input 23.66; NAFNet 40.21, Restormer 39.93, SCUNet 35.11).
+  - The stop rule held the queue before v18s1 at 11:40. The queue was stopped there at the user's call at 11:56, and seeds 1 and 2 were not run.
+- **What v18s0 says.**
+  - Three times the steps bought texture and MTF50 and lost shadow SNR and SIDD.
+  - It does not say which change did it. The steps, the data (UHD-IQA), the seed and the validation draw all changed at once.
+  - Validation loss fell 12 % while held-out shadow SNR and SIDD fell. So the training objective does not track what the gates read, and more steps on it is not the way forward.
+  - The objective is the next question. The debiased probe (20.4) asks it in a tenth of a run per change.
 - **Other splits, and why not.**
   - One 72-hour run gives no spread.
   - Three 72-hour runs take nine days.
@@ -1145,12 +1159,37 @@ Every recipe change goes through five steps in order, and stops at the first tha
    - One branch per candidate plus a control branch on the incumbent's recipe, all on the same seed and stream.
    - A cooldown from a constant-rate trunk matches a cosine of the same length ([Hägele et al. 2024](https://arxiv.org/abs/2405.18392)). So a branch reads as a finished run at a fraction of the cost, and the curve law fits the branches (20.2).
    - At v18's rate (3.4 steps a second), a 24k-step trunk is about 2 hours, and a 4k-step branch with its scoring is about 45 minutes. Four candidates take about 5 hours, against 8 per candidate as full runs.
-   - It needs a schedule flag in train.py, added after v18.
+   - The flag: `train --schedule wsd --decay N` (`623fccb9`). `lr_at` holds `--lr` after the warmup, then decays it as 1 − sqrt to the floor over the last N steps. It uses the same budget share as the cosine, so a `--minutes` stop still anneals. At `--decay 0` it never decays: that is the trunk.
+   - A branch resumes from a copy of the trunk's last.pt with a larger `--steps`. The stream is seeded at seed + step, so every branch of a seed reads the same tiles.
+   - The EMA (0.999) has a horizon of about 1,000 steps. After a 4,000-step cooldown, the trunk's share of a branch's EMA weights is about 2 %.
 5. **The verdict decides.**
    - Adopt when the pooled IQM interval is above 0 and no cell is worse.
    - Tie when every cell is non-inferior; keep the simpler recipe.
    - Otherwise drop.
    - Seeds are paired across branches, and a claim in this plan needs three.
+
+**The first probe (launched 10-31, `.tmp/probe_wsd.sh`, from `.tmp/frozen_probe` at `623fccb9`).**
+
+- **Per seed 0, 1, 2, at `--val-seed 0`:**
+  - A trunk on v15's recipe, held at the peak rate for 24,000 steps.
+  - Five cooldown branches of 4,000 steps from its last.pt.
+
+  | Branch | Range | Flat | Texture | Transfer | What it asks |
+  |---|---:|---:|---:|---:|---|
+  | ctrl | 3 | 1 | 1 | 0.1 | the control: v15's recipe |
+  | r0t0 | 0 | 1 | 0 | 0.1 | the one neutral recipe in 20.1 |
+  | r0 | 0 | 1 | 1 | 0.1 | the range term alone |
+  | t0 | 3 | 1 | 0 | 0.1 | the texture term alone, which may count noise as texture |
+  | l1 | 0 | 0 | 0 | 0 | plain fidelity: L1 (clip-weighted) and the gradient term, as NAFNet and Restormer train |
+
+- **Scoring.**
+  - Each branch's last.pt, not best.pt: a branch's best.pt is chosen on its own loss, so it is removed.
+  - The held-out sets without the demo images (`.tmp/score_probe.sh`, from `frozen_eval17`), and SIDD validation, blind.
+  - Each candidate's verdict against the control, per seed and on three.
+  - `.tmp/probe_table.py` puts SIDD and the median shadow SNR per branch and seed beside v15 and the baselines, in `.tmp/probe_table.md`.
+- **Caveat.** A branch reads what a change does over a cooldown from a shared trunk. A recipe that wins earns a full run before it is released.
+- **Preflight (10-31).** The trunk's and the l1 branch's exact commands at 200 and 300 steps (warmup 50, `.tmp/preflight_wsd`): 10 GB on the card and none spilled, 64–68 img/s, the branch resumed at step 200, and the rate held at 2.0e-4 and then 5.90e-5 at step 250 and 6.0e-7 at 300, as `lr_at` gives. Held-out evaluation (`frozen_eval17`) and SIDD both load the branch's last.pt.
+- **Time.** At 62–64 img/s and about 24 s per validation and save, a trunk is about 2 hours. A branch is about 20 minutes, and its scoring about 11 (SIDD 5.5). So a seed is about 4.7 hours and the three about 14 (est): from 12:36 on 10-31 to about 03:00 on 11-01.
 
 ### 20.5 Data: what to add, and how to weigh it (research, 10-30)
 
@@ -1230,5 +1269,6 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
 ### 20.8 Waiting on a decision
 
 - **v18's stop rule: decided on 30 October.** The verdict replaces the count of cascaded gates in `.tmp/v18_gate_check.py`; section 19 states the rule. It stops on the pooled reading, not on single cells. Tested on the reports there: a run against itself goes on, v17 against v15 stops, and a run missing reports stops.
-- **v18s1 and v18s2: replicates or variants.** As replicates of v18s0 (the plan), they give the seed spread every rule above needs. As variants they give more information per GPU-day but no spread. The plan keeps replicates.
-- **After v18: the debiased probe first.** Range 0 and texture 0, the one neutral recipe so far (20.1's last table), goes through 20.4 against a control branch on v15's recipe. It needs the schedule flag in train.py, written after v18 so the queued seeds' code does not change.
+- **v18s1 and v18s2: not run.** v18s0 read worse than v15 (section 19), and the queue was stopped before seed 1 at the user's call on 10-31.
+- **The probe runs instead (20.4, from 10-31).** Four candidates against a control on v15's recipe, three seeds each: range 0 with texture 0, range 0, texture 0, and plain fidelity. The schedule flag went in after v18 was stopped, so no queued run's code changed.
+- **After the probe: NAFNet's architecture on our data.** The gap to the baselines on SIDD (10 dB) and on shadow SNR (5 to 11 dB) is in denoising, not in size: SCUNet (about 18M parameters) and Restormer (about 26M) beat a 120M network. The probe tells whether our objective is the cause. NAFNet's block, trained on our recipe, tells whether the network is.
