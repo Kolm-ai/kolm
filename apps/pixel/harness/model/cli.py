@@ -49,7 +49,7 @@ def cmd_train(args) -> int:
           transfer_weight=args.transfer_weight,
           shift_real=args.shift_real, subpix_real=args.subpix_real, noise_map=args.noise_map, compile_model=args.compile, warmup=args.warmup,
           lr_floor=args.lr_floor, target_audit=args.target_audit, overshoot_weight=args.overshoot_weight,
-          pyramid_weight=args.pyramid_weight, resample=args.resample)
+          pyramid_weight=args.pyramid_weight, resample=args.resample, schedule=args.schedule, decay=args.decay)
     return 0
 
 
@@ -234,6 +234,12 @@ def add_parser(sub) -> None:
     t.add_argument("--compile", action="store_true", help="torch.compile the training forward")
     t.add_argument("--warmup", type=int, help="linear warmup steps (default 500)")
     t.add_argument("--lr-floor", type=float, help="the cosine's end as a share of --lr (default 0.05)")
+    t.add_argument("--schedule", choices=("cosine", "wsd"), default="cosine",
+                   help="the rate after the warmup: a cosine to the floor (default), or wsd, held at --lr and "
+                        "decayed as 1 - sqrt to the floor over the last --decay steps (train.lr_at)")
+    t.add_argument("--decay", type=int, default=0,
+                   help="wsd's cooldown steps at the end of --steps (default 0: the rate stays at --lr, a trunk "
+                        "that cooldown branches resume from with a larger --steps)")
     t.add_argument("--target-audit", action="store_true",
                    help="draw only the clean items the target audit keeps (a source's clean.max_halo; "
                         "python -m harness data audit reads them)")

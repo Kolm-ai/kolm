@@ -3,6 +3,8 @@ the stream yields the right shapes, a two-step CPU training run checkpoints and 
 round-trips a frame (whole and tiled) at the input's white level."""
 from __future__ import annotations
 
+import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -367,6 +369,29 @@ def test_train_records_the_sixteenth_run_terms_and_apply_rebuilds_a_smooth_net(t
     assert isinstance(load_model(out / "last.pt", "cpu").model.pool[0], BlurDown)
     with pytest.raises(ValueError, match="overshoot and pyramid"):
         train(str(tmp_path / "n"), SOURCES, steps=1, workers=0, pyramid_weight=-1.0, device="cpu")
+
+
+@needs_data
+@needs_clean
+def test_a_cooldown_branch_resumes_a_wsd_trunk_and_records_its_schedule(tmp_path):
+    import shutil
+    from harness.model.train import train
+    kw = dict(batch=2, tile=32, workers=0, base=8, val_n=4, calib_n=8, ckpt_every=2, log_every=1, warmup=0,
+              lr=1e-3, lr_floor=0.01, device="cpu", log=lambda *a: None)
+    trunk, branch = tmp_path / "trunk", tmp_path / "branch"
+    train(str(trunk), SOURCES, steps=2, schedule="wsd", **kw)
+    branch.mkdir()
+    shutil.copy(trunk / "last.pt", branch / "last.pt")
+    train(str(branch), SOURCES, steps=4, schedule="wsd", decay=2, texture_weight=0.5, **kw)
+    ck = torch.load(branch / "last.pt", map_location="cpu", weights_only=False)
+    assert ck["step"] == 4 and ck["train"]["schedule"] == "wsd" and ck["train"]["decay"] == 2
+    assert ck["train"]["texture_weight"] == 0.5
+    t = torch.load(trunk / "last.pt", map_location="cpu", weights_only=False)
+    assert t["train"]["decay"] == 0 and t["step"] == 2
+    recs = [json.loads(l) for l in (branch / "train_log.jsonl").read_text(encoding="utf-8").splitlines()]
+    lrs = {r["step"]: r["lr"] for r in recs if "lr" in r}
+    assert set(lrs) == {3, 4}                                       # the branch trains steps 3 and 4 only
+    assert lrs[3] == pytest.approx(1e-3 * (0.01 + 0.99 * (1 - math.sqrt(0.5)))) and lrs[4] == pytest.approx(1e-5)
 
 
 @needs_data

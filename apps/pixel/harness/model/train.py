@@ -70,6 +70,7 @@ OVERSHOOT_WEIGHT = 0.0
 PYRAMID_WEIGHT = 0.0
 WARMUP = 500
 LR_FLOOR = 0.05      # the cosine's end as a share of the peak rate
+SCHEDULES = ("cosine", "wsd")
 EMA_DECAY = 0.999
 CLIP_LOG = float(encode(np.array([0.995]))[0])
 
@@ -189,14 +190,21 @@ def pair_loss(pred: torch.Tensor, y: torch.Tensor, x: torch.Tensor, range_weight
 
 
 def lr_at(step: int, steps: int, lr: float, spent: float = 0.0, warmup: int = WARMUP,
-          floor: float = LR_FLOOR) -> float:
+          floor: float = LR_FLOOR, schedule: str = "cosine", decay: int = 0) -> float:
     """Linear warmup over `warmup` steps, then a cosine to `floor` x `lr` over whichever budget runs out first: the
     steps, or `spent`, the share of the wall-clock budget used (0 without one). A run that its --minutes stop
-    therefore still anneals, whatever its size's speed."""
+    therefore still anneals, whatever its size's speed. `schedule` "wsd" (warmup, stable, decay) holds `lr` instead
+    and decays it as 1 - sqrt to `floor` x `lr` over the last `decay` steps of the same budget (Hagele et al. 2024,
+    arXiv 2405.18392); at `decay` 0 it never decays, a trunk that cooldown branches resume from."""
     if step < warmup:
         return lr * (step + 1) / warmup
-    t = min(1.0, max((step - warmup) / max(1, steps - warmup), spent))
-    return lr * (floor + (1.0 - floor) * 0.5 * (1.0 + math.cos(math.pi * t)))
+    u = min(1.0, max((step - warmup) / max(1, steps - warmup), spent))
+    if schedule == "wsd":
+        share = decay / max(1, steps - warmup)
+        if share <= 0 or u < 1.0 - share:
+            return lr
+        return lr * (floor + (1.0 - floor) * (1.0 - math.sqrt(min(1.0, (u - (1.0 - share)) / share))))
+    return lr * (floor + (1.0 - floor) * 0.5 * (1.0 + math.cos(math.pi * u)))
 
 
 def to_batch(samples: list[dict], norm: Normaliser, device) -> tuple:
@@ -261,7 +269,7 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
           noise_map: bool = False, compile_model: bool = False, warmup: int | None = None,
           lr_floor: float | None = None, target_audit: bool = False, overshoot_weight: float | None = None,
           pyramid_weight: float | None = None, resample: str = "learned", val_seed: int | None = None,
-          log=print) -> dict:
+          schedule: str = "cosine", decay: int = 0, log=print) -> dict:
     """`real` names stored real-pair sources (data.realstore) drawn with probability `p_real` per sample; `weights`
     maps a clean source to its draw weight (1 unnamed); `range_weight`, `range_k`, `flat_weight`, `flat_k` and
     `texture_weight` set the range, flat-texture and texture-deficit terms; `p_dead_leaves` is the share of rendered
@@ -278,7 +286,8 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
     warmup steps and its end as a share of `lr`), `target_audit` (the clean items the target audit keeps,
     data.targetaudit). The sixteenth run's, as off by default and as recorded: `overshoot_weight` and
     `pyramid_weight` (losses.overshoot_loss, losses.pyramid_loss), `resample` (how the network's levels change
-    scale, net.CondUNet; in its `config`). `seed` draws the initial weights and the training stream;
+    scale, net.CondUNet; in its `config`). `schedule` and `decay` choose the rate's shape (lr_at; default the cosine
+    every run to the eighteenth used). `seed` draws the initial weights and the training stream;
     `val_seed` (default `seed`) the calibration and validation draws, so the runs of a seed sweep fit one
     normaliser and choose best.pt on one validation set."""
     out = Path(out)
@@ -314,6 +323,10 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
     lr_floor = LR_FLOOR if lr_floor is None else float(lr_floor)
     if warmup < 0 or not 0.0 <= lr_floor <= 1.0:
         raise ValueError(f"schedule wants warmup >= 0 and a floor in [0, 1], got {warmup}, {lr_floor}")
+    decay = int(decay)
+    if schedule not in SCHEDULES or decay < 0 or decay > max(0, steps - warmup) or (decay and schedule != "wsd"):
+        raise ValueError(f"schedule is one of {SCHEDULES} and decay (wsd only) is 0 to steps - warmup, got "
+                         f"{schedule}, {decay}")
     loss_kw = dict(range_weight=range_weight, range_k=range_k, flat_weight=flat_weight, flat_k=flat_k,
                    texture_weight=texture_weight, ssim_weight=ssim_weight, transfer_weight=transfer_weight,
                    overshoot_weight=overshoot_weight, pyramid_weight=pyramid_weight)
@@ -326,7 +339,8 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
                 real=list(real), p_real=p_real, weights=weights, p_dead_leaves=p_dead_leaves, mults=list(mults),
                 blocks=blocks if isinstance(blocks, int) else list(blocks), mid_blocks=mid_blocks,
                 shift_real=bool(shift_real), subpix_real=bool(subpix_real), noise_map=bool(noise_map), compile=bool(compile_model), warmup=warmup,
-                lr_floor=lr_floor, target_audit=bool(target_audit), resample=resample, **loss_kw)
+                lr_floor=lr_floor, target_audit=bool(target_audit), resample=resample, schedule=schedule,
+                decay=decay, **loss_kw)
     last = out / "last.pt"
     ck = torch.load(last, map_location="cpu", weights_only=False) if last.exists() else None
     quiet = (lambda *a, **k: None)
@@ -412,7 +426,7 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
             break
         x, y, c = x.to(dev, non_blocking=True), y.to(dev, non_blocking=True), c.to(dev, non_blocking=True)
         for g in opt.param_groups:
-            g["lr"] = lr_at(step, steps, lr, frac(), warmup, lr_floor)
+            g["lr"] = lr_at(step, steps, lr, frac(), warmup, lr_floor, schedule, decay)
         with torch.autocast(dev.type, dtype=torch.bfloat16, enabled=dev.type == "cuda"):
             pred = fwd(x, c)
         pred, yt, xt = pred.float(), y, x
@@ -429,7 +443,7 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
         run_loss += loss.item(); n_log += 1
         if step % log_every == 0:
             now = time.perf_counter()
-            rec = {"step": step, "loss": run_loss / n_log, "lr": lr_at(step, steps, lr, frac(), warmup, lr_floor),
+            rec = {"step": step, "loss": run_loss / n_log, "lr": lr_at(step, steps, lr, frac(), warmup, lr_floor, schedule, decay),
                    "imgs_s": n_log * batch / (now - t_log), "elapsed_s": now - t0,
                    "gpu_mem_gb": torch.cuda.max_memory_allocated() / 2**30 if dev.type == "cuda" else 0.0}
             logf.write(json.dumps(rec) + "\n"); logf.flush()

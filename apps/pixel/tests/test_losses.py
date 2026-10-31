@@ -124,6 +124,36 @@ def test_lr_at_defaults_unchanged_and_the_warmup_and_floor_are_kept():
     assert lr_at(steps, steps, lr, warmup=1000, floor=0.003) == pytest.approx(lr * 0.003)
     assert lr_at(1000, steps, lr, warmup=1000, floor=0.003) == pytest.approx(lr)
     assert lr_at(5, steps, lr, spent=1.0, warmup=0, floor=0.01) == pytest.approx(lr * 0.01)
+    for step in (0, WARMUP, 3000, 9999, 20000):      # the cosine by name is the default
+        assert lr_at(step, steps, lr, schedule="cosine") == lr_at(step, steps, lr)
+
+
+def test_wsd_holds_the_rate_then_decays_as_one_minus_sqrt_over_the_last_steps():
+    lr, steps, warm, decay, floor = 1e-3, 10000, 1000, 2000, 0.01
+    wsd = dict(warmup=warm, floor=floor, schedule="wsd", decay=decay)
+    assert lr_at(99, steps, lr, **wsd) == pytest.approx(lr * 0.1)                  # the same warmup
+    for step in (warm, 5000, 7999, 8000):
+        assert lr_at(step, steps, lr, **wsd) == pytest.approx(lr)                 # stable until the last 2000
+    for step in range(8000, 10001, 250):
+        t = (step - 8000) / decay
+        assert lr_at(step, steps, lr, **wsd) == pytest.approx(lr * (floor + (1 - floor) * (1 - math.sqrt(t))))
+    assert lr_at(20000, steps, lr, **wsd) == pytest.approx(lr * floor)
+    rates = [lr_at(s, steps, lr, **wsd) for s in range(warm, steps + 1, 50)]
+    assert all(a >= b for a, b in zip(rates, rates[1:]))
+    assert lr_at(2000, steps, lr, spent=1.0, **wsd) == pytest.approx(lr * floor)  # a --minutes stop still anneals
+    trunk = dict(warmup=warm, floor=floor, schedule="wsd")                        # decay 0: never decays
+    assert all(lr_at(s, steps, lr, spent=sp, **trunk) == lr for s in (warm, 9999, 20000) for sp in (0.0, 1.0))
+    # a branch resumes the trunk's step 24000 with --steps 28000 --decay 4000: the rate it left with, then the decay
+    assert lr_at(24000, 28000, lr, **{**wsd, "decay": 4000}) == pytest.approx(lr)
+    assert lr_at(28000, 28000, lr, **{**wsd, "decay": 4000}) == pytest.approx(lr * floor)
+
+
+def test_train_refuses_an_unknown_schedule_and_a_decay_it_cannot_run(tmp_path):
+    from harness.model.train import train
+    for kw, steps in ((dict(schedule="linear"), 100), (dict(schedule="wsd", decay=200), 100),
+                      (dict(schedule="wsd", decay=-1), 100), (dict(decay=10), 100)):
+        with pytest.raises(ValueError, match="schedule is one of"):
+            train(str(tmp_path / "x"), steps=steps, warmup=0, workers=0, device="cpu", log=lambda *a: None, **kw)
 
 
 def test_pair_loss_is_unchanged_at_a_zero_ssim_weight_and_adds_it_otherwise():
