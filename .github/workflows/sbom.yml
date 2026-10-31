@@ -73,7 +73,7 @@ jobs:
       # for clean vuln-free runs (would spam the tracker).
       - name: open tracking issue on sbom failure
         if: steps.cdx.outcome == 'failure'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const title = `SBOM emission failed on ${context.sha.slice(0,7)}`;
