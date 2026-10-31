@@ -1,0 +1,243 @@
+{
+  "qualities": {
+    "resolution": [
+      "mtf50_cpp",
+      "texture_hf_fidelity"
+    ],
+    "shadows": [
+      "shadow_snr_db"
+    ],
+    "highlights": [
+      "highlight_loss_fraction",
+      "dr_steps"
+    ],
+    "color": [
+      "delta_e_mean",
+      "delta_e_max"
+    ],
+    "artifacts": [
+      "edge_overshoot",
+      "banding_score",
+      "periodicity"
+    ],
+    "geometry_lighting": [
+      "landmark_error_px",
+      "shading_rmse"
+    ],
+    "temporal": [
+      "flicker",
+      "flow_warped_excess",
+      "motion_region_error",
+      "trajectory_error_px"
+    ],
+    "provenance": [
+      "invented_detail_fraction",
+      "undeclared_invention_fraction",
+      "rendered_fraction"
+    ]
+  },
+  "scene": {
+    "width": 384,
+    "height": 216,
+    "supersample": 2,
+    "seed": 7,
+    "n_frames": 24,
+    "fps": 24.0,
+    "exposure_s": 0.0
+  },
+  "camera": {
+    "preset": "derived:best_case_earth_sourced",
+    "exposure_s": 0.020833333333333332,
+    "seed": 1
+  },
+  "display": {
+    "preset": "derived:dell-up3218k",
+    "distance_m": 0.625,
+    "delivery": {
+      "format": "jpeg",
+      "quality": 92
+    }
+  },
+  "rendered_map": {
+    "policy": "optional"
+  },
+  "gates": [
+    {
+      "name": "composition",
+      "checks": [
+        {
+          "metric": "pref_convincing_p_beats_camera_low",
+          "op": ">",
+          "value": 0.5
+        }
+      ]
+    },
+    {
+      "name": "provenance",
+      "checks": [
+        {
+          "metric": "undeclared_invention_fraction",
+          "op": "<=",
+          "value": 0.01
+        }
+      ]
+    },
+    {
+      "name": "lighting_materials",
+      "checks": [
+        {
+          "metric": "shading_rmse",
+          "op": "<=",
+          "value": 0.02
+        },
+        {
+          "metric": "landmark_error_px",
+          "op": "<=",
+          "value": 0.5
+        }
+      ]
+    },
+    {
+      "name": "tone_color",
+      "checks": [
+        {
+          "metric": "delta_e_mean",
+          "op": "<=",
+          "value": 2.0,
+          "source": "https://en.wikipedia.org/wiki/Color_difference"
+        },
+        {
+          "metric": "highlight_loss_fraction",
+          "op": "<=",
+          "value": 0.0
+        },
+        {
+          "metric": "dr_steps",
+          "op": "ties_or_beats_camera"
+        }
+      ]
+    },
+    {
+      "name": "artifacts",
+      "checks": [
+        {
+          "metric": "edge_overshoot",
+          "op": "<=",
+          "value": 0.02,
+          "fit": {
+            "criterion": "fitted mean DCR = 4.5 (midpoint of 5 'imperceptible' and 4 'perceptible but not annoying')",
+            "value": 0.222988,
+            "ci95": [
+              0.1874731140025743,
+              0.2592438684020945
+            ],
+            "extrapolated": true,
+            "n": 405,
+            "condition": "KADID-10k crowdsourced DCR study: 512x384 PNG, uncontrolled displays and distances",
+            "supported": true,
+            "failed_criteria": [],
+            "upper_bound": {
+              "metric_median": 0.5623475499500465,
+              "level": 1,
+              "dmos_mean": 3.5790123456790135,
+              "meaning": "this level is already rated below 4.5, so the threshold lies below its median metric"
+            },
+            "note": "fit supported but extrapolated: the crossing 0.223 lies outside the rated metric range, so the value 0.02 stays the pass line and the fit is reported only"
+          }
+        },
+        {
+          "metric": "banding_score",
+          "op": "<=",
+          "value": 0.01,
+          "source": "https://www.itu.int/dms_pub/itu-r/opb/rep/R-REP-BT.2246-9-2025-PDF-E.pdf",
+          "fit": {
+            "criterion": "fitted mean DCR = 4.5 (midpoint of 5 'imperceptible' and 4 'perceptible but not annoying')",
+            "value": 1.1e-05,
+            "ci95": [
+              1.3811459720834748e-09,
+              0.0009456107510913491
+            ],
+            "extrapolated": true,
+            "n": 333,
+            "condition": "KADID-10k crowdsourced DCR study: 512x384 PNG, uncontrolled displays and distances",
+            "supported": false,
+            "failed_criteria": [
+              "spearman",
+              "ci_ratio"
+            ],
+            "upper_bound": {
+              "metric_median": 0.144758367516942,
+              "level": 1,
+              "dmos_mean": 4.1685185185185185,
+              "meaning": "this level is already rated below 4.5, so the threshold lies below its median metric"
+            },
+            "note": "fit not supported (spearman, ci_ratio); the sourced value 0.01 is kept, the rated data only bound the threshold from above"
+          }
+        },
+        {
+          "metric": "periodicity",
+          "op": "<=",
+          "value": 0.3
+        }
+      ]
+    },
+    {
+      "name": "resolution",
+      "checks": [
+        {
+          "metric": "display_ppd",
+          "op": ">=",
+          "value": 94.0,
+          "source": "https://arxiv.org/abs/2410.06068"
+        },
+        {
+          "metric": "mtf50_cpp",
+          "op": "beats_camera"
+        }
+      ]
+    },
+    {
+      "name": "micro_detail",
+      "checks": [
+        {
+          "metric": "texture_hf_fidelity",
+          "op": "beats_camera"
+        }
+      ]
+    },
+    {
+      "name": "temporal",
+      "checks": [
+        {
+          "metric": "flicker",
+          "op": "beats_camera"
+        },
+        {
+          "metric": "flow_warped_excess",
+          "op": "<=",
+          "value": 0.005
+        },
+        {
+          "metric": "motion_region_error",
+          "op": "beats_camera"
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "thresholds": "data/derived/vision_thresholds.json",
+    "gates_fitted": "data/derived/gates_fitted.json",
+    "camera_presets": "data/derived/camera_presets.json",
+    "displays": "data/derived/displays.json",
+    "applied": [
+      "gate.delta_e_mean",
+      "gate.banding_score",
+      "gate.display_ppd",
+      "gate.edge_overshoot (fitted; extrapolated, reported only)",
+      "gate.banding_score (sourced; fit unsupported)",
+      "display.distance_m",
+      "camera.preset",
+      "display.preset"
+    ]
+  }
+}
