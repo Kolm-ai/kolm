@@ -1289,7 +1289,7 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
 - **v18s1 and v18s2: not run.** v18s0 read worse than v15 (section 19), and the queue was stopped before seed 1 at the user's call on 10-31.
 - **The probe runs instead (20.4, from 10-31).** Four candidates against a control on v15's recipe, three seeds each: range 0 with texture 0, range 0, texture 0, and plain fidelity. The schedule flag went in after v18 was stopped, so no queued run's code changed.
 - **The probe: done (20.4).** Plain fidelity is better on each seed and the strict rule drops it on sharpness and highlight cells. It is not released, and it is the loss for the next comparison.
-- **Next: NAFNet's architecture on our data, running from 11-02 (20.9).** The best branch is 8.8 dB under NAFNet on SIDD, and no loss weight moved a number by more than 2.5 dB. SCUNet (about 18M parameters) and Restormer (about 26M) beat a 120M network, so the gap is in the network's design, not its size.
+- **Next: NAFNet's architecture on our data, from 11-02 (20.9). Seed 0 says the gap is not the network: NAFNet's network on our data is 9.6 dB under NAFNet on SIDD.** The hypothesis it tested: the best branch is 8.8 dB under NAFNet on SIDD, and no loss weight moved a number by more than 2.5 dB. SCUNet (about 18M parameters) and Restormer (about 26M) beat a 120M network, so the gap is in the network's design, not its size.
 
 ### 20.9 NAFNet's architecture on our data (from 11-02)
 
@@ -1350,3 +1350,23 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
     - Pixel shuffle and the 2 × 2 stride-2 down both work on a period of 2, which is what the periodicity metric picks up.
     - If the drift is still there at the end, the verdict carries it: periodicity, ΔE and shadow SNR are all cells.
 - **Time.** About 1.9 h of training for res and 1.6 h for naf, plus validation and about 11 minutes of scoring each: about 4.3 h a seed, about 13 h for three.
+- **Seed 0's result (11-02, 06:18).**
+
+| | res, seed 0 | naf, seed 0 | NAFNet, pretrained on SIDD |
+|---|---|---|---|
+| Final validation loss | 0.1888 | 0.1853 | |
+| Training time | 133.2 min | 117.8 min | |
+| SIDD PSNR / SSIM | 31.52 / 0.7451 | 30.61 / 0.7171 | 40.21 / 0.9243 |
+| Blind shadow SNR, dB: raw.pixls.us, RawNIND, HDR+, SI-HDR | 22.20, 26.48, 26.49, 22.55 | 21.53, 26.56, 27.29, 25.91 | 29.79, 34.24, 35.47, 21.77 |
+| Known shadow SNR, dB: the same sets | 20.72, 28.25, 26.24, 23.22 | 21.66, 29.21, 27.50, 25.73 | |
+
+  - **The verdict of naf against res: worse pooled, by a twentieth of a margin.** IQM -0.047 [-0.053, -0.002]. 5 cells worse, 13 better, 32 undetermined, 120 non-inferior.
+    - Worse: period-2 artefacts on RawNIND (periodicity blind, known and sub-pixel known; banding blind) and blind edge overshoot.
+    - Better: shadow SNR on SI-HDR (+3.4 dB blind, +2.5 known) and on HDR+ (+1.1 to +1.4 in three sets), real ΔE on RawNIND, and blind MTF50 and texture.
+    - The preflight's ΔE drift reversed: naf is better on ΔE. Its periodicity drift stayed, on RawNIND only.
+  - The pooled share of cells improved, 0.38, sits under its own interval [0.40, 0.49]. 24 cells tie at exactly zero (12 of them the integer dr_steps), and a percentile bootstrap of a step statistic is biased. The reading rests on the IQM's interval, which covers its point.
+- **The reading: the gap is not the network.**
+  - On our data and loss, NAFNet's network lands within a twentieth of a margin of ours pooled, at 0.30× the multiply-adds. It is 0.9 dB under ours on SIDD.
+  - Both stay 8.7 to 9.6 dB under pretrained NAFNet on SIDD, and 3 to 8 dB under it on held-out shadow SNR. The exception is SI-HDR, where NAFNet's 21.77 is under both.
+  - So NAFNet's network does not bring NAFNet's numbers. What is left is the data (SIDD's real noisy-clean pairs against our targets), the length (1/57 of its tiles) and the loss.
+  - Seeds 1 and 2 settle res against naf, which matters for compute (naf is 0.30× per step). They will not move the reading above.
