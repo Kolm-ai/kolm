@@ -1289,4 +1289,64 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
 - **v18s1 and v18s2: not run.** v18s0 read worse than v15 (section 19), and the queue was stopped before seed 1 at the user's call on 10-31.
 - **The probe runs instead (20.4, from 10-31).** Four candidates against a control on v15's recipe, three seeds each: range 0 with texture 0, range 0, texture 0, and plain fidelity. The schedule flag went in after v18 was stopped, so no queued run's code changed.
 - **The probe: done (20.4).** Plain fidelity is better on each seed and the strict rule drops it on sharpness and highlight cells. It is not released, and it is the loss for the next comparison.
-- **Next: NAFNet's architecture on our data (20.9).** The best branch is 8.8 dB under NAFNet on SIDD, and no loss weight moved a number by more than 2.5 dB. SCUNet (about 18M parameters) and Restormer (about 26M) beat a 120M network, so the gap is in the network's design, not its size.
+- **Next: NAFNet's architecture on our data, running from 11-02 (20.9).** The best branch is 8.8 dB under NAFNet on SIDD, and no loss weight moved a number by more than 2.5 dB. SCUNet (about 18M parameters) and Restormer (about 26M) beat a 120M network, so the gap is in the network's design, not its size.
+
+### 20.9 NAFNet's architecture on our data (from 11-02)
+
+- **The question: is the gap to NAFNet in the network or in its training data?**
+  - NAFNet trains on SIDD, its home set. On our held-out sets, out of its domain, it still has 6.9 to 11.2 dB more shadow SNR than v15 (20.7).
+  - No probe branch moved SIDD by more than 1.5 dB from the control (20.4). Training NAFNet's network on our data and our loss separates the network from the data.
+- **The design: two arms, each from scratch on the probe's plain fidelity** (clip-weighted L1 + gradient; range, flat, texture and transfer at 0), with the probe's sources, weights and stream.
+
+| | res (the control) | naf |
+|---|---|---|
+| Network | v15's shape: base 64, mults 1,2,4,8, blocks 2,3,6,8, mid 12, residual blocks, concatenated skips | NAFNet-width64: base 64, mults 1,2,4,8,16, blocks 2,2,4,8,0, mid 12, decoder 2, NAF blocks, additive skips, 2 × 2 stride-2 down, 1 × 1 conv and pixel-shuffle up |
+| Parameters | 120.54M (7.37M of them FiLM) | 126.19M: NAFNet's 115.98M, FiLM's 10.13M, the embedding's 0.07M |
+| Multiply-adds per 256-pixel tile | 210.1 G | 63.3 G (the paper: about 64 G) |
+| Optimizer | AdamW 2e-4, betas (0.9, 0.99), weight decay 0.01 | AdamW 5e-4, betas (0.9, 0.9), weight decay 0: NAFNet's, with its 1e-3 at batch 64 scaled by the square root to batch 16 |
+
+- **Both arms:** 28,000 steps, warmup 1,000, warmup-stable-decay with the last 4,000 decayed to 0.3 % of the peak, batch 16, tile 256, seeds 0, 1 and 2 at validation seed 0.
+  - The runs interleave (res s0, naf s0, res s1, ...), so seed 0's verdict comes first.
+  - Each is scored on its EMA weights at the last step, on the held-out sets (known, blind, real, sub-pixel) and SIDD validation.
+  - naf's verdict is taken against res per seed and on all three. The driver is `.tmp/arch_l1.sh`, from the tree frozen at 7573e54a.
+- **The code (7573e54a): `train --block naf`** builds NAFNet's network inside CondUNet ([Chen et al. 2022](https://arxiv.org/abs/2204.04676)).
+  - It has NAFNet's block (layer norm, depthwise convolution, simple gate, simplified channel attention, residual scales β and γ starting at zero), its down and up, its additive skips, and a decoder depth of its own (`--dec-blocks`).
+  - FiLM conditioning, the noise map, the EMA, the checkpoint and the scorers are the res network's. `--beta2` and `--weight-decay` set AdamW's.
+  - A test copies a reference NAFNet's weights into a naf net. With FiLM at zero, the two give the same output, and the parameter count is NAFNet's plus FiLM's and the embedding's.
+  - The defaults are unchanged: res, 0.99 and 0.01. Our block is our own implementation (NAFNet's code is MIT).
+- **Caveats.**
+  - naf changes the network and the optimizer together, as NAFNet trains. Telling the two apart needs a third arm.
+  - The steps are equal, not the compute: naf does 0.30× the multiply-adds per step.
+  - 448,000 tiles is about 1/57 of NAFNet's 25.6M (400,000 iterations at batch 64).
+  - The loss is L1 + gradient, not NAFNet's PSNR loss.
+  - naf's 5e-4 is scaled, not tuned.
+- **How to read it.**
+  - **naf better on the verdict, and nearer NAFNet's shadow SNR and SIDD:** the gap is the network, and the next long run takes naf's network.
+  - **naf no better:** the gap is NAFNet's data and length (SIDD's real pairs, 25.6M tiles), and the next step is real noisy-clean pairs at scale.
+  - **Shadow SNR goes with MTF50:** a naf that removes more noise only by smoothing has made NAFNet's trade, not a gain.
+- **Preflight (11-02).** Each arm ran its exact command from the frozen tree, warmup 50, decay 50, to 200 steps, then resumed to 300. The user's game held about 6 GB of the card throughout.
+
+| | res | naf |
+|---|---|---|
+| Steady rate | 64 to 66 images/s | 82 images/s |
+| Peak memory | 9.99 GB | 21.74 GB, under the 24.5 GB cap, no spill |
+| First 50 steps (compile) | 60 s | 295 s |
+| Real validation loss at 100 / 200 / 300 | 0.3178 / 0.3148 / 0.3097 | 0.3159 / 0.3074 / 0.2995 |
+| Synthetic validation loss at 100 / 200 / 300 | 0.3857 / 0.3853 / 0.3847 | 0.3854 / 0.3858 / 0.3873 |
+
+- **The preflight's results.**
+  - Both resumed from step 200 at the peak rate and decayed to the floor by 300.
+  - **The scorer matches.** The frozen tree scores the res checkpoint as frozen_eval17 did: no difference in 3,568 numbers at a relative 1e-6. So the probe's and v15's numbers compare.
+    - frozen_eval17's CondUNet takes neither `block` nor `dec_blocks`, so an older tree cannot load a checkpoint from 7573e54a on.
+    - For this check it ran through `.tmp/old_tree_eval.py`, which drops the two keys only at their defaults.
+  - A naf checkpoint loads in the held-out scorer and in SIDD (24.08 dB at step 300; the input is 23.66).
+  - **To watch in naf: it moves off the identity faster than res, and its colour and periodicity cells drift first.**
+    - Real validation loss falls at each check. Synthetic validation loss rises a little: 0.3854, 0.3858, 0.3873.
+    - Synthetic periodicity goes 0.072, 0.097, 0.151 at steps 100, 200, 300.
+    - Real ΔE goes 0.51, 0.77, 1.40. Synthetic shadow SNR goes 17.2, 16.8, 15.7.
+    - res holds all three near the input.
+    - In layer norm, the statistics run in float32 under autocast (F.layer_norm), so this is not a precision artefact.
+    - At decay 0.999, the EMA at step 300 is still 74 % the initial weights, and the preflight held the peak rate 5e-4 from step 50. The run warms up over 1,000 steps.
+    - Pixel shuffle and the 2 × 2 stride-2 down both work on a period of 2, which is what the periodicity metric picks up.
+    - If the drift is still there at the end, the verdict carries it: periodicity, ΔE and shadow SNR are all cells.
+- **Time.** About 1.9 h of training for res and 1.6 h for naf, plus validation and about 11 minutes of scoring each: about 4.3 h a seed, about 13 h for three.
