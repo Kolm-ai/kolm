@@ -1370,3 +1370,62 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
   - Both stay 8.7 to 9.6 dB under pretrained NAFNet on SIDD, and 3 to 8 dB under it on held-out shadow SNR. The exception is SI-HDR, where NAFNet's 21.77 is under both.
   - So NAFNet's network does not bring NAFNet's numbers. What is left is the data (SIDD's real noisy-clean pairs against our targets), the length (1/57 of its tiles) and the loss.
   - Seeds 1 and 2 settle res against naf, which matters for compute (naf is 0.30× per step). They will not move the reading above.
+
+### 20.10 The pairs: what our training pairs teach about shadow noise (11-02)
+
+- **The question.** Seed 0 put the gap in the data, not the network.
+  - Our models sit 8 to 9 dB under NAFNet's shadow SNR even on RawNIND and HDR+, which we train on.
+  - On raw.pixls.us, our camera's simulated capture has 26.02 dB of shadow SNR. v15 brings it to 22.92, res to 22.20 and naf to 21.53, under the input. NAFNet brings it to 29.79.
+  - So our models do not only fail to remove fine shadow noise: on a clean capture, they add it.
+- **Two audits of the pairs as the stream draws them** (CPU only, never committed: `.tmp/real_corr_audit.py`, `.tmp/noise_level_audit.py`).
+  - Both read the finest Haar diagonal detail of the luminance, HH = (a − b − c + d) / 2 per 2 × 2 block. White noise of std s gives HH of std s; texture puts little energy there.
+  - The noise estimate is median |HH| / 0.6745, per log-spaced shadow band (the reference's luminance under 0.02), and the tile's median over its bands.
+  - On flat 0.01 plus white noise, it reads 28.36 and 16.49 dB against truths of 28.51 and 16.47.
+- **Finding 1: HDR+'s targets keep their input's noise.** The slope of the target's HH on the input's HH: the median over 96 train tiles per source, 69 to 92 of them with enough shadow. SIDD validation (192 blocks, 124 with shadow) is the reference for independent noise.
+
+| Pairs | Shadow slope [p25, p75] | Shadow correlation | Mid-tone slope | Target HH / input HH, shadows |
+|---|---|---|---|---|
+| HDR+ burst (reference frame → Google's merge) | 0.432 [0.283, 0.630] | 0.751 | 0.750 | 0.60 |
+| RawNIND (high ISO → low ISO, tripod) | 0.061 [0.005, 0.334] | 0.180 | 0.142 | 0.37 |
+| SI-HDR (short frame → merge of the longer frames) | 0.028 [0.002, 0.244] | 0.135 | 0.801 | 0.29 |
+| SIDD validation (one frame → mean of a long burst) | 0.014 [0.011, 0.019] | 0.133 | 0.014 | 0.11 |
+
+  - HDR+'s input is the merge's reference frame, so the merge carries it. Its target keeps 43 % of the input's finest shadow detail, against 1 to 6 % for the other three. SI-HDR's mid-tone slope is texture: its frames are well exposed there, and its input is not in its merge.
+  - RealStore draws a scene uniformly, then a pair in it. HDR+ has 3,183 of the 3,585 train scenes, so it is 89 % of the real draws. At p_real 0.5, about 44 % of every batch teaches keeping about 40 % of the shadow noise.
+- **Finding 2: synthetic noise is coarse, so in the synthetic pairs fine grain in the shadows is never noise.** 24 restore pairs per source, capture profile.
+  - The input is rendered twice from the same seed, with the sensor's noise and without it, so the input's noise is exactly their difference. The real pairs and SIDD have input − target instead, which also carries the target's own noise.
+  - SNR in dB, the median over tiles; 100 is the cap (more than half the blocks read zero):
+
+| Pairs | Noise, std | Noise, HH | Gap | Input, HH | Target, HH |
+|---|---:|---:|---:|---:|---:|
+| KADID-10k, synthetic | 20.65 | 37.04 | +16.4 | 30.30 | 23.20 |
+| TID2013, synthetic | 20.88 | 33.81 | +12.9 | 30.60 | 19.68 |
+| Poly Haven, synthetic | 22.13 | 47.84 | +25.7 | 44.90 | 28.08 |
+| Wikimedia, synthetic | 21.80 | 41.68 | +19.9 | 36.00 | 18.40 |
+| UHD-IQA, synthetic | 19.28 | 40.60 | +21.3 | 33.55 | 20.11 |
+| HDR+ clean frames, synthetic | 27.03 | 46.26 | +19.2 | 39.08 | 22.99 |
+| RawNIND clean frames, synthetic | 18.45 | 100 | capped | 64.23 | 29.18 |
+| SI-HDR clean frames, synthetic | 24.40 | 100 | capped | 92.98 | 40.05 |
+| PixelShift200, synthetic | 22.84 | 53.19 | +30.4 | 64.77 | 32.72 |
+| RawNIND, real | 19.58 | 22.62 | +3.0 | 22.01 | 28.40 |
+| HDR+, real | 20.48 | 21.45 | +1.0 | 18.27 | 23.66 |
+| SI-HDR, real | 8.63 | 11.33 | +2.7 | 10.50 | 29.47 |
+| SIDD validation (linearised, 140 blocks with shadow) | 2.89 | 5.97 | +3.1 | 5.88 | 24.92 |
+
+  - **The gap.** White noise reads the same both ways. The synthetic noise's HH reads 13 to 30 dB above its std, or caps: most of its energy is coarser than a pixel. The real pairs' and SIDD's gap is 1 to 3 dB.
+  - **The cause is the demosaic at the tile's resolution, not the ISP.** camera.simulate_frame supersamples the optics only; the sensor runs at the tile's pixel and is demosaiced bilinearly.
+    - On a flat field, white sensor noise demosaiced bilinearly reads +9.5 dB. Box-downsampled 2× after the demosaic, as the real pairs are made (LibRaw at the sensor's resolution, then the source's clean scale 2), it reads +3.1.
+    - On 16 KADID-10k and 16 RawNIND tiles, the gap is +9.9 and +10.0 dB with the drawn ISP, and +9.6 and +9.6 with JPEG, posterise and unsharp off (`.tmp/noise_isp_split.py`).
+    - The caps on the darker RawNIND and SI-HDR frames add 8-bit flattening of the deep shadows on top.
+  - **The direction.** In every real set the target holds less fine shadow detail than the input (5 to 19 dB cleaner): the pair says "remove this grain". In every synthetic set it holds more (7 to 53 dB), because the camera's optics blurred it out of the input and the target is the sharp scene. That part is right: undoing the blur is the job.
+  - **The consequence.** In the synthetic pairs, fine grain in the input's shadows is never noise, and fine grain missing from it is detail to restore. Real noise is fine grain. A model that learned the synthetic pairs keeps or sharpens it. Our outputs sitting under the input's shadow SNR on raw.pixls.us fit this, but do not prove it: that set's reference carries its own high-ISO grain.
+- **The screen: two runs, one change of pairs each** (`.tmp/pair_screen.sh`, from `.tmp/frozen_arch`). Each is NAFNet's arm at seed 0 with a_naf_s0's flags, and a_naf_s0 is the control.
+  - **p_nohdr:** `--real rawnind,si-hdr --p-real 0.5`. The real pairs without HDR+, which stays a synthetic clean source. RawNIND is 66 % and SI-HDR 34 % of the real draws (402 scenes).
+  - **p_realonly:** `--real rawnind,si-hdr --p-real 1.0`. Those real pairs only, no synthetic pairs.
+  - The real validation set follows `--real`, so validation loss does not compare across the runs. The held-out sets, SIDD and the verdict do.
+  - Each is about 2 h of training and 15 min of scoring. The table is `.tmp/pair_table.py`.
+- **How to read it.**
+  - **p_nohdr nearer NAFNet on shadow SNR, with MTF50 held:** finding 1 is a cause. HDR+ pairs need an input outside their merge: our own merge of the other frames (the burst store's), never the IPOL code.
+  - **p_realonly beyond p_nohdr:** the synthetic pairs hurt as rendered. The fix is to run the sensor and its demosaic at twice the tile's resolution and box-downsample, as the real pairs are made, with read noise scaled so that the fitted noise levels still hold at the tile.
+  - **Neither moves:** the pairs' noise is not the cause, and what is left is length (1/57 of NAFNet's tiles) and the loss.
+  - 402 scenes is few for p_realonly: a gain there that p_nohdr lacks may still be real, and a loss on the synthetic-only metrics (periodicity, colour, the gates' worlds) is expected.
