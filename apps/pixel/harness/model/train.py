@@ -269,7 +269,8 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
           noise_map: bool = False, compile_model: bool = False, warmup: int | None = None,
           lr_floor: float | None = None, target_audit: bool = False, overshoot_weight: float | None = None,
           pyramid_weight: float | None = None, resample: str = "learned", val_seed: int | None = None,
-          schedule: str = "cosine", decay: int = 0, log=print) -> dict:
+          schedule: str = "cosine", decay: int = 0, block: str = "res", dec_blocks: int | tuple | None = None,
+          beta2: float = 0.99, weight_decay: float = 0.01, log=print) -> dict:
     """`real` names stored real-pair sources (data.realstore) drawn with probability `p_real` per sample; `weights`
     maps a clean source to its draw weight (1 unnamed); `range_weight`, `range_k`, `flat_weight`, `flat_k` and
     `texture_weight` set the range, flat-texture and texture-deficit terms; `p_dead_leaves` is the share of rendered
@@ -287,7 +288,9 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
     data.targetaudit). The sixteenth run's, as off by default and as recorded: `overshoot_weight` and
     `pyramid_weight` (losses.overshoot_loss, losses.pyramid_loss), `resample` (how the network's levels change
     scale, net.CondUNet; in its `config`). `schedule` and `decay` choose the rate's shape (lr_at; default the cosine
-    every run to the eighteenth used). `seed` draws the initial weights and the training stream;
+    every run to the eighteenth used). `block` and `dec_blocks` pick the network's block and the decoder's depth
+    per level (net.CondUNet; "naf" is NAFNet's block; in its `config`), and `beta2` and `weight_decay` set AdamW's
+    (default 0.99 and 0.01, every run to the eighteenth; NAFNet trains at 0.9 and 0). `seed` draws the initial weights and the training stream;
     `val_seed` (default `seed`) the calibration and validation draws, so the runs of a seed sweep fit one
     normaliser and choose best.pt on one validation set."""
     out = Path(out)
@@ -340,7 +343,8 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
                 blocks=blocks if isinstance(blocks, int) else list(blocks), mid_blocks=mid_blocks,
                 shift_real=bool(shift_real), subpix_real=bool(subpix_real), noise_map=bool(noise_map), compile=bool(compile_model), warmup=warmup,
                 lr_floor=lr_floor, target_audit=bool(target_audit), resample=resample, schedule=schedule,
-                decay=decay, **loss_kw)
+                decay=decay, block=block, dec_blocks=dec_blocks if dec_blocks is None or isinstance(dec_blocks, int)
+                else list(dec_blocks), beta2=beta2, weight_decay=weight_decay, **loss_kw)
     last = out / "last.pt"
     ck = torch.load(last, map_location="cpu", weights_only=False) if last.exists() else None
     quiet = (lambda *a, **k: None)
@@ -375,20 +379,22 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
             log(f"no real validation set: {ex}")
     torch.manual_seed(seed)   # the initial weights (a resume loads its own)
     model = CondUNet(base=base, mults=mults, blocks=blocks, mid_blocks=mid_blocks, noise_map=noise_map,
-                     resample=resample).to(dev)
+                     resample=resample, block=block, dec_blocks=dec_blocks).to(dev)
     ema = copy.deepcopy(model).eval()
     model.set_grad_ckpt(grad_ckpt)
     for p in ema.parameters():
         p.requires_grad_(False)
-    opt = torch.optim.AdamW(model.parameters(), lr=lr, betas=(0.9, 0.99), weight_decay=0.01, fused=dev.type == "cuda")
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, betas=(0.9, beta2), weight_decay=weight_decay,
+                            fused=dev.type == "cuda")
     ema_params, model_params = list(ema.parameters()), list(model.parameters())
     step, best = 0, float("inf")
     if ck:
         model.load_state_dict(ck["model"]); ema.load_state_dict(ck["ema"]); opt.load_state_dict(ck["opt"]); step = ck["step"]
-    log(f"model {model.n_params() / 1e6:.2f} M params on {dev} (base {base}, mults {mults}, blocks {blocks}, mid "
-        f"{mid_blocks or 'as the last level'}{', gradient checkpointing' if grad_ckpt else ''}"
+    log(f"model {model.n_params() / 1e6:.2f} M params on {dev} ({block} blocks, base {base}, mults {mults}, blocks "
+        f"{blocks}, mid {'as the last level' if mid_blocks is None else mid_blocks}"
+        f"{'' if dec_blocks is None else f', decoder {dec_blocks}'}{', gradient checkpointing' if grad_ckpt else ''}"
         f"{', noise map' if noise_map else ''}{', compiled' if compile_model else ''}); {steps} steps, "
-        f"batch {batch}, tile {tile}, {workers} workers")
+        f"batch {batch}, tile {tile}, {workers} workers; AdamW betas (0.9, {beta2}), weight decay {weight_decay}")
     if decoded_store:
         log("decoded store: loader workers read clean images from derived/decoded and store the ones they decode")
     stream = PairStream(list(sources), tile, norm, seed + step, real=real, p_real=p_real, weights=weights or None,

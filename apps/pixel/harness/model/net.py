@@ -6,7 +6,12 @@ It scales by width (`base`), by level (`mults`), and by depth per level (`blocks
 by the encoder and decoder at that level) and at the bottleneck (`mid_blocks`): a block at the lowest level costs
 4 ** (levels - 1) times fewer FLOPs per parameter than one at full resolution, so the depth goes there. `resample`
 picks how levels change scale: "learned" (a strided conv down, a stride-2 transposed conv up; every run up to v15) or
-"smooth" (BlurDown and SmoothUp, which leave no grid of the levels' strides in the output)."""
+"smooth" (BlurDown and SmoothUp, which leave no grid of the levels' strides in the output). `block` picks the block:
+"res" (ResBlock, every run up to v18) or "naf" (NAFBlock, after NAFNet: Chen et al. 2022, "Simple Baselines for Image
+Restoration", whose design is MIT-licensed; this is our own implementation, with FiLM added). A "naf" net also takes
+NAFNet's scale changes (a 2 x 2 stride-2 conv down, a 1 x 1 conv and pixel shuffle up), additive skips and a bare conv
+head. `dec_blocks` sets the decoder's depth per level apart from the encoder's, and a level may hold no blocks, so
+NAFNet-width64 is base 64, mults (1, 2, 4, 8, 16), blocks (2, 2, 4, 8, 0), mid_blocks 12, dec_blocks 2."""
 from __future__ import annotations
 
 import torch
@@ -18,6 +23,7 @@ from .data import CAPTURE_DIM, COND_DIM, LOG_GAIN, METRIC_COND_DIM
 
 NOISE_POOL = 5   # px: the window of the local level the noise map reads the signal-dependent shot noise at
 RESAMPLE = ("learned", "smooth")
+BLOCKS = ("res", "naf")
 BINOMIAL = (1.0, 2.0, 1.0)   # BlurDown's low-pass, per axis
 
 
@@ -66,10 +72,52 @@ class ResBlock(nn.Module):
         return x + h
 
 
-class Level(nn.Module):
-    def __init__(self, ch: int, emb: int, blocks: int):
+class LayerNorm2d(nn.Module):
+    """Layer norm over the channels at each pixel, as NAFNet's, in float32 under autocast (F.layer_norm runs there)."""
+
+    def __init__(self, ch: int, eps: float = 1e-6):
         super().__init__()
-        self.blocks = nn.ModuleList([ResBlock(ch, emb) for _ in range(blocks)])
+        self.weight, self.bias = nn.Parameter(torch.ones(ch)), nn.Parameter(torch.zeros(ch))
+        self.eps = eps
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return F.layer_norm(x.permute(0, 2, 3, 1), (x.shape[1],), self.weight, self.bias, self.eps).permute(0, 3, 1, 2)
+
+
+def simple_gate(x: torch.Tensor) -> torch.Tensor:
+    a, b = x.chunk(2, dim=1)
+    return a * b
+
+
+class NAFBlock(nn.Module):
+    """NAFNet's block (Chen et al. 2022): layer norm, a 1 x 1 conv to twice the width, a depthwise 3 x 3, the simple
+    gate (one half times the other), simplified channel attention (the global mean through a 1 x 1 conv, as a scale), a
+    1 x 1 conv back, added at a learned per-channel scale beta; then layer norm, a 1 x 1 conv to twice the width, the
+    gate, a 1 x 1 conv back, added at gamma. No activation function anywhere. beta and gamma start at zero, so the
+    block starts as the identity, and FiLM (also zero at the start) conditions the first norm's output."""
+
+    def __init__(self, ch: int, emb: int):
+        super().__init__()
+        self.n1, self.film = LayerNorm2d(ch), FiLM(emb, ch)
+        self.c1, self.c2 = nn.Conv2d(ch, 2 * ch, 1), nn.Conv2d(2 * ch, 2 * ch, 3, padding=1, groups=2 * ch)
+        self.sca = nn.Sequential(nn.AdaptiveAvgPool2d(1), nn.Conv2d(ch, ch, 1))
+        self.c3 = nn.Conv2d(ch, ch, 1)
+        self.n2, self.c4, self.c5 = LayerNorm2d(ch), nn.Conv2d(ch, 2 * ch, 1), nn.Conv2d(ch, ch, 1)
+        self.beta, self.gamma = nn.Parameter(torch.zeros(1, ch, 1, 1)), nn.Parameter(torch.zeros(1, ch, 1, 1))
+
+    def forward(self, x: torch.Tensor, e: torch.Tensor) -> torch.Tensor:
+        h = simple_gate(self.c2(self.c1(self.film(self.n1(x), e))))
+        y = x + self.c3(h * self.sca(h)) * self.beta
+        return y + self.c5(simple_gate(self.c4(self.n2(y)))) * self.gamma
+
+
+BLOCK = {"res": ResBlock, "naf": NAFBlock}
+
+
+class Level(nn.Module):
+    def __init__(self, ch: int, emb: int, blocks: int, block: str = "res"):
+        super().__init__()
+        self.blocks = nn.ModuleList([BLOCK[block](ch, emb) for _ in range(blocks)])
         self.grad_ckpt = False
 
     def forward(self, x: torch.Tensor, e: torch.Tensor) -> torch.Tensor:
@@ -111,34 +159,52 @@ class SmoothUp(nn.Module):
 class CondUNet(nn.Module):
     def __init__(self, in_ch: int = 3, out_ch: int = 3, base: int = 48, mults: tuple = (1, 2, 4, 4),
                  blocks: int | tuple = 2, cond_dim: int = COND_DIM, emb: int = 256, mid_blocks: int | None = None,
-                 noise_map: bool = False, resample: str = "learned"):
+                 noise_map: bool = False, resample: str = "learned", block: str = "res",
+                 dec_blocks: int | tuple | None = None):
         super().__init__()
         per = (int(blocks),) * len(mults) if isinstance(blocks, int) else tuple(int(b) for b in blocks)
-        if len(per) != len(mults) or min(per) < 1 or (mid_blocks is not None and mid_blocks < 1):
-            raise ValueError(f"blocks wants one count >= 1 or one per level ({len(mults)}), got {blocks}, mid {mid_blocks}")
+        dec = per[:-1] if dec_blocks is None else ((int(dec_blocks),) * (len(mults) - 1) if isinstance(dec_blocks, int)
+                                                   else tuple(int(b) for b in dec_blocks))
+        if len(per) != len(mults) or min(per) < 0 or (mid_blocks is not None and mid_blocks < 0):
+            raise ValueError(f"blocks wants one count >= 0 or one per level ({len(mults)}), got {blocks}, mid {mid_blocks}")
+        if len(dec) != len(mults) - 1 or min(dec, default=0) < 0:
+            raise ValueError(f"dec_blocks wants one count >= 0 or one per decoder level ({len(mults) - 1}), "
+                             f"got {dec_blocks}")
         if resample not in RESAMPLE:
             raise ValueError(f"resample wants one of {RESAMPLE}, got {resample!r}")
+        if block not in BLOCKS:
+            raise ValueError(f"block wants one of {BLOCKS}, got {block!r}")
+        if block == "naf" and resample != "learned":
+            raise ValueError("block 'naf' has its own resampling; resample wants 'learned'")
         self.config = dict(in_ch=in_ch, out_ch=out_ch, base=base, mults=tuple(mults),
                            blocks=blocks if isinstance(blocks, int) else per, cond_dim=cond_dim, emb=emb,
-                           mid_blocks=mid_blocks, noise_map=bool(noise_map), resample=resample)
+                           mid_blocks=mid_blocks, noise_map=bool(noise_map), resample=resample, block=block,
+                           dec_blocks=dec_blocks if dec_blocks is None or isinstance(dec_blocks, int) else dec)
+        self.block = block
+        self.additive = block == "naf"     # NAFNet adds the skip; the res net concatenates and merges with a 1 x 1
         self.noise_map = bool(noise_map)   # one more stem channel: noise_map(x, cond)
         self.embed = nn.Sequential(nn.Linear(cond_dim, emb), nn.SiLU(), nn.Linear(emb, emb), nn.SiLU())
         chs = [base * m for m in mults]
         self.stem = nn.Conv2d(in_ch + int(self.noise_map), chs[0], 3, padding=1)
         self.down, self.pool = nn.ModuleList(), nn.ModuleList()
         for i, c in enumerate(chs):
-            self.down.append(Level(c, emb, per[i]))
+            self.down.append(Level(c, emb, per[i], block))
             if i + 1 < len(chs):
-                self.pool.append(BlurDown(c, chs[i + 1]) if resample == "smooth"
+                self.pool.append(nn.Conv2d(c, chs[i + 1], 2, stride=2) if block == "naf"
+                                 else BlurDown(c, chs[i + 1]) if resample == "smooth"
                                  else nn.Conv2d(c, chs[i + 1], 3, stride=2, padding=1))
-        self.mid = Level(chs[-1], emb, per[-1] if mid_blocks is None else mid_blocks)
+        self.mid = Level(chs[-1], emb, per[-1] if mid_blocks is None else mid_blocks, block)
         self.up, self.merge = nn.ModuleList(), nn.ModuleList()
         for i in range(len(chs) - 1, 0, -1):
-            self.up.append(SmoothUp(chs[i], chs[i - 1]) if resample == "smooth"
-                           else nn.ConvTranspose2d(chs[i], chs[i - 1], 2, stride=2))
-            self.merge.append(nn.Conv2d(2 * chs[i - 1], chs[i - 1], 1))
-            self.down.append(Level(chs[i - 1], emb, per[i - 1]))   # decoder levels appended after the encoder ones
-        self.head = nn.Sequential(nn.GroupNorm(8, chs[0]), nn.SiLU(), nn.Conv2d(chs[0], out_ch, 3, padding=1))
+            if block == "naf":
+                self.up.append(nn.Sequential(nn.Conv2d(chs[i], 4 * chs[i - 1], 1, bias=False), nn.PixelShuffle(2)))
+            else:
+                self.up.append(SmoothUp(chs[i], chs[i - 1]) if resample == "smooth"
+                               else nn.ConvTranspose2d(chs[i], chs[i - 1], 2, stride=2))
+                self.merge.append(nn.Conv2d(2 * chs[i - 1], chs[i - 1], 1))
+            self.down.append(Level(chs[i - 1], emb, dec[i - 1], block))   # decoder levels appended after the encoder's
+        self.head = (nn.Sequential(nn.Conv2d(chs[0], out_ch, 3, padding=1)) if block == "naf"
+                     else nn.Sequential(nn.GroupNorm(8, chs[0]), nn.SiLU(), nn.Conv2d(chs[0], out_ch, 3, padding=1)))
         nn.init.zeros_(self.head[-1].weight)
         nn.init.zeros_(self.head[-1].bias)
         self.n_levels = len(chs)
@@ -151,9 +217,8 @@ class CondUNet(nn.Module):
                 m.grad_ckpt = bool(on)
         return self
 
-    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
-        e = self.embed(cond)
-        h = self.stem(torch.cat([x, noise_map(x, cond)], dim=1) if self.noise_map else x)
+    def body(self, h: torch.Tensor, e: torch.Tensor) -> torch.Tensor:
+        """The net between the stem and the head: the encoder, the bottleneck and the decoder with its skips."""
         skips = []
         for i in range(self.n_levels):
             h = self.down[i](h, e)
@@ -163,9 +228,14 @@ class CondUNet(nn.Module):
         h = self.mid(h, e)
         for j in range(self.n_levels - 1):
             h = self.up[j](h)
-            h = self.merge[j](torch.cat([h, skips.pop()], dim=1))
+            h = h + skips.pop() if self.additive else self.merge[j](torch.cat([h, skips.pop()], dim=1))
             h = self.down[self.n_levels + j](h, e)
-        return x + self.head(h)
+        return h
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        e = self.embed(cond)
+        h = self.stem(torch.cat([x, noise_map(x, cond)], dim=1) if self.noise_map else x)
+        return x + self.head(self.body(h, e))
 
     def n_params(self) -> int:
         return sum(p.numel() for p in self.parameters())

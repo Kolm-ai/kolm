@@ -49,7 +49,9 @@ def cmd_train(args) -> int:
           transfer_weight=args.transfer_weight,
           shift_real=args.shift_real, subpix_real=args.subpix_real, noise_map=args.noise_map, compile_model=args.compile, warmup=args.warmup,
           lr_floor=args.lr_floor, target_audit=args.target_audit, overshoot_weight=args.overshoot_weight,
-          pyramid_weight=args.pyramid_weight, resample=args.resample, schedule=args.schedule, decay=args.decay)
+          pyramid_weight=args.pyramid_weight, resample=args.resample, schedule=args.schedule, decay=args.decay,
+          block=args.block, dec_blocks=parse_blocks(args.dec_blocks) if args.dec_blocks else None, beta2=args.beta2,
+          weight_decay=args.weight_decay)
     return 0
 
 
@@ -179,6 +181,13 @@ def add_parser(sub) -> None:
     t.add_argument("--mults", default="1,2,4,4", help="width multiple of each level, comma-separated; a level halves the side")
     t.add_argument("--blocks", default="2", help="residual blocks per level: one count, or one per level comma-separated")
     t.add_argument("--mid-blocks", type=int, help="residual blocks at the bottleneck (default: the last level's count)")
+    t.add_argument("--dec-blocks", help="decoder blocks per level below the bottleneck: one count, or one per level "
+                   "from full resolution down, comma-separated (default: the encoder's)")
+    t.add_argument("--block", choices=("res", "naf"), default="res",
+                   help="the network's block: res (every run to the eighteenth) or naf, NAFNet's (Chen et al. 2022), "
+                        "with its 2 x 2 down, pixel-shuffle up and additive skips (net.CondUNet)")
+    t.add_argument("--beta2", type=float, default=0.99, help="AdamW's second-moment decay (NAFNet: 0.9)")
+    t.add_argument("--weight-decay", type=float, default=0.01, help="AdamW's weight decay (NAFNet: 0)")
     t.add_argument("--grad-ckpt", action="store_true",
                    help="recompute block activations in the backward pass: about a third more compute, a fraction of "
                         "the activation memory, the same gradients")

@@ -307,9 +307,87 @@ def test_smooth_resampling_leaves_no_grid_and_rebuilds_from_its_config():
         CondUNet(base=8, mults=(1, 2), resample="pixel-shuffle")
 
 
-def test_gradient_checkpointing_changes_no_output_or_gradient():
+def _naf_from_reference(ref, net: CondUNet) -> None:
+    """Copy a reference NAFNet's weights (baseline_archs.nafnet) into a "naf" CondUNet of its shape; FiLM and the
+    conditioning embedding have no counterpart and stay as they are."""
+    names = {"conv1": "c1", "conv2": "c2", "conv3": "c3", "conv4": "c4", "conv5": "c5", "norm1": "n1", "norm2": "n2"}
+    top = {"intro": "stem", "ending": "head.0", "downs": "pool", "ups": "up"}
+    sd = {}
+    for k, v in ref.state_dict().items():
+        p = k.split(".")
+        if p[0] in top:
+            sd[".".join([top[p[0]]] + p[1:])] = v
+            continue
+        if p[0] == "middle_blks":
+            lv, rest = "mid", p[1:]
+        else:     # encoders and decoders, the deepest decoder first, as CondUNet appends its decoder levels
+            lv, rest = f"down.{int(p[1]) + (net.n_levels if p[0] == 'decoders' else 0)}", p[2:]
+        sd[".".join([lv, "blocks", rest[0], names.get(rest[1], rest[1])] + rest[2:])] = v
+    missing, unexpected = net.load_state_dict(sd, strict=False)
+    assert not unexpected and all(".film." in k or k.startswith("embed.") for k in missing), (missing, unexpected)
+
+
+def test_naf_net_is_nafnet_with_the_conditioning_at_zero():
+    """With FiLM at zero, a "naf" CondUNet carrying a reference NAFNet's weights computes what NAFNet does, and has
+    NAFNet's parameters plus FiLM's and the embedding's."""
+    from harness.model.baseline_archs.nafnet import NAFNet
     torch.manual_seed(0)
-    net = CondUNet(base=8, mults=(1, 2), blocks=2)
+    ref = NAFNet(img_channel=3, width=8, middle_blk_num=2, enc_blk_nums=[1, 2], dec_blk_nums=[2, 1]).eval()
+    with torch.no_grad():
+        for p in ref.parameters():          # beta and gamma off zero, so every block counts
+            p.add_(0.1 * torch.randn_like(p))
+    net = CondUNet(base=8, mults=(1, 2, 4), blocks=(1, 2, 0), mid_blocks=2, dec_blocks=(1, 2), block="naf").eval()
+    extra = sum(p.numel() for k, p in net.named_parameters() if ".film." in k or k.startswith("embed."))
+    assert net.n_params() - extra == sum(p.numel() for p in ref.parameters())
+    _naf_from_reference(ref, net)
+    x = torch.rand(2, 3, 32, 32)
+    with torch.no_grad():
+        assert torch.allclose(net(x, torch.randn(2, COND_DIM)), ref(x), atol=1e-5)
+
+
+def test_naf_net_starts_as_the_identity_and_rebuilds_from_its_config():
+    """A "naf" net returns its input at the start (zero head, zero beta and gamma), takes NAFNet's 2 x 2 down, pixel
+    shuffle up and additive skips, allows an empty level and a decoder depth of its own, and rebuilds from its config;
+    a config written before `block` and `dec_blocks` existed builds the res net it always did."""
+    torch.manual_seed(0)
+    net = CondUNet(base=8, mults=(1, 2, 4), blocks=(1, 2, 0), mid_blocks=2, dec_blocks=(1, 3), block="naf",
+                   noise_map=True)
+    x, c = torch.rand(2, 3, 32, 32), torch.rand(2, COND_DIM)
+    assert torch.equal(net(x, c), x)
+    assert [len(lv.blocks) for lv in net.down] == [1, 2, 0, 3, 1] and len(net.mid.blocks) == 2
+    assert net.pool[0].kernel_size == (2, 2) and isinstance(net.up[0][1], torch.nn.PixelShuffle) and not len(net.merge)
+    again = CondUNet(**net.config)
+    again.load_state_dict(net.state_dict())
+    assert again.config["dec_blocks"] == (1, 3) and again.additive
+    res = CondUNet(base=8, mults=(1, 2, 4), blocks=1, dec_blocks=(2, 3))
+    assert [len(lv.blocks) for lv in res.down] == [1, 1, 1, 3, 2] and len(res.merge) == 2
+    flat = CondUNet(base=8, mults=(1, 2), blocks=1)
+    old = {k: v for k, v in flat.config.items() if k not in ("block", "dec_blocks")}
+    assert CondUNet(**old).block == "res" and CondUNet(**old).n_params() == flat.n_params()
+    for kw, match in ((dict(block="naf", resample="smooth"), "resample wants 'learned'"),
+                      (dict(block="vit"), "block wants"), (dict(dec_blocks=(1, 2)), "dec_blocks wants"),
+                      (dict(blocks=-1), "blocks wants")):
+        with pytest.raises(ValueError, match=match):
+            CondUNet(base=8, mults=(1, 2), **kw)
+
+
+def test_the_train_cli_takes_the_block_the_decoder_depth_and_the_optimizer():
+    import argparse
+    from harness.model.cli import add_parser, parse_blocks
+    p = argparse.ArgumentParser()
+    add_parser(p.add_subparsers(dest="cmd"))
+    a = p.parse_args(["model", "train", "--out", "x", "--block", "naf", "--blocks", "2,2,4,8,0", "--dec-blocks", "2",
+                      "--beta2", "0.9", "--weight-decay", "0"])
+    assert (a.block, parse_blocks(a.blocks), parse_blocks(a.dec_blocks)) == ("naf", (2, 2, 4, 8, 0), 2)
+    assert (a.beta2, a.weight_decay) == (0.9, 0.0)
+    d = p.parse_args(["model", "train", "--out", "x"])
+    assert (d.block, d.dec_blocks, d.beta2, d.weight_decay) == ("res", None, 0.99, 0.01)
+
+
+@pytest.mark.parametrize("block", ["res", "naf"])
+def test_gradient_checkpointing_changes_no_output_or_gradient(block):
+    torch.manual_seed(0)
+    net = CondUNet(base=8, mults=(1, 2), blocks=2, block=block)
     with torch.no_grad():
         for p in net.parameters():          # off the zero init, so every block carries a gradient
             p.add_(0.05 * torch.randn_like(p))
@@ -322,6 +400,7 @@ def test_gradient_checkpointing_changes_no_output_or_gradient():
         runs.append((y.detach(), [p.grad.clone() for p in net.parameters()]))
     assert torch.allclose(runs[0][0], runs[1][0])
     assert all(torch.allclose(a, b, atol=1e-6) for a, b in zip(runs[0][1], runs[1][1]))
+    assert all(float(g.abs().sum()) > 0 for g in runs[0][1])      # every parameter learns
 
 
 def test_inference_pads_to_the_net_level_multiple():
@@ -369,6 +448,25 @@ def test_train_records_the_sixteenth_run_terms_and_apply_rebuilds_a_smooth_net(t
     assert isinstance(load_model(out / "last.pt", "cpu").model.pool[0], BlurDown)
     with pytest.raises(ValueError, match="overshoot and pyramid"):
         train(str(tmp_path / "n"), SOURCES, steps=1, workers=0, pyramid_weight=-1.0, device="cpu")
+
+
+@needs_data
+@needs_clean
+def test_train_records_the_block_and_the_optimizer_and_apply_rebuilds_a_naf_net(tmp_path):
+    from harness.model.apply import load_model
+    from harness.model.train import train
+    out = tmp_path / "m"
+    train(str(out), SOURCES, steps=1, batch=2, tile=32, workers=0, base=8, mults=(1, 2, 4), blocks=(1, 1, 0),
+          mid_blocks=2, dec_blocks=1, block="naf", beta2=0.9, weight_decay=0.0, val_n=4, calib_n=8, ckpt_every=1,
+          device="cpu", log=lambda *a: None)
+    ck = torch.load(out / "last.pt", map_location="cpu", weights_only=False)
+    assert (ck["config"]["block"], ck["config"]["dec_blocks"]) == ("naf", 1)
+    assert (ck["train"]["block"], ck["train"]["dec_blocks"], ck["train"]["beta2"], ck["train"]["weight_decay"]) \
+        == ("naf", 1, 0.9, 0.0)
+    g = ck["opt"]["param_groups"][0]
+    assert tuple(g["betas"]) == (0.9, 0.9) and g["weight_decay"] == 0.0
+    b = load_model(out / "last.pt", "cpu")
+    assert b.model.block == "naf" and b.model.n_levels == 3 and len(b.model.mid.blocks) == 2
 
 
 @needs_data

@@ -71,6 +71,24 @@ def test_burstnet_at_init_is_the_single_net():
         assert torch.allclose(b(x, c), ref, atol=1e-6)
 
 
+def test_burstnet_wraps_a_naf_single_net():
+    """The burst front end sits on a "naf" single net as on a res one: at the start it is the single net, and it
+    rebuilds from the single net's config."""
+    torch.manual_seed(0)
+    u = CondUNet(base=8, mults=(1, 2, 4), blocks=(1, 1, 0), mid_blocks=1, emb=32, noise_map=True, block="naf")
+    with torch.no_grad():
+        for p in u.parameters():
+            p.add_(0.05 * torch.randn_like(p))
+    b = BurstNet(u.eval(), feat=8, frames=3).eval()
+    x, c = encode_t(torch.rand(2, 3, 32, 32) * 0.5), _cond(2)
+    fr = encode_t(torch.rand(2, 3, 3, 32, 32) * 0.5)
+    with torch.no_grad():
+        assert torch.allclose(b(x, c, fr, torch.ones(2, 3, dtype=torch.bool)), u(x, c), atol=1e-6)
+    again = BurstNet(dict(u.config), feat=8, frames=3)
+    again.load_state_dict(b.state_dict())
+    assert again.single.block == "naf"
+
+
 def test_masked_frames_are_no_frames_and_fusion_learns():
     u = _single()
     b = BurstNet(u, feat=8, frames=3)

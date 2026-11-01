@@ -111,6 +111,7 @@ def render(release: Path, run: Path | None = None, capture_evals: list[Path] = (
     run = Path(run) if run else Path(cfg["source_checkpoint"]).parent
     train = cfg.get("train") or {}
     net = cfg["net"]
+    dec = "" if net.get("dec_blocks") is None else f", decoder blocks {net.get('dec_blocks')}"
     out = [f"# {cfg['name']}", "",
            "The recovered layer of kolm pixel: a conditional U-Net that takes a camera raw's linear decode (LibRaw's "
            "demosaic, camera white balance, linear sRGB primaries, 1.0 at the sensor's clip) and returns the scene it "
@@ -123,9 +124,9 @@ def render(release: Path, run: Path | None = None, capture_evals: list[Path] = (
            f"| training time | {_cell(round(cfg['elapsed_min']) if cfg.get('elapsed_min') else None)} min |",
            f"| weights | `{cfg['weights']}` (EMA, safetensors), SHA-256 `{cfg['sha256']}` |",
            f"| format | `{cfg['format']}` |",
-           f"| network | CondUNet: base {net.get('base')}, mults {net.get('mults')}, blocks {net.get('blocks')}, "
-           f"{net.get('mid_blocks')} mid blocks, conditioning {net.get('cond_dim')} dims, noise map "
-           f"{net.get('noise_map')} |",
+           f"| network | CondUNet, {net.get('block', 'res')} blocks: base {net.get('base')}, mults {net.get('mults')}, "
+           f"blocks {net.get('blocks')}, {net.get('mid_blocks')} mid blocks{dec}, conditioning {net.get('cond_dim')} "
+           f"dims, noise map {net.get('noise_map')} |",
            f"| exported from | `{cfg.get('source_checkpoint')}` |", ""]
 
     out += ["## Use", "", "```bash",

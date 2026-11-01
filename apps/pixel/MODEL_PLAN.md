@@ -1191,6 +1191,23 @@ Every recipe change goes through five steps in order, and stops at the first tha
 - **Preflight (10-31).** The trunk's and the l1 branch's exact commands at 200 and 300 steps (warmup 50, `.tmp/preflight_wsd`): 10 GB on the card and none spilled, 64–68 img/s, the branch resumed at step 200, and the rate held at 2.0e-4 and then 5.90e-5 at step 250 and 6.0e-7 at 300, as `lr_at` gives. Held-out evaluation (`frozen_eval17`) and SIDD both load the branch's last.pt.
 - **Time.** At 62–64 img/s and about 24 s per validation and save, a trunk is about 2 hours. A branch is about 20 minutes, and its scoring about 11 (SIDD 5.5). So a seed is about 4.7 hours and the three about 14 (est): from 12:36 on 10-31 to about 03:00 on 11-01.
 
+**The first probe's result (finished 03:17 on 11-01, three seeds).** Blind means over the seeds; shadow SNR in dB, the median of the restored tiles.
+
+| Branch | SIDD PSNR | SIDD SSIM | raw.pixls.us | RawNIND | HDR+ | SI-HDR | Verdict on three seeds, pooled IQM [90 %] |
+|---|---:|---:|---:|---:|---:|---:|---|
+| ctrl | 30.18 | 0.682 | 21.46 | 22.77 | 23.32 | 20.13 | the control |
+| r0t0 | 31.08 | 0.730 | 21.86 | 22.53 | 23.66 | 19.90 | +0.004 [−0.020, +0.027], no clear change |
+| r0 | 28.69 | 0.606 | 20.63 | 21.20 | 21.22 | 18.44 | −0.012 [−0.043, +0.007], worse on seeds 0 and 2 |
+| t0 | 31.60 | 0.758 | 22.52 | 23.73 | 24.87 | 20.90 | −0.050 [−0.064, +0.004], worse on each seed |
+| l1 | 31.39 | 0.748 | 23.27 | 25.28 | 25.53 | 22.57 | +0.052 [+0.025, +0.082], better on each seed (+0.033, +0.073, +0.056) |
+| *v15* | 30.39 | 0.687 | 22.92 | 24.67 | 24.32 | 20.55 | |
+| *NAFNet* | 40.21 | 0.924 | 29.79 | 34.24 | 35.47 | 21.77 | |
+
+- **Plain fidelity wins on denoising.** Against the control, l1 adds 1.2 dB on SIDD and 1.8 to 2.5 dB of shadow SNR on every held-out set. It beats v15 on all five columns after 28,000 steps.
+- **The rule still drops it.** Its 17 worse cells are all sharpness or highlights: MTF50, high-frequency texture fidelity, and the highlight-loss fraction. That is the trade a smoother output makes, and the range term was what held the highlights.
+- **The custom terms do not close the gap.** The best branch is still 8.8 dB under NAFNet on SIDD and 6.5 to 9.9 dB under it on shadow SNR (raw.pixls.us, RawNIND, HDR+). No loss weight moves a number by more than 2.5 dB. So the network, not the objective, is the next question.
+- **What it decides.** l1 is not released. It is the loss for the architecture comparison (20.9), because it is the loss NAFNet trains on, so that comparison names the network alone. Tables: `.tmp/probe_table.md`; verdicts: `.tmp/probe/verdict_*`.
+
 ### 20.5 Data: what to add, and how to weigh it (research, 10-30)
 
 - **Quantity flattens.** For learned reconstruction, gains taper after a few thousand training images: about 0.04 dB per doubling past about 6,000 ([Klug and Heckel 2022](https://arxiv.org/abs/2209.13435)).
@@ -1271,4 +1288,5 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
 - **v18's stop rule: decided on 30 October.** The verdict replaces the count of cascaded gates in `.tmp/v18_gate_check.py`; section 19 states the rule. It stops on the pooled reading, not on single cells. Tested on the reports there: a run against itself goes on, v17 against v15 stops, and a run missing reports stops.
 - **v18s1 and v18s2: not run.** v18s0 read worse than v15 (section 19), and the queue was stopped before seed 1 at the user's call on 10-31.
 - **The probe runs instead (20.4, from 10-31).** Four candidates against a control on v15's recipe, three seeds each: range 0 with texture 0, range 0, texture 0, and plain fidelity. The schedule flag went in after v18 was stopped, so no queued run's code changed.
-- **After the probe: NAFNet's architecture on our data.** The gap to the baselines on SIDD (10 dB) and on shadow SNR (5 to 11 dB) is in denoising, not in size: SCUNet (about 18M parameters) and Restormer (about 26M) beat a 120M network. The probe tells whether our objective is the cause. NAFNet's block, trained on our recipe, tells whether the network is.
+- **The probe: done (20.4).** Plain fidelity is better on each seed and the strict rule drops it on sharpness and highlight cells. It is not released, and it is the loss for the next comparison.
+- **Next: NAFNet's architecture on our data (20.9).** The best branch is 8.8 dB under NAFNet on SIDD, and no loss weight moved a number by more than 2.5 dB. SCUNet (about 18M parameters) and Restormer (about 26M) beat a 120M network, so the gap is in the network's design, not its size.

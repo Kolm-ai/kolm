@@ -83,18 +83,7 @@ class FrameEncoder(nn.Module):
 
 def _body(u: CondUNet, h: torch.Tensor, e: torch.Tensor) -> torch.Tensor:
     """CondUNet.forward between the stem and the head."""
-    skips = []
-    for i in range(u.n_levels):
-        h = u.down[i](h, e)
-        if i + 1 < u.n_levels:
-            skips.append(h)
-            h = u.pool[i](h)
-    h = u.mid(h, e)
-    for j in range(u.n_levels - 1):
-        h = u.up[j](h)
-        h = u.merge[j](torch.cat([h, skips.pop()], dim=1))
-        h = u.down[u.n_levels + j](h, e)
-    return h
+    return u.body(h, e)
 
 
 class BurstNet(nn.Module):
