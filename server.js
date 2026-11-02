@@ -22,7 +22,7 @@ import { runDueDunning, tEmailDunning } from './src/dunning.js';
 import { sendEmail } from './src/email.js';
 
 // W922 — normalize provider-key env-var names at startup. Operators keep keys in
-// Vercel/Railway under varied casings (runpod_api_key, cerebras_api,
+// Vercel/AWS under varied casings (runpod_api_key, cerebras_api,
 // anthropic_api_key, Cloudflare_api_token, stripe_api_key, ...); the code reads
 // canonical UPPER_SNAKE names. Map them once so every provider (Stripe, RunPod,
 // Cerebras, Anthropic, Google, ...) is picked up regardless of the operator's
@@ -40,9 +40,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 app.disable('x-powered-by');
-// Two-hop proxy chain in prod: Client → Vercel CDN → Railway edge → Express.
+// Two-hop proxy chain in prod: Client → Vercel CDN → AWS ALB → Express.
 // `trust proxy: 2` makes express read X-Forwarded-For from the right hop so
-// the rate-limit keyGenerator sees the real client IP, not Railway's edge IP.
+// the rate-limit keyGenerator sees the real client IP, not the ALB's IP.
 app.set('trust proxy', isProductionRuntime() ? 2 : false);
 
 const cspConnectSrc = [
@@ -255,7 +255,7 @@ app.use(express.static(path.join(__dirname, 'public'), {
 app.use('/', buildRouter());
 
 // Generic extensionless static fallback — mirrors Vercel's "try public/<path>.html"
-// rewrite so self-host / Docker / Railway-direct serves the same routes the live
+// rewrite so self-host / Docker / ALB-direct serves the same routes the live
 // Vercel deploy does. Conservative: only GET, only extension-less paths, rejects
 // traversal (..). Resolves /<page> to public/<page>.html and /<dir> to
 // public/<dir>/index.html.
@@ -403,7 +403,7 @@ if (process.argv[1] && process.argv[1].endsWith('server.js')) {
     } catch { /* deliberate: cleanup */ }
     process.exit(1);
   });
-  // SIGTERM / SIGINT — Railway sends SIGTERM on deploys; honour it by closing
+  // SIGTERM / SIGINT — ECS sends SIGTERM on deploys; honour it by closing
   // the listening socket and exiting cleanly so we don't drop in-flight
   // requests on rolling restarts.
   const onSig = (sig) => () => {
@@ -518,7 +518,7 @@ if (process.argv[1] && process.argv[1].endsWith('server.js')) {
   globalThis.__kolmServer = httpServer;
 
   // Continuous re-attestation: in-process sweep so the product self-drives with
-  // no external scheduler. Railway runs a single long-lived web instance, and
+  // no external scheduler. Production runs a single long-lived API task, and
   // claim-then-run in asr-fulfillment makes a sweep idempotent even if one ever
   // overlaps. Runs every KOLM_REATTEST_INTERVAL_MIN (default 30), no-op when
   // nothing is due. Disable with KOLM_REATTEST_DISABLE=1. The external

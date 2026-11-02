@@ -35,7 +35,7 @@ function freshDir(prefix) {
   process.env.KOLM_ENV = 'test';
   process.env.KOLM_STORE_DRIVER = 'json';
   delete process.env.NODE_ENV;
-  delete process.env.RAILWAY_ENVIRONMENT;
+  delete process.env.AWS_EXECUTION_ENV;
   delete process.env.VERCEL;
   delete process.env.AWS_LAMBDA_FUNCTION_NAME;
   fs.mkdirSync(process.env.KOLM_DATA_DIR, { recursive: true });

@@ -1,6 +1,6 @@
 // Vercel serverless function for /v1/teacher/chat (POST relay) and
 // /v1/teacher/chat/health (GET status). Lives on Vercel rather than the
-// Railway router so it can read sensitive env vars (anthropic_api_key,
+// API router so it can read sensitive env vars (anthropic_api_key,
 // openai_key, google_api_key, xai_api_key) that exist only at the kolm.ai
 // Vercel runtime. The user wired the Trinity distill worker to fall back
 // to ${KOLM_BASE_URL}/v1/teacher/chat when the local env lacks teacher
@@ -13,6 +13,11 @@
 import crypto from 'node:crypto';
 
 export const TEACHER_CHAT_VERSION = 'w692-v1';
+
+// Origin of the kolm API (/v1/whoami) used to validate bearer keys. Set
+// KOLM_API_ORIGIN on Vercel; the fallback is the current production origin and
+// goes away at the AWS cutover (docs/operations/aws-migration.md, Phase 3).
+export const KOLM_API_ORIGIN = String(process.env.KOLM_API_ORIGIN || 'https://kolmogorov-stack-production.up.railway.app').replace(/\/+$/, '');
 
 export const TEACHER_CHAT_LIMITS = Object.freeze({
   AUTH_TIMEOUT_MS: 4000,
@@ -83,7 +88,7 @@ function firstEnv(envs) {
   return null;
 }
 
-// Bearer-token authn against the kolm Railway router. Caches good keys
+// Bearer-token authn against the kolm API router. Caches good keys
 // for 5 minutes per cold start so we don't burn a /v1/whoami round trip
 // on every teacher call.
 const _keyCache = new Map();
@@ -103,7 +108,7 @@ async function authenticate(req) {
   const cached = _keyCache.get(cacheKey);
   if (cached && cached.expires > Date.now()) return { ok: true, tenant: cached.tenant };
   try {
-    const r = await fetchWithTimeout('https://kolmogorov-stack-production.up.railway.app/v1/whoami', {
+    const r = await fetchWithTimeout(KOLM_API_ORIGIN + '/v1/whoami', {
       headers: { authorization: 'Bearer ' + bearer },
     }, TEACHER_CHAT_LIMITS.AUTH_TIMEOUT_MS);
     if (!r.ok) {
@@ -147,7 +152,7 @@ async function relayAnthropic({ key, model, system, messages, maxTokens }) {
   const j = await r.json();
   const block = (j.content || []).find(b => b && b.type === 'text');
   // Anthropic returns usage = {input_tokens, output_tokens}; preserve so the
-  // Railway gateway's cost_usd estimate is non-zero when the proxy is in
+  // The API gateway's cost_usd estimate is non-zero when the proxy is in
   // play. Without this the receipt would always show 0 tokens for the
   // Vercel-fallback path.
   return { ok: true, text: block ? block.text : '', usage: j.usage || {}, upstream_id: j.id || null };

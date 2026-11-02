@@ -265,7 +265,7 @@ test('atom2 - KOLM_STORE_DRIVER=vercel_postgres loads store.js and falls back to
       KOLM_DATA_DIR: dataDir,
       HOME: tmp, USERPROFILE: tmp,
       NODE_ENV: 'development',
-      VERCEL: '', RAILWAY_ENVIRONMENT: '', AWS_LAMBDA_FUNCTION_NAME: '',
+      VERCEL: '', AWS_EXECUTION_ENV: '', ECS_CONTAINER_METADATA_URI_V4: '', AWS_LAMBDA_FUNCTION_NAME: '',
     },
     encoding: 'utf8',
   });

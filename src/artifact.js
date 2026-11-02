@@ -176,7 +176,7 @@ function signSecret() {
   const secret = effectiveReceiptSecret({ includeLegacyArtifactSecret: true });
   if (secret) return secret;
   if (isProductionRuntime() && !warnedMissingSignSecret) {
-    console.error('[artifact] WARNING: RECIPE_RECEIPT_SECRET not set - /v1/compile will 503. Set it on Railway env.');
+    console.error('[artifact] WARNING: RECIPE_RECEIPT_SECRET not set - /v1/compile will 503. Set it in the API host env (SSM parameter).');
     warnedMissingSignSecret = true;
   }
   return null;

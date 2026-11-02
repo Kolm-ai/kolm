@@ -46,9 +46,14 @@ RUN mkdir -p /etc/kolm/keys /var/lib/kolm \
 
 COPY --from=builder --chown=node:node /app /app
 
+# Commit hash reported by /health and stamped into receipts (router.js
+# gitCommit). CI passes --build-arg GIT_COMMIT_SHA=$GITHUB_SHA; empty means
+# unknown at runtime.
+ARG GIT_COMMIT_SHA=""
 ENV NODE_ENV=production \
     PORT=8787 \
-    KOLM_DATA_DIR=/var/lib/kolm
+    KOLM_DATA_DIR=/var/lib/kolm \
+    GIT_COMMIT_SHA=$GIT_COMMIT_SHA
 
 # No USER directive: the entrypoint starts as root to chown the mounted data
 # volume, then drops to the unprivileged `node` user via su-exec before exec'ing

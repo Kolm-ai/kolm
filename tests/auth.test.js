@@ -9,7 +9,7 @@ test('admin fallback key is disabled in production-like hosts', async (t) => {
   const savedEnv = {
     ADMIN_KEY: process.env.ADMIN_KEY,
     NODE_ENV: process.env.NODE_ENV,
-    RAILWAY_ENVIRONMENT: process.env.RAILWAY_ENVIRONMENT,
+    AWS_EXECUTION_ENV: process.env.AWS_EXECUTION_ENV,
     VERCEL: process.env.VERCEL,
     AWS_LAMBDA_FUNCTION_NAME: process.env.AWS_LAMBDA_FUNCTION_NAME,
     KOLM_DATA_DIR: process.env.KOLM_DATA_DIR,
@@ -29,7 +29,7 @@ test('admin fallback key is disabled in production-like hosts', async (t) => {
   delete process.env.KOLM_ARTIFACT_DIR;
   delete process.env.ADMIN_KEY;
   delete process.env.NODE_ENV;
-  delete process.env.RAILWAY_ENVIRONMENT;
+  delete process.env.AWS_EXECUTION_ENV;
   delete process.env.VERCEL;
   delete process.env.AWS_LAMBDA_FUNCTION_NAME;
   delete process.env.RECIPE_RECEIPT_SECRET;
@@ -60,13 +60,13 @@ test('admin fallback key is disabled in production-like hosts', async (t) => {
   assert.equal(effectiveReceiptSecret(), DEV_RECEIPT_SECRET);
   assert.equal(runtimeReadiness().status, 'ready');
 
-  process.env.RAILWAY_ENVIRONMENT = 'production';
+  process.env.AWS_EXECUTION_ENV = 'AWS_ECS_FARGATE';
   assert.equal(isProductionRuntime(), true);
   assert.equal(adminApiKey(), null);
   assert.equal(effectiveReceiptSecret(), null);
   assert.equal(runtimeReadiness().status, 'not_ready');
 
-  delete process.env.RAILWAY_ENVIRONMENT;
+  delete process.env.AWS_EXECUTION_ENV;
   process.env.VERCEL = '1';
   assert.equal(isProductionRuntime(), true);
   assert.equal(adminApiKey(), null);

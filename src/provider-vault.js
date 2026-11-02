@@ -12,7 +12,7 @@
 //     guarantees (atomic upsert/cascade) hold in SQLite mode only; the JSON dev
 //     backend is a single-process file store with no real transaction boundary.
 //   - the AES-256-GCM key lives in the secrets-vault.key file (under
-//     KOLM_DATA_DIR - the Railway volume), reused from secrets-vault.js.
+//     KOLM_DATA_DIR - the EFS volume), reused from secrets-vault.js.
 //
 // Scopes:
 //   - 'member': usable only by the member who stored it (actor_id match).

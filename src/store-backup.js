@@ -1,6 +1,6 @@
 // Durable point-in-time backups for the kolm data layer.
 //
-// The production datastore is SQLite on a Railway persistent volume (see
+// The production datastore is SQLite on an EFS persistent volume (see
 // docs/durability.md for why that is the correct choice for this synchronous,
 // single-instance architecture). A persistent volume survives container
 // restarts, but does NOT protect against logical corruption, an accidental

@@ -127,11 +127,11 @@ export function modelFromBody(body, provider) {
 // --------------------------------------------------------------------------
 // Vercel teacher-chat fallback
 //
-// W-M wave / wrapper-completion. The Railway service that hosts /v1/* does
+// W-M wave / wrapper-completion. The AWS service that hosts /v1/* does
 // NOT see Vercel env vars - vendor API keys (ANTHROPIC_API_KEY, OPENAI_*,
 // GOOGLE_*, XAI_*) live on the kolm.ai Vercel deployment because that's where
 // /v1/teacher/chat already runs and accepts a kolm bearer. When the gateway
-// dispatch path lands on Railway and finds NO local provider key, it should
+// dispatch path lands on the API host and finds NO local provider key, it should
 // transparently proxy upstream calls through Vercel's /v1/teacher/chat
 // instead of returning no_upstream_key. The user's gateway request already
 // carries a valid kolm bearer; we re-use it as the proxy bearer.

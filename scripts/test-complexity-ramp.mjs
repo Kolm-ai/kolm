@@ -27,7 +27,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 delete process.env.NODE_ENV;
-delete process.env.RAILWAY_ENVIRONMENT;
+delete process.env.AWS_EXECUTION_ENV;
 delete process.env.VERCEL;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

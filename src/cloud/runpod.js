@@ -218,7 +218,7 @@ function _resolveApiKey(opts = {}) {
 }
 
 // When there is NO direct RunPod key in this process (the common case: the
-// operator keeps runpod_api_key in Vercel, which the Railway router + CLI can't
+// operator keeps runpod_api_key in Vercel, which the API router + CLI can't
 // see), fall back to the Vercel proxy (api/runpod.js) which DOES hold the key.
 // Requires a kolm bearer + base to authenticate to the proxy.
 function _resolveProxy(opts = {}) {

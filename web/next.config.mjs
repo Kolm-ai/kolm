@@ -284,15 +284,16 @@ const nextConfig = {
   poweredByHeader: false,
 
   // The live API surface (/v1/audit, /v1/verify, /health) is served by the
-  // existing backend (Railway today, see MEMORY). During the migration the
+  // existing backend (Railway today, AWS after the migration; see
+  // docs/operations/aws-migration.md). During the migration the
   // Next app proxies those paths to the same origin the static site uses, so
   // the browser verifier and the audit endpoints keep working without a code
   // change at cutover. Override the upstream with KOLM_API_ORIGIN at build/run
   // time; default is the production origin.
   async rewrites() {
-    // Proxy the API straight to the Railway backend - NOT to kolm.ai, which is
+    // Proxy the API straight to the backend origin - NOT to kolm.ai, which is
     // this very app after cutover (that would self-loop). Mirrors the static
-    // site's vercel.json which rewrites /v1/* to the Railway origin directly.
+    // site's vercel.json which rewrites /v1/* to the backend origin directly.
     const apiOrigin = process.env.KOLM_API_ORIGIN || "https://kolmogorov-stack-production.up.railway.app";
     return [
       { source: "/v1/:path*", destination: `${apiOrigin}/v1/:path*` },

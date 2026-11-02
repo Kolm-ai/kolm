@@ -285,7 +285,7 @@ export async function createAsrCheckout(opts = {}) {
   if (!envSecret('STRIPE_WEBHOOK_SECRET')) missing.push('STRIPE_WEBHOOK_SECRET');
   throw new BillingNotConfiguredError(
     missing,
-    `Cannot start checkout for ASR "${product}": not configured. Set in Railway/Vercel: ${missing.join(', ')}. ` +
+    `Cannot start checkout for ASR "${product}": not configured. Set in AWS/Vercel: ${missing.join(', ')}. ` +
     'Either a hosted Stripe Payment Link, or STRIPE_SECRET_KEY plus the price id.'
   );
 }

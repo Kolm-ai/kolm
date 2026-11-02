@@ -1,18 +1,22 @@
 // Vercel serverless function: /v1/runpod/graphql (POST proxy) + /v1/runpod/health (GET).
 //
 // Lives on Vercel — like api/teacher-chat.js — so it can read the runpod_api_key
-// that operators keep in the kolm.ai Vercel runtime. The Railway router and the
+// that operators keep in the kolm.ai Vercel runtime. The API router and the
 // CLI cannot see Vercel env vars, so the RunPod dispatch (src/cloud/runpod.js)
 // falls back to this proxy when it has no local RUNPOD_API_KEY. Net effect: an
 // operator who keeps their RunPod key in Vercel gets a working frontier->RunPod
-// path without duplicating the key onto Railway.
+// path without duplicating the key onto the API host.
 //
 // Vercel env is case-sensitive + operators add keys with mixed casing, so read
 // every reasonable form (same policy as teacher-chat).
 
 const RUNPOD_KEY_ALIASES = ['RUNPOD_API_KEY', 'runpod_api_key', 'KOLM_RUNPOD_TOKEN', 'runpod_token', 'RUNPOD_TOKEN'];
 const RUNPOD_GRAPHQL = 'https://api.runpod.io/graphql';
-const WHOAMI = 'https://kolmogorov-stack-production.up.railway.app/v1/whoami';
+// Origin of the kolm API used to validate bearer keys. Set KOLM_API_ORIGIN on
+// Vercel; the fallback is the current production origin and goes away at the
+// AWS cutover (docs/operations/aws-migration.md, Phase 3).
+const KOLM_API_ORIGIN = String(process.env.KOLM_API_ORIGIN || 'https://kolmogorov-stack-production.up.railway.app').replace(/\/+$/, '');
+const WHOAMI = KOLM_API_ORIGIN + '/v1/whoami';
 
 function firstEnv(envs) {
   for (const k of envs) {
