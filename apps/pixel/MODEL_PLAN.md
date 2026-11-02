@@ -1563,7 +1563,26 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
   - **At a share of 1, 27 of 48 dead-leaves draws took it** (56 %, the camera restores' share). Input minus target is noise about zero: median −0.1 % of the target's mean, sd 0.009 (`.tmp/denoise_cost.py`).
   - **No measurable cost:** 161, 151 and 166 ms per 256 px sample at shares 0, 0.5 and 1.
   - **Tests:** 412 passed, 3 skipped.
-- **Next: g_denoise.** The flags of the better of a_naf_s0 and f_sidd, plus `--p-denoise 0.5`, so half of the camera restores teach denoising alone. Its validation is its base's, so its loss compares too.
+- **The result of f_sidd (seed 0, blind; `.tmp/pair_table.md`, 11-03).** Shadow SNR in dB, the median of the restored tiles:
+
+| Run | SIDD PSNR | SIDD SSIM | raw.pixls.us | RawNIND | HDR+ | SI-HDR | Pooled IQM [90 %] against the control |
+|---|---:|---:|---:|---:|---:|---:|---|
+| a_naf_s0, control | 30.61 | 0.717 | 21.53 | 26.56 | 27.29 | 25.91 | |
+| f_sidd_s0 | 32.14 | 0.779 | 22.66 | 27.57 | 28.02 | 27.18 | −0.072 [−0.098, −0.058]: 9 worse, 5 better |
+| NAFNet | 40.21 | 0.924 | 29.79 | 34.24 | 35.47 | 21.77 | |
+
+  In known mode the shadows read 21.66 → 21.68 on raw.pixls.us, 29.21 → 30.74 on RawNIND, 27.50 → 27.63 on HDR+ and 25.74 → 25.84 on SI-HDR.
+- **How it reads: the real pairs gain, and the rendered held-out set moves only where the descriptor is withheld.**
+  - **SIDD rises 1.5 dB,** above naf's three-seed range (29.33 to 30.61), and SSIM 0.717 → 0.779. Its validation is not held-out content (section 20.11), and it is still 8.1 dB under NAFNet.
+  - **Real noise carries to other cameras' real pairs, texture held.** RawNIND's held-out shadows gain 1.0 dB blind (a better cell) and 1.5 known, with texture 0.283 → 0.291 known. HDR+ and SI-HDR gain 0.7 and 1.3 dB blind, inside their intervals.
+  - **On raw.pixls.us it follows the descriptor.**
+    - **Known:** shadows +0.02 dB, texture 0.565 → 0.548, MTF50 unchanged. The stated blur still sets the sharpening, as the probe found.
+    - **Blind:** shadows +1.12 dB (better) and texture 0.513 → 0.461 (worse), the trade the probe's blur edits made. The real draws' share is unchanged, but a fifth of them are now SIDD's, the noisiest real pairs, all stating no blur. A likely reading, not tested: a noisy input now looks more like a real pair to the blind model, so it assumes less blur.
+  - **Worse pooled, beyond one seed's noise.** 0.31 of cells improved. Two arms that tie on three seeds read −0.047 to +0.018 per seed (section 20.9).
+    - **Worse:** texture blind (−0.051); highlight loss blind and known (−0.010, −0.012); banding on raw.pixls.us blind and known, HDR+ blind, and the sub-pixel reads of HDR+ and RawNIND known (−0.002 to −0.005); RawNIND's sub-pixel periodicity blind (−0.031).
+    - **Better:** shadow SNR on raw.pixls.us and RawNIND blind; landmark error blind and known; edge overshoot known.
+  - **So SIDD does not join the default as it stands.** This is the middle case read in advance: the real sets gain, and raw.pixls.us in known mode does not move, so what the rendered pairs teach is the place to look. g_denoise runs on the control's flags.
+- **Next: g_denoise** (`.tmp/denoise_screen.sh`, from `.tmp/frozen_denoise` at a19df486; started 05:30 on 11-03). The control's flags, since f_sidd reads worse, plus `--p-denoise 0.5`, so half of the camera restores teach denoising alone. Its validation is the control's, so its loss compares too.
   - **raw.pixls.us's shadows rise with MTF50 and texture inside naf's seed spread:** the deblurring lesson was the cause, and the share is set next.
   - **The shadows rise and texture falls as it did under the probe's edits:** the trade is in the content, not the lesson's mix. The shadows' weight in the loss is the next lever.
   - **Nothing moves:** the image evidence the model sharpens on is not the rendered pairs' blur.

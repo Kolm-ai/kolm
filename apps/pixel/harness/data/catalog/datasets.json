@@ -2494,6 +2494,27 @@
    "report": "iqa-vqa-raw"
   },
   {
+   "id": "okeinla",
+   "name": "Okeinla",
+   "url": "https://huggingface.co/datasets/AyedaOk/okeinla-dataset",
+   "hf_id": "AyedaOk/okeinla-dataset",
+   "hf_config": "—",
+   "hf_split": "—",
+   "hf_rows_api_works": "no (ARW files, no viewer)",
+   "license": "CC BY-SA 4.0",
+   "size_gb": "43.73",
+   "n_items": "106 scenes: 761 noisy ARW at ISO 100-51200, 368 ISO-100 GT ARW (1-5 per scene)",
+   "n_annotations": "0",
+   "annotation_type": "ISO sweeps",
+   "artifact_coverage": [
+    "noise"
+   ],
+   "access": "direct-download",
+   "harness_use": "Candidate real-pair source (one Sony A7C II, tripod), not pulled. The card says every setting but ISO was held, so the ISO-100 GT may share the noisy shots' shutter time and photon count, and then it is no cleaner than the input; the ExposureTime tags of one scene's noisy and GT files decide it before any pull.",
+   "group": "D",
+   "report": "iqa-vqa-raw"
+  },
+  {
    "id": "renoir",
    "name": "RENOIR",
    "url": "(unreachable)",
