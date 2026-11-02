@@ -72,6 +72,7 @@ import numpy as np
 from ..scene import box_downsample
 from . import data_root, keeps_reserve, reserve_bytes
 from .collect import consumed_marker
+from .decodedstore import _lower_priority
 from .noise import FIT_HI, PlaneStats, cfa_split, frame_scales, outlier_frames, sidd_metadata
 
 SIDD = "sidd-dng"
@@ -760,25 +761,6 @@ def done(root: Path | None = None) -> dict[str, dict]:
     return out
 
 
-def _below_normal() -> None:
-    """Below-normal CPU priority, without decodedstore's background mode: a reduction reads its zip on the drive
-    the downloads write to, and background mode's very low I/O priority queues every read behind them (0018 took
-    over 15 minutes so, against about 3 at normal priority). The training run reads the other drive."""
-    try:
-        if os.name == "nt":
-            import ctypes
-            from ctypes import wintypes
-            k = ctypes.WinDLL("kernel32", use_last_error=True)
-            k.GetCurrentProcess.restype = wintypes.HANDLE
-            k.SetPriorityClass.argtypes = (wintypes.HANDLE, wintypes.DWORD)
-            k.SetPriorityClass.restype = wintypes.BOOL
-            k.SetPriorityClass(k.GetCurrentProcess(), 0x00004000)   # BELOW_NORMAL_PRIORITY_CLASS
-        else:
-            os.nice(10)
-    except Exception:  # noqa: BLE001 - priority is a courtesy, never a reason to fail
-        pass
-
-
 def reduce_all(root: Path | None = None, workers: int = 2, background: bool = True, delete_zips: bool = False,
                instances: list[str] | None = None, log=print) -> dict:
     """Every complete zip whose stack is not reduced yet, `workers` processes at once (below normal priority with
@@ -810,11 +792,11 @@ def reduce_all(root: Path | None = None, workers: int = 2, background: bool = Tr
 
     if workers <= 1 or len(tasks) <= 1:
         if background:
-            _below_normal()
+            _lower_priority()
         for n, t in enumerate(tasks, 1):
             take(n, *_task(t))
     else:
-        with mp.get_context("spawn").Pool(workers, initializer=_below_normal if background else None) as pool:
+        with mp.get_context("spawn").Pool(workers, initializer=_lower_priority if background else None) as pool:
             for n, r in enumerate(pool.imap_unordered(_task, tasks), 1):
                 take(n, *r)
             pool.close()

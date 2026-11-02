@@ -128,12 +128,15 @@ def write_decoded(p: Path, img: np.ndarray) -> bool:
 
 
 def _lower_priority() -> None:
-    """A fill that runs beside a training run yields the CPU, the disk and memory to it: on Windows the below-normal
-    class and then background mode (which also lowers I/O and memory priority), on POSIX nice 10. The handle and
-    its arguments are typed: ctypes' default int would truncate GetCurrentProcess's pseudo-handle (-1) to 32 bits,
-    and the call would fail without a word, as the target audit's first run beside v14a found (its workers stayed
-    at normal priority and cut the run's sampler from 57 to 17 images a second). Background mode reports the
-    normal class (GetPriorityClass 0x20) while it lowers every thread's priority, I/O and memory with it."""
+    """A fill that runs beside a training run yields the CPU to it: on Windows the below-normal class, on POSIX
+    nice 10. Not background mode, which lowers I/O and memory priority as well: under memory pressure it holds the
+    working set near 30 MB, so a worker whose arrays run to hundreds of MB faults on nearly every page (the sidd-dng
+    store's workers sat at 30 MB resident of 630 MB, about 950,000 faults a second each, and took 150 s a pair and
+    then far longer against 11.5 s alone), and its I/O queues behind any download on the same drive (a SIDD
+    reduction took over 15 minutes so, against about 3). The handle and its arguments are typed: ctypes' default
+    int would truncate GetCurrentProcess's pseudo-handle (-1) to 32 bits, and the call would fail without a word, as
+    the target audit's first run beside v14a found (its workers stayed at normal priority and cut the run's sampler
+    from 57 to 17 images a second)."""
     try:
         if os.name == "nt":
             import ctypes
@@ -142,9 +145,7 @@ def _lower_priority() -> None:
             k.GetCurrentProcess.restype = wintypes.HANDLE
             k.SetPriorityClass.argtypes = (wintypes.HANDLE, wintypes.DWORD)
             k.SetPriorityClass.restype = wintypes.BOOL
-            me = k.GetCurrentProcess()
-            k.SetPriorityClass(me, 0x00004000)   # BELOW_NORMAL_PRIORITY_CLASS
-            k.SetPriorityClass(me, 0x00100000)   # PROCESS_MODE_BACKGROUND_BEGIN
+            k.SetPriorityClass(k.GetCurrentProcess(), 0x00004000)   # BELOW_NORMAL_PRIORITY_CLASS
         else:
             os.nice(10)
     except Exception:  # noqa: BLE001 - priority is a courtesy, never a reason to fail
