@@ -324,7 +324,8 @@ class Collector:
     def _download(self, url: str, dst: Path) -> None:
         part = fs(dst.with_suffix(dst.suffix + ".part"))
         host = urlparse(url).netloc
-        for attempt in range(RETRIES):
+        attempt = 0                  # attempts that added no bytes: a multi-GB file over a link that drops every few
+        while True:                  # hundred MB keeps resuming while each try moves it on, and fails once it stalls
             have = os.stat(part).st_size if os.path.exists(part) else 0
             headers = {"Range": f"bytes={have}-"} if have else {}
             self._throttle.wait(host)
@@ -341,9 +342,11 @@ class Collector:
                             f.write(block)
                 break
             except (requests.RequestException, OSError) as ex:
-                if attempt == RETRIES - 1:
+                grew = os.path.exists(part) and os.stat(part).st_size > have
+                if not grew and attempt == RETRIES - 1:
                     raise
-                time.sleep(retry_delay(attempt, getattr(ex, "response", None)))
+                time.sleep(retry_delay(0 if grew else attempt, getattr(ex, "response", None)))
+                attempt = 0 if grew else attempt + 1
         os.replace(part, fs(dst))
 
     # ---- small helpers used by expanders -------------------------------------------

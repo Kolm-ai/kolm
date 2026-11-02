@@ -487,6 +487,55 @@ def test_listings_back_off_politely_and_honour_retry_after(tmp_path, monkeypatch
     assert len(sleeps) == C.LISTING_RETRIES - 1 and sleeps == sorted(sleeps) and max(sleeps) <= C.MAX_BACKOFF_S
 
 
+def test_a_download_whose_link_drops_keeps_resuming_while_it_moves_on_and_fails_once_it_stalls(tmp_path, monkeypatch):
+    import requests
+    from harness.data import collect as C
+
+    body = bytes(range(256)) * 40                                   # 10 KB, sent 1 KB per try before the link drops
+
+    class R:
+        def __init__(self, start, step):
+            self.status_code, self.headers, self.start, self.step = (206 if start else 200), {}, start, step
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, n):
+            yield body[self.start:self.start + self.step]
+            if self.start + self.step < len(body):
+                raise requests.exceptions.ChunkedEncodingError("Connection broken: IncompleteRead")
+
+    monkeypatch.setattr(C.time, "sleep", lambda s: None)
+    c = C.Collector(root=tmp_path, jobs=1, log=lambda *_: None)
+    c._throttle = C._HostThrottle(0.0, {})
+    ranges = []
+
+    def get(step):
+        def g(url, headers=None, **kw):
+            start = int(headers["Range"][6:-1]) if headers else 0
+            ranges.append(start)
+            return R(start, step)
+        return g
+
+    c._session.get = get(1024)
+    c._download("https://example.org/f.zip", tmp_path / "f.zip")    # ten drops, well over RETRIES, each one moving on
+    assert (tmp_path / "f.zip").read_bytes() == body and len(ranges) == 10 > C.RETRIES
+    assert ranges == list(range(0, len(body), 1024))
+
+    ranges.clear()
+    c._session.get = get(0)                                         # a link that sends nothing: RETRIES tries, then fail
+    (tmp_path / "g.zip.part").write_bytes(body[:100])
+    with pytest.raises(requests.exceptions.ChunkedEncodingError):
+        c._download("https://example.org/g.zip", tmp_path / "g.zip")
+    assert len(ranges) == C.RETRIES and set(ranges) == {100} and not (tmp_path / "g.zip").exists()
+
+
 def test_downloads_stop_at_the_free_space_floor_and_resume_after(tmp_path, monkeypatch):
     src = _local_source(tmp_path)
     monkeypatch.setenv("HARNESS_COLLECT_RESERVE_GB", "1e9")       # a floor no drive clears
