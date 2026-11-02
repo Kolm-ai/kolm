@@ -1586,3 +1586,54 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
   - **raw.pixls.us's shadows rise with MTF50 and texture inside naf's seed spread:** the deblurring lesson was the cause, and the share is set next.
   - **The shadows rise and texture falls as it did under the probe's edits:** the trade is in the content, not the lesson's mix. The shadows' weight in the loss is the next lever.
   - **Nothing moves:** the image evidence the model sharpens on is not the rendered pairs' blur.
+- **The result of g_denoise (seed 0, blind; `.tmp/pair_table.md`, 11-03 07:44).** 28,000 steps in 121 minutes, with 50.0 % of the camera restores on a denoise-only target. Validation loss 0.1869, against the control's 0.1853. Shadow SNR in dB, the median of the restored tiles:
+
+| Run | SIDD PSNR | SIDD SSIM | raw.pixls.us | RawNIND | HDR+ | SI-HDR | Pooled IQM [90 %] against the control |
+|---|---:|---:|---:|---:|---:|---:|---|
+| a_naf_s0, control | 30.61 | 0.717 | 21.53 | 26.56 | 27.29 | 25.91 | |
+| g_denoise_s0 | 30.89 | 0.737 | 23.84 | 26.52 | 26.52 | 26.04 | −0.107 [−0.144, −0.087]: 14 worse, 4 better |
+| NAFNet | 40.21 | 0.924 | 29.79 | 34.24 | 35.47 | 21.77 | |
+
+  In known mode the shadows read 21.66 → 23.08 on raw.pixls.us, 29.21 → 28.46 on RawNIND, 27.50 → 25.93 on HDR+ and 25.74 → 24.65 on SI-HDR.
+- **How it reads: the second case. The shadows rise and texture falls, at the probe's rate.**
+  - **raw.pixls.us:** shadows +2.30 dB blind and +1.41 known (better cells). Texture 0.513 → 0.431 blind and 0.565 → 0.515 known, and MTF50 0.346 → 0.327 blind (worse cells). That is about 28 dB per unit of texture in both modes; the probe's no-blur edit traded at about 26.
+  - **The real sets do not gain.** RawNIND ties blind (26.56 → 26.52); known, its shadows fall 0.75 dB as texture rises 0.283 → 0.338. HDR+ and SI-HDR lose 1.6 and 1.1 dB known (worse cells on SI-HDR and on HDR+'s sub-pixel read). Banding is worse on raw.pixls.us and on every HDR+ read (−0.005 to −0.006).
+  - **SIDD +0.3 dB,** inside naf's seed range.
+  - **So the denoise-only share stays 0.** The second case named the shadows' weight in the loss as the next lever. The frontier below says that weight would slide along the same trade, so it is not run.
+- **The frontier: the data screens slide along one trade; the loss and the length move the trade.**
+  - **What it reads.** The frontier gate fits a linear Wiener ladder per tile on the truth and reads its texture and MTF50 at the output's own shadow SNR. The output's texture minus the frontier's is the true detail a model keeps beyond the best linear filter at the same noise. texture_hf_fidelity projects the output's detail onto the truth's (`harness/data/tilemetrics.py:106`), so noise and invented detail add nothing to it.
+  - **raw.pixls.us, blind** (`heldout_blind/heldout.json`, `gates.frontier`):
+
+| Run | Steps | Recipe | Shadow SNR | Texture | MTF50 | Texture − frontier | MTF50 − frontier |
+|---|---:|---|---:|---:|---:|---:|---:|
+| *input* | | | 26.02 | 0.237 | 0.254 | | |
+| a_naf s0, s1, s2 (control) | 28,000 | naf, l1 | 21.23–21.53 | 0.492–0.529 | 0.346–0.355 | +0.151 to +0.183 | +0.045 to +0.051 |
+| f_sidd_s0 | 28,000 | control + SIDD | 22.66 | 0.461 | 0.341 | +0.152 | +0.053 |
+| g_denoise_s0 | 28,000 | control + p_denoise 0.5 | 23.84 | 0.431 | 0.327 | +0.161 | +0.057 |
+| e_sensor2x_s0 | 28,000 | control, sensor ×2 | 22.84 | 0.418 | 0.341 | +0.109 | +0.060 |
+| d_realonly_s0 | 28,000 | real pairs only | 28.73 | 0.210 | 0.242 | +0.063 | +0.047 |
+| p_l1 s0–s2 | 28,000 | v15's trunk, l1 | 22.68–23.96 | 0.373–0.413 | 0.318–0.324 | +0.103 to +0.131 | +0.039 to +0.053 |
+| p_ctrl s0–s2 | 28,000 | v15's trunk, v15's loss | 21.27–21.78 | 0.508–0.570 | 0.356–0.361 | +0.193 to +0.235 | +0.052 to +0.064 |
+| p_r0t0 s0–s2 | 28,000 | v15's trunk, r0t0 | 21.32–22.20 | 0.553–0.618 | 0.370–0.375 | +0.244 to +0.307 | +0.074 to +0.086 |
+| v15 | 45,625 | v15's | 22.92 | 0.468 | 0.345 | +0.175 | +0.066 |
+| v17 | 93,559 | v17's | 21.23 | 0.601 | 0.384 | +0.263 | +0.082 |
+| v18s0 | 272,000 | v15's | 19.55 | 0.991 | 0.500 | +0.547 | +0.145 |
+| *NAFNet* | | | 29.79 | 0.080 | 0.168 | −0.049 | −0.026 |
+| *Restormer* | | | 29.30 | 0.133 | 0.193 | −0.011 | −0.008 |
+| *SCUNet* | | | 27.53 | 0.154 | 0.209 | −0.021 | −0.009 |
+
+  - **The data screens keep the control's efficiency or lose some.** f_sidd and g_denoise stay inside the control's seed range while their shadows rise 1.1 and 2.3 dB; e_sensor2x and d_realonly fall under it. The verdict reads such a move as worse, because texture and MTF50 fail non-inferiority whatever the shadows gain.
+  - **The loss and the length raise it.** At about the control's shadows (21.2 to 22.2 dB), p_r0t0 keeps texture 0.553–0.618 and v17 0.601, against the control's 0.492–0.529. l1, the control's loss, is the probe's least efficient arm. 20.4 chose it for its shadows, a move along the trade, and gave up efficiency to make it. On v15's recipe, 45,625 → 272,000 steps took the margin from +0.175 to +0.547.
+  - **So two decisions read again.** 20.4's "plain fidelity wins" and 20.10's "more steps on it is not the way forward" were both read by the verdict, which cannot tell a move along the trade from a better trade.
+  - **But none of ours is a finished image.** Every run ends with noisier shadows than its input (26.02 dB), and the more efficient, the noisier: v18s0 is 6.5 dB under. NAFNet, Restormer and SCUNet end 1.5 to 3.8 dB over it and under the frontier: they smooth away true detail. Neither side keeps more than the frontier at shadows as clean as the input.
+  - **Caveats.**
+    - One seed for each v run; v15 → v18s0 also changed the data (UHD-IQA), the seed and the validation draw.
+    - Margins are compared near matched shadows, because the frontier's own texture falls as the shadows clean: 0.444 at 19.6 dB, 0.270 at 23.8, 0.147 at 28.7.
+    - On RawNIND known, v15 keeps +0.635 at 45,625 steps and v18s0 +0.678, against the control's +0.145 at 3.3 dB cleaner shadows. On SI-HDR blind every run is under the frontier, v18s0 the most (−0.126).
+- **Next: one operating point for every run, set at inference.**
+  - **How.** Every run conditions on a noise map from the stated noise law (`net.noise_map`), and on the same law through FiLM. Scaling the stated shot and read noise at inference (known mode) should move a model along its own trade without training.
+  - **What.** Sweep the scale for the control, p_r0t0, v17 and v18s0 on raw.pixls.us and RawNIND, then read texture and MTF50 at matched shadow SNR: at the input's (26 dB) and at NAFNet's (29.8). Evaluation only.
+  - **Read in advance:**
+    - **The efficient runs keep their lead at matched shadows:** the efficiency is real. The next long run is r0t0's loss at length, with the scale as the release's strength control.
+    - **Their lead closes as they are pushed clean:** the margin was noise and detail sharpened together, not a better trade, and the data and the loss are the levers again.
+    - **The scale does not move the shadows:** the models read their noise from the image, not the descriptor, so the operating point has to be trained.
