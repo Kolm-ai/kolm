@@ -763,15 +763,18 @@ def done(root: Path | None = None) -> dict[str, dict]:
 
 def reduce_all(root: Path | None = None, workers: int = 2, background: bool = True, delete_zips: bool = False,
                instances: list[str] | None = None, log=print) -> dict:
-    """Every complete zip whose stack is not reduced yet, `workers` processes at once (below normal priority with
-    `background`); with `delete_zips`, a zip whose burst pairs is deleted once its stack is written (one that does
-    not pair is kept, for a second look). Returns the tally."""
+    """Every complete zip whose stack is not reduced yet, the highest ISO first, `workers` processes at once (below
+    normal priority with `background`); with `delete_zips`, a zip whose burst pairs is deleted once its stack is
+    written (one that does not pair is kept, for a second look). Returns the tally. The order is the pairs' worth:
+    a noisy input teaches a denoiser most, and SIDD's instance numbers run low ISO first (its first 24 stacks, read
+    11-03, were all ISO 800 or less, 21 of them 200 or less), so a pass cut short has spent itself on the least."""
     root = Path(root or data_root())
     base = root / "raw" / SIDD
     meta = sidd_metadata(base / METADATA)
     have = done(root)
     todo = [p for p in zips(root) if ZIP_RE.match(p.name).group(1) not in have
             and (not instances or ZIP_RE.match(p.name).group(1) in instances)]
+    todo.sort(key=lambda p: -meta.get(ZIP_RE.match(p.name).group(1), {}).get("iso", 0))
     out_root = stack_root(root)
     log(f"{SIDD}: {len(have)} stack(s) reduced, {len(todo)} zip(s) to reduce with {workers} worker(s)")
     tasks = [(str(p), meta.get(ZIP_RE.match(p.name).group(1)), str(out_root), delete_zips) for p in todo]

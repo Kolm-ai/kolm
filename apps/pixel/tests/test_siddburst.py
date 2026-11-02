@@ -397,8 +397,8 @@ def test_reduce_all_skips_done_stacks_and_deletes_only_paired_zips(tmp_path, sma
         w = csv.writer(fh)
         w.writerow(["instance", "scene_name", "scene_number", "camera", "camera_full", "iso", "shutter",
                     "illuminant_temp", "brightness", "num_images", "zip_file", "zip_bytes"])
-        for inst, scene in (("0007", "003"), ("0008", "004")):
-            w.writerow([inst, f"{inst}_{scene}_GP_00800_00100_4400_N", scene, "GP", "Google Pixel", 800, "00100",
+        for inst, scene, iso in (("0007", "003", 800), ("0008", "004", 3200)):
+            w.writerow([inst, f"{inst}_{scene}_GP_{iso:05d}_00100_4400_N", scene, "GP", "Google Pixel", iso, "00100",
                         4400, "N", 20, f"{inst}_DNG.zip", 0])
     _zip(raw / "data/train/0007_DNG.zip", "0007", _frames(20))
     _zip(raw / "data/train/0008_DNG.zip", "0008", _rendered(DRIFT, seed=4))
@@ -406,6 +406,7 @@ def test_reduce_all_skips_done_stacks_and_deletes_only_paired_zips(tmp_path, sma
     logs = []
     tally = SB.reduce_all(tmp_path, workers=1, background=False, delete_zips=True, log=logs.append)
     assert tally["reduced"] == 2 and tally["pairs"] == 1 and tally["no_pairs"] == 1 and tally["failed"] == 0
+    assert "[1/2] 0008_s004" in logs[1] and "[2/2] 0007_s003" in logs[2]   # the higher ISO first
     assert not (raw / "data/train/0007_DNG.zip").exists() and (raw / "data/train/0008_DNG.zip").exists()
     marker = json.loads((raw / "data/train/0007_DNG.zip.consumed").read_text(encoding="utf-8"))
     assert marker["instance"] == "0007" and not (raw / "data/train/0008_DNG.zip.consumed").exists()
