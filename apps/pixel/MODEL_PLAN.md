@@ -1370,6 +1370,21 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
   - Both stay 8.7 to 9.6 dB under pretrained NAFNet on SIDD, and 3 to 8 dB under it on held-out shadow SNR. The exception is SI-HDR, where NAFNet's 21.77 is under both.
   - So NAFNet's network does not bring NAFNet's numbers. What is left is the data (SIDD's real noisy-clean pairs against our targets), the length (1/57 of its tiles) and the loss.
   - Seeds 1 and 2 settle res against naf, which matters for compute (naf is 0.30× per step). They will not move the reading above.
+- **Three seeds' result (11-02, 15:39).** Means over seeds 0, 1 and 2 (per seed in `.tmp/arch_table.md`):
+
+| | res | naf | NAFNet | Restormer |
+|---|---|---|---|---|
+| SIDD PSNR / SSIM | 31.38 / 0.7506 (31.52, 31.60, 31.01) | 30.01 / 0.6830 (30.61, 30.10, 29.33) | 40.21 / 0.9243 | 39.93 / 0.9215 |
+| Blind shadow SNR, dB: raw.pixls.us, RawNIND, HDR+, SI-HDR | 22.14, 25.83, 26.20, 22.85 | 21.43, 26.42, 26.82, 26.00 | 29.79, 34.24, 35.47, 21.77 | 29.30, 34.85, 33.78, 24.51 |
+| Known shadow SNR, dB: the same sets | 20.77, 28.35, 26.19, 23.66 | 21.53, 28.86, 27.16, 25.83 | | |
+
+  - **The verdict of naf against res on three seeds: no clear change.** IQM -0.010 [-0.053, +0.054], 0.46 of cells improved. 4 cells worse, 12 better, 31 undetermined, 123 non-inferior.
+    - Per seed: -0.047 (worse), +0.018 and +0.011 (no clear change).
+    - Worse on three seeds: blind edge overshoot (-0.019), and period-2 artefacts on RawNIND (banding blind and sub-pixel known, periodicity known).
+    - The plan's rule reads "drop": adoption needs the interval above zero and no cell worse.
+  - **The reading.** The network is not the lever. Pooled, naf ties res at 0.30× the multiply-adds; it is 1.4 dB under res on SIDD and 3.2 dB over it on SI-HDR's shadows.
+    - Both stay 7 to 9.3 dB under NAFNet and Restormer on held-out shadow SNR outside SI-HDR, and 8.5 to 10.2 dB under them on SIDD.
+    - res stays the default. naf stays as `--block naf`: the pair screen (20.10) runs on it, since it is the cheaper arm to train and its control a_naf_s0 is scored.
 
 ### 20.10 The pairs: what our training pairs teach about shadow noise (11-02)
 
@@ -1420,12 +1435,12 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
   - **The direction.** In every real set the target holds less fine shadow detail than the input (5 to 19 dB cleaner): the pair says "remove this grain". In every synthetic set it holds more (7 to 53 dB), because the camera's optics blurred it out of the input and the target is the sharp scene. That part is right: undoing the blur is the job.
   - **The consequence.** In the synthetic pairs, fine grain in the input's shadows is never noise, and fine grain missing from it is detail to restore. Real noise is fine grain. A model that learned the synthetic pairs keeps or sharpens it. Our outputs sitting under the input's shadow SNR on raw.pixls.us fit this, but do not prove it: that set's reference carries its own high-ISO grain.
 - **The screen: two runs, one change of pairs each** (`.tmp/pair_screen.sh`, from `.tmp/frozen_arch`). Each is NAFNet's arm at seed 0 with a_naf_s0's flags, and a_naf_s0 is the control.
-  - **p_nohdr:** `--real rawnind,si-hdr --p-real 0.5`. The real pairs without HDR+, which stays a synthetic clean source. RawNIND is 66 % and SI-HDR 34 % of the real draws (402 scenes).
-  - **p_realonly:** `--real rawnind,si-hdr --p-real 1.0`. Those real pairs only, no synthetic pairs.
+  - **d_nohdr:** `--real rawnind,si-hdr --p-real 0.5`. The real pairs without HDR+, which stays a synthetic clean source. RawNIND is 66 % and SI-HDR 34 % of the real draws (402 scenes).
+  - **d_realonly:** `--real rawnind,si-hdr --p-real 1.0`. Those real pairs only, no synthetic pairs.
   - The real validation set follows `--real`, so validation loss does not compare across the runs. The held-out sets, SIDD and the verdict do.
   - Each is about 2 h of training and 15 min of scoring. The table is `.tmp/pair_table.py`.
 - **How to read it.**
-  - **p_nohdr nearer NAFNet on shadow SNR, with MTF50 held:** finding 1 is a cause. HDR+ pairs need an input outside their merge: our own merge of the other frames (the burst store's), never the IPOL code.
-  - **p_realonly beyond p_nohdr:** the synthetic pairs hurt as rendered. The fix is to run the sensor and its demosaic at twice the tile's resolution and box-downsample, as the real pairs are made, with read noise scaled so that the fitted noise levels still hold at the tile.
+  - **d_nohdr nearer NAFNet on shadow SNR, with MTF50 held:** finding 1 is a cause. HDR+ pairs need an input outside their merge: our own merge of the other frames (the burst store's), never the IPOL code.
+  - **d_realonly beyond d_nohdr:** the synthetic pairs hurt as rendered. The fix is to run the sensor and its demosaic at twice the tile's resolution and box-downsample, as the real pairs are made, with read noise scaled so that the fitted noise levels still hold at the tile.
   - **Neither moves:** the pairs' noise is not the cause, and what is left is length (1/57 of NAFNet's tiles) and the loss.
-  - 402 scenes is few for p_realonly: a gain there that p_nohdr lacks may still be real, and a loss on the synthetic-only metrics (periodicity, colour, the gates' worlds) is expected.
+  - 402 scenes is few for d_realonly: a gain there that d_nohdr lacks may still be real, and a loss on the synthetic-only metrics (periodicity, colour, the gates' worlds) is expected.
