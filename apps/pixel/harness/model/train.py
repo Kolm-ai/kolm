@@ -271,7 +271,7 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
           lr_floor: float | None = None, target_audit: bool = False, overshoot_weight: float | None = None,
           pyramid_weight: float | None = None, resample: str = "learned", val_seed: int | None = None,
           schedule: str = "cosine", decay: int = 0, block: str = "res", dec_blocks: int | tuple | None = None,
-          beta2: float = 0.99, weight_decay: float = 0.01, log=print) -> dict:
+          beta2: float = 0.99, weight_decay: float = 0.01, p_denoise: float = 0.0, log=print) -> dict:
     """`real` names stored real-pair sources (data.realstore) drawn with probability `p_real` per sample; `weights`
     maps a clean source to its draw weight (1 unnamed), `real_weights` a real source to its scenes' (1 unnamed;
     the real validation draw stays unweighted); `range_weight`, `range_k`, `flat_weight`, `flat_k` and
@@ -293,7 +293,9 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
     scale, net.CondUNet; in its `config`). `schedule` and `decay` choose the rate's shape (lr_at; default the cosine
     every run to the eighteenth used). `block` and `dec_blocks` pick the network's block and the decoder's depth
     per level (net.CondUNet; "naf" is NAFNet's block; in its `config`), and `beta2` and `weight_decay` set AdamW's
-    (default 0.99 and 0.01, every run to the eighteenth; NAFNet trains at 0.9 and 0). `seed` draws the initial weights and the training stream;
+    (default 0.99 and 0.01, every run to the eighteenth; NAFNet trains at 0.9 and 0). `p_denoise` (default 0) is
+    the share of the stream's camera restores whose target is the input's capture without its noise, so the pair
+    teaches no sharpening (data._rendered; MODEL_PLAN 20.12). `seed` draws the initial weights and the training stream;
     `val_seed` (default `seed`) the calibration and validation draws, so the runs of a seed sweep fit one
     normaliser and choose best.pt on one validation set."""
     out = Path(out)
@@ -315,6 +317,9 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
     p_dead_leaves = float(p_dead_leaves)
     if not 0.0 <= p_dead_leaves <= 1.0:
         raise ValueError(f"p_dead_leaves is a probability, got {p_dead_leaves}")
+    p_denoise = float(p_denoise)
+    if not 0.0 <= p_denoise <= 1.0:
+        raise ValueError(f"p_denoise is a probability, got {p_denoise}")
     ssim_weight = SSIM_WEIGHT if ssim_weight is None else float(ssim_weight)
     if ssim_weight < 0:
         raise ValueError(f"MS-SSIM term wants weight >= 0, got {ssim_weight}")
@@ -349,7 +354,7 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
                 noise_map=bool(noise_map), compile=bool(compile_model), warmup=warmup,
                 lr_floor=lr_floor, target_audit=bool(target_audit), resample=resample, schedule=schedule,
                 decay=decay, block=block, dec_blocks=dec_blocks if dec_blocks is None or isinstance(dec_blocks, int)
-                else list(dec_blocks), beta2=beta2, weight_decay=weight_decay, **loss_kw)
+                else list(dec_blocks), beta2=beta2, weight_decay=weight_decay, p_denoise=p_denoise, **loss_kw)
     last = out / "last.pt"
     ck = torch.load(last, map_location="cpu", weights_only=False) if last.exists() else None
     quiet = (lambda *a, **k: None)
@@ -376,6 +381,8 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
         log(f"sensor scale {sensor_scale}: rendered pairs' sensor and demosaic at {sensor_scale}x the tile, then a box")
     if p_dead_leaves > 0:
         log(f"dead leaves: {p_dead_leaves:.1%} of the rendered pairs on procedural tiles")
+    if p_denoise > 0:
+        log(f"denoise-only targets: {p_denoise:.1%} of the stream's camera restores (input's optics and mosaic kept)")
     val_real = None
     if real and p_real > 0:
         from ..data.realstore import RealStore
@@ -407,7 +414,8 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
         log("decoded store: loader workers read clean images from derived/decoded and store the ones they decode")
     stream = PairStream(list(sources), tile, norm, seed + step, real=real, p_real=p_real, weights=weights or None,
                         p_dead_leaves=p_dead_leaves, decoded_store=decoded_store, audit=target_audit,
-                        subpix_real=subpix_real, sensor=sensor_scale, real_weights=real_weights or None)
+                        subpix_real=subpix_real, sensor=sensor_scale, real_weights=real_weights or None,
+                        p_denoise=p_denoise)
     loader = DataLoader(StreamDataset(stream), batch_size=batch,
                         num_workers=workers, pin_memory=dev.type == "cuda", persistent_workers=workers > 0,
                         prefetch_factor=4 if workers > 0 else None, multiprocessing_context=loader_context(workers))

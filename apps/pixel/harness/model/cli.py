@@ -53,7 +53,7 @@ def cmd_train(args) -> int:
           lr_floor=args.lr_floor, target_audit=args.target_audit, overshoot_weight=args.overshoot_weight,
           pyramid_weight=args.pyramid_weight, resample=args.resample, schedule=args.schedule, decay=args.decay,
           block=args.block, dec_blocks=parse_blocks(args.dec_blocks) if args.dec_blocks else None, beta2=args.beta2,
-          weight_decay=args.weight_decay)
+          weight_decay=args.weight_decay, p_denoise=args.p_denoise)
     return 0
 
 
@@ -245,6 +245,10 @@ def add_parser(sub) -> None:
     t.add_argument("--sensor-scale", type=int, choices=(1, 2), default=1,
                    help="2: the rendered pairs' sensor and demosaic run at twice the tile's resolution, then a 2x "
                         "box, as the real pairs are decoded; same noise level, finer grain (camera.simulate_frame)")
+    t.add_argument("--p-denoise", type=float, default=0.0,
+                   help="share of the training stream's camera restores whose target is the input's capture without "
+                        "its noise (same optics and mosaic), conditioned as a real pair: pairs that teach denoising "
+                        "and no sharpening (data._rendered; default 0, off)")
     t.add_argument("--noise-map", action="store_true",
                    help="one more input channel: the capture's noise law per pixel (net.noise_map)")
     t.add_argument("--compile", action="store_true", help="torch.compile the training forward")

@@ -113,3 +113,15 @@ def test_sensor_scale_2_keeps_row_noise_and_the_clip():
     assert hot.max() == pytest.approx(1.0 / c.white_fill, rel=0.01)   # the well clips at the same radiance
     with pytest.raises(ValueError):
         simulate_frame(_flat(0.5), c.replace(sensor_scale=3), 1, np.random.default_rng(0))
+
+
+@pytest.mark.parametrize("scale", [1, 2])
+def test_a_noiseless_frame_is_the_sensors_mean_and_keeps_the_clip(scale):
+    c = _cam(bayer=True, read_noise_e=5.0, row_noise_e=20.0, bit_depth=10, sensor_scale=scale)
+    flat = _flat(0.3, 128, 128)
+    quiet = [simulate_frame(flat, c.replace(noiseless=True), 1, np.random.default_rng(k)) for k in (0, 1)]
+    assert np.array_equal(quiet[0], quiet[1]) and np.allclose(quiet[0], float(flat[0, 0, 0]), rtol=0, atol=1e-9)
+    noisy = simulate_frame(flat, c, 1, np.random.default_rng(0))[8:-8, 8:-8]
+    assert noisy.std() > 1e-3 and noisy.mean() == pytest.approx(0.3, rel=0.01)   # zero-mean noise about it
+    hot = simulate_frame(_flat(2.0), c.replace(noiseless=True), 1, np.random.default_rng(0))
+    assert np.allclose(hot, 1.0 / c.white_fill)   # the well clips where the noisy sensor's does

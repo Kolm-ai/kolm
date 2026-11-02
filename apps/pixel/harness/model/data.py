@@ -79,6 +79,19 @@ def restore_target(a: DegradeParams) -> DegradeParams:
     return DegradeParams(**{k: getattr(a, k) for k in GLOBAL_FIELDS})
 
 
+LOCAL_ISP_FIELDS = ("unsharp_gain", "unsharp_sigma_px", "posterise_bits", "jpeg_quality")
+
+
+def denoise_target(a: DegradeParams) -> DegradeParams:
+    """A's capture as the denoise-only target renders it (degrade's noiseless): A's camera (chromatic shift, optics,
+    mosaic and demosaic), its lens shading moved to the scene as render_pair moves the input's, and A's ISP with its
+    local stages (LOCAL_ISP_FIELDS) off. Input and target share the optics and the mosaic, as a real pair's do, so
+    the pair teaches the noise's removal and no sharpening (MODEL_PLAN 20.12)."""
+    off = DegradeParams()
+    return DegradeParams(**{**a.to_dict(), **{k: getattr(off, k) for k in LOCAL_ISP_FIELDS},
+                            "shading_corner_stops": 0.0, "shading_corrected": 1})
+
+
 def draw_state(rng: np.random.Generator, dists: Distributions, profile: str = "iqa") -> DegradeParams:
     p = sample_params(rng, dists, profile)
     for _ in range(MAX_REDRAWS):
@@ -362,25 +375,37 @@ def cond_vector(norm: Normaliser, s: dict, known: bool = True) -> np.ndarray:
 
 
 def make_sample(src: TileSource, dists: Distributions, rng: np.random.Generator, ss: int = 1,
-                sensor: int = 1) -> dict:
+                sensor: int = 1, p_denoise: float = 0.0) -> dict:
     """One rendered pair with its bookkeeping; the conditioning is the raw metric dict."""
     tile, it, y0, x0 = src.random_tile(rng)
-    return _rendered(tile, it, y0, x0, dists, rng, ss, sensor)
+    return _rendered(tile, it, y0, x0, dists, rng, ss, sensor, p_denoise)
 
 
 def dead_leaves_sample(tile: int, dists: Distributions, rng: np.random.Generator, ss: int = 1,
-                       sensor: int = 1) -> dict:
+                       sensor: int = 1, p_denoise: float = 0.0) -> dict:
     """One rendered pair on a procedural colour dead-leaves tile (deadleaves.py): its item is (DEAD_LEAVES, seed),
     the seed reproducing the tile."""
     seed = int(rng.integers(1 << 62))
     clean = dead_leaves(np.random.default_rng(seed), tile)
-    return _rendered(clean, Item(DEAD_LEAVES, str(seed)), 0, 0, dists, rng, ss, sensor)
+    return _rendered(clean, Item(DEAD_LEAVES, str(seed)), 0, 0, dists, rng, ss, sensor, p_denoise)
 
 
 def _rendered(tile: np.ndarray, it: Item, y0: int, x0: int, dists: Distributions, rng: np.random.Generator,
-              ss: int, sensor: int = 1) -> dict:
+              ss: int, sensor: int = 1, p_denoise: float = 0.0) -> dict:
+    """A drawn pair rendered. With `p_denoise` a camera restore's target is, with that probability, A's capture
+    without its noise (denoise_target): conditioned as a real pair is, on the target's own metrics and a capture
+    descriptor that states no blur (the rng is drawn for it only when `p_denoise` > 0)."""
     a, b, restore = draw_pair(rng, dists)
     sa, sb = int(rng.integers(1 << 62)), int(rng.integers(1 << 62))
+    if p_denoise > 0 and restore and a.camera_on and rng.random() < p_denoise:
+        b = denoise_target(a)
+        xa = degrade(tile, a, sa, ss, it.is_hdr, sensor=sensor)
+        xb = degrade(tile, b, sb, ss, it.is_hdr, scene_gain=input_shading(a, tile.shape[0], tile.shape[1]),
+                     sensor=sensor, noiseless=True)
+        cap = capture_of_params(a)
+        cap[0] = cap[1] = 0.0   # airy and residual blur: the target keeps the input's optics
+        return {"x": xa, "y": xb, "metrics": tile_metrics(xb, xb), "restore": True, "capture": cap, "denoise": True,
+                "a": a, "b": b, "item": it, "y0": y0, "x0": x0, "seed_a": sa, "seed_b": sb}
     xa, xb, m = render_pair(tile, a, b, sa, sb, it.is_hdr, ss, sensor)
     return {"x": xa, "y": xb, "metrics": m, "restore": restore, "a": a, "b": b, "item": it, "y0": y0, "x0": x0,
             "seed_a": sa, "seed_b": sb}
@@ -435,21 +460,25 @@ class PairStream:
     real pair (train's --shift-real searches its registration); `audit` draws the clean items the target audit
     keeps (TileSource); `subpix_real` reads each real pair's reference at its sub-pixel residual (RealStore);
     `sensor` is the rendered pairs' sensor scale (degrade); `real_weights` each real source's scenes' draw weight
-    (RealStore)."""
+    (RealStore); `p_denoise` the share of camera restores whose target is the input's capture without its noise
+    (_rendered; the validation and calibration draws keep it off)."""
     def __init__(self, sources: list[str], tile: int, normaliser: Normaliser, seed: int, root: Path | None = None,
                  ss: int = 1, real: tuple[str, ...] = (), p_real: float = 0.0, weights: dict[str, float] | None = None,
                  p_dead_leaves: float = 0.0, decoded_store: bool = True, audit: bool = False,
-                 subpix_real: bool = False, sensor: int = 1, real_weights: dict[str, float] | None = None):
+                 subpix_real: bool = False, sensor: int = 1, real_weights: dict[str, float] | None = None,
+                 p_denoise: float = 0.0):
         self.audit, self.subpix_real, self.sensor = bool(audit), bool(subpix_real), int(sensor)
         self.sources, self.tile, self.norm, self.seed, self.root, self.ss = sources, tile, normaliser, seed, root, ss
         self.decoded_store = bool(decoded_store)
         self.real, self.p_real, self.weights = tuple(real), float(p_real), weights
         self.real_weights = real_weights
-        self.p_dead_leaves = float(p_dead_leaves)
+        self.p_dead_leaves, self.p_denoise = float(p_dead_leaves), float(p_denoise)
         if self.p_real and not self.real:
             raise ValueError("p_real > 0 needs real sources")
         if not 0.0 <= self.p_dead_leaves <= 1.0:
             raise ValueError(f"p_dead_leaves is a probability, got {p_dead_leaves}")
+        if not 0.0 <= self.p_denoise <= 1.0:
+            raise ValueError(f"p_denoise is a probability, got {p_denoise}")
 
     def __iter__(self):
         import torch
@@ -469,9 +498,9 @@ class PairStream:
             if store is not None and rng.random() < self.p_real:
                 s = real_sample(store, rng)
             elif self.p_dead_leaves > 0 and rng.random() < self.p_dead_leaves:
-                s = dead_leaves_sample(self.tile, dists, rng, self.ss, self.sensor)
+                s = dead_leaves_sample(self.tile, dists, rng, self.ss, self.sensor, self.p_denoise)
             else:
-                s = make_sample(src, dists, rng, self.ss, self.sensor)
+                s = make_sample(src, dists, rng, self.ss, self.sensor, self.p_denoise)
             x = torch.from_numpy(encode(s["x"])).permute(2, 0, 1).contiguous()
             y = torch.from_numpy(encode(s["y"])).permute(2, 0, 1).contiguous()
             c = torch.from_numpy(cond_vector(self.norm, s, rng.random() < P_CAPTURE_KNOWN))

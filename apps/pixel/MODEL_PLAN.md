@@ -1503,3 +1503,67 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
   - **So fine grain in the synthetic pairs' noise is not what unteaches the shadows.** The candidate left, not tested, is the optics: the target is the sharp scene and the input is blurred by the camera, so the pairs teach sharpening, and sharpening a shadow amplifies its grain. A real pair's input and target share their optics, and d_realonly's shadows came from such pairs only.
   - **Sensor scale stays 1.** The rule reads "drop": worse pooled, with texture cells worse. The IQM's interval lies wholly under zero; its point, −0.036, sits just above it, the percentile bootstrap's bias on cells that tie at zero (section 20.9), and the reading rests on the interval.
 - **Next: the real pairs' share.** The lever d_realonly showed is real noise against a clean target in the same optics, and the synthetic pairs are needed for texture and colour. SIDD's stacks add five phones' noise (the reduction runs the highest ISO first: by 01:20 on 11-03, all 10 bursts it had reduced at ISO 1,600 to 10,000 paired with all 24 inputs, where 8 of the first 24 at ISO 50 to 800 did not pair). The next run adds `sidd-dng` with `--real-weights` set so SIDD is about a fifth of the real draws, sensor scale 1, against a_naf_s0.
+
+### 20.12 SIDD in training, and what the rendered pairs teach (11-03)
+
+- **SIDD's store.**
+  - **The reduction.** All 115 of SIDD Medium's training instances were reduced, in two passes, the highest ISO first. 103 pair and 12 do not:
+    - **Six were too few still frames:** fewer than 8 lay within 0.25 px of one frame.
+    - **In the other six the pair gate kept fewer than 8 of 24 inputs:** something in the burst moved.
+  - **What was stored** (`python -m harness data realstore --sources sidd-dng`): 2,042 training pairs in 91 instances and 262 validation pairs in 12, 46.3 GB. One input was rejected (0172_s008, its quadrants 2 px apart).
+  - **These are the noisiest real pairs held:** electrons at clip run from 34 to 3,872, median 665, against 2,906 for the real store as a whole.
+- **Its share.** `--real-weights sidd-dng=9.849` makes SIDD's 91 instances a fifth of the real draws. Training draws hdr-plus-burst 71 %, sidd-dng 20 %, rawnind 6 % and si-hdr 3 % of 7,856 pairs in 3,676 scenes.
+- **The screen: f_sidd** (`.tmp/sidd_screen.sh`, from `.tmp/frozen_sidd` at 97b92b64). One change from a_naf_s0, the control: sidd-dng joins `--real` at that weight. NAFNet's arm, seed 0, 28,000 steps. The real validation draw now holds SIDD's instances, so its loss does not compare with the control's.
+- **How to read it.**
+  - **SIDD PSNR will rise, and that alone decides nothing.** NAFNet trained on SIDD Medium too, but SIDD's validation blocks come from the same 10 scenes as its training instances (section 20.11).
+  - **raw.pixls.us's shadows rise with texture held:** real noise against a clean target is the lever, and more real pairs are the data to get.
+  - **SIDD rises and raw.pixls.us does not move:** five phones' noise does not carry to raw.pixls.us's cameras. What the rendered pairs teach (below) is the place to look.
+- **While it trained: what the control does with its capture descriptor.**
+  - **The probe** (`.tmp/blur_probe.py`, CPU): a_naf_s0 in known mode restored raw.pixls.us's held-out set with its descriptor edited one way per arm.
+  - **What training states:** rendered pairs always state some blur (Airy/2 at least 0.047, residual/4 at least 0.007), and only real pairs state none.
+  - **Each cell** is the median over the 64 tiles; shadow SNR is in dB.
+
+| Descriptor | Shadow SNR | texture_hf_fidelity | MTF50 | Edge overshoot |
+|---|---:|---:|---:|---:|
+| as rendered (best_case_earth) | 21.66 | 0.565 | 0.362 | 0.022 |
+| shot and read noise ×2 | 21.64 | 0.558 | 0.360 | 0.023 |
+| no mosaic | 21.64 | 0.479 | 0.343 | 0.026 |
+| the least blur training states | 22.89 | 0.520 | 0.355 | 0.002 |
+| no blur | 23.32 | 0.502 | 0.351 | 0 |
+| no blur, no mosaic | 23.64 | 0.441 | 0.335 | 0 |
+| input | 26.02 | 0.237 | 0.254 | 0 |
+
+  On RawNIND's held-out real pairs, with their measured descriptor:
+
+| Descriptor | Shadow SNR | texture_hf_fidelity |
+|---|---:|---:|
+| as measured | 29.21 | 0.283 |
+| raw.pixls.us's stated blur | 28.85 | 0.250 |
+| noise ×2 | 30.52 | 0.239 |
+| noise ×½ | 27.73 | 0.323 |
+| blind (section 20.10) | 26.56 | |
+
+- **How it reads.**
+  - **The stated blur sets how hard the model sharpens, and the shadows' grain follows it.**
+    - **From the blur as rendered to none:** the shadows gain 1.7 dB, the overshoot goes to zero, and texture falls from 0.565 to 0.502.
+    - **The response is smooth, not a switch:** the least blur training ever states already gives 1.2 dB of the 1.7.
+  - **The descriptor is not most of it.** With no blur and no mosaic stated, the output's shadows (23.64) are still 2.4 dB grainier than the input's (26.02). The rest of the sharpening is read from the image, and every rendered camera input the model has seen was blurred against a sharp target.
+  - **The noise fields act only where they were learned.**
+    - **On RawNIND's real pairs they set how hard the model denoises:** +1.3 dB at ×2 and −1.5 dB at ×½, with texture moving the other way.
+    - **On rendered raw.pixls.us they do nothing** (−0.02 dB).
+  - **So the rendered camera pairs teach deblurring and denoising in one lesson, and the deblurring amplifies the shadows' grain.** This is the candidate section 20.11 named. Real pairs teach denoising without it, and d_realonly's shadows came from them alone.
+- **The denoise-only pairs (`--p-denoise`, default 0).** For a share of the stream's camera restores, the target is the input's own capture without its noise:
+  - **Capture:** the same chromatic shift, optics, mosaic and demosaic. `CaptureConstraints.noiseless` keeps the well's clip and draws no shot, read or row noise and no ADC.
+  - **Shading:** the input's lens shading is carried as part of the scene (`input_shading`), as `render_pair` does.
+  - **ISP:** the input's rendering intent is kept (`GLOBAL_FIELDS`), and its local stages are dropped: unsharp mask, posterisation and JPEG.
+  - **Conditioning:** as a real pair is, on the target's own tile metrics and a descriptor that states no blur, with the noise law kept.
+  - **Scope:** only the training stream; validation and calibration are unchanged.
+- **Checks.**
+  - **At a share of 0 the stream is bit-identical to 97b92b64.** A SHA-256 over 40 dead-leaves samples at sensor scale 1 and 2, plus two camera degrades, is the same on both trees (`.tmp/stream_digest.py`).
+  - **At a share of 1, 27 of 48 dead-leaves draws took it** (56 %, the camera restores' share). Input minus target is noise about zero: median −0.1 % of the target's mean, sd 0.009 (`.tmp/denoise_cost.py`).
+  - **No measurable cost:** 161, 151 and 166 ms per 256 px sample at shares 0, 0.5 and 1.
+  - **Tests:** 412 passed, 3 skipped.
+- **Next: g_denoise.** The flags of the better of a_naf_s0 and f_sidd, plus `--p-denoise 0.5`, so half of the camera restores teach denoising alone. Its validation is its base's, so its loss compares too.
+  - **raw.pixls.us's shadows rise with MTF50 and texture inside naf's seed spread:** the deblurring lesson was the cause, and the share is set next.
+  - **The shadows rise and texture falls as it did under the probe's edits:** the trade is in the content, not the lesson's mix. The shadows' weight in the loss is the next lever.
+  - **Nothing moves:** the image evidence the model sharpens on is not the rendered pairs' blur.

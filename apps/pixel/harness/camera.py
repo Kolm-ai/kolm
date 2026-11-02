@@ -58,6 +58,7 @@ class CaptureConstraints:
     black_pedestal_e: float | None = None  # ADC offset so the read-noise floor is not clipped at 0; None = 8 x read noise
     row_noise_e: float = 0.0  # sigma of a per-row offset shared along the row (horizontal streaks), electrons
     sensor_scale: int = 1  # sensor pixels per output pixel along each axis, 1 or 2 (simulate_frame, SENSOR_VAR_RATIO)
+    noiseless: bool = False  # the sensor's mean: the well clips the photo-electrons, no shot, read or row noise, no ADC
 
     @property
     def f_number(self) -> float:
@@ -181,7 +182,10 @@ def demosaic_bilinear(plane: np.ndarray, cfa: np.ndarray) -> np.ndarray:
 def _sensor(electrons: np.ndarray, c: CaptureConstraints, rng: np.random.Generator) -> np.ndarray:
     """Photo-electrons -> what the ISP sees, in electrons. The well clips the photo-electrons; readout adds read
     noise and row noise; a black pedestal keeps the noise floor above the ADC's zero (a real sensor's black level,
-    subtracted again at the end); the ADC clips at full well + pedestal and quantises to bit_depth."""
+    subtracted again at the end); the ADC clips at full well + pedestal and quantises to bit_depth. `noiseless`
+    keeps the well's clip alone (the rng is not drawn)."""
+    if c.noiseless:
+        return np.minimum(np.clip(electrons, 0, None).astype(np.float64), c.full_well_e)
     e = np.minimum(rng.poisson(np.clip(electrons, 0, None)).astype(np.float64), c.full_well_e)
     if c.read_noise_e > 0:
         e += rng.normal(0.0, c.read_noise_e, size=e.shape)
