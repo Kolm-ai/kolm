@@ -1488,3 +1488,18 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
   - **Shadow SNR on raw.pixls.us rises toward d_realonly's (28.73) with texture, MTF50 and colour held:** the synthetic pairs' grain was the cause. Sensor scale 2 goes into every run after, and SIDD's pairs are added to it.
   - **It rises with texture lost:** the coarse grain was hiding detail the synthetic pairs taught. Read the per-metric table before deciding.
   - **It does not move:** the grain is not what the synthetic pairs unteach. What is left is how few real pairs there are against synthetic ones, and SIDD's pairs are the next step either way.
+- **The result (seed 0, blind; `.tmp/pair_table.md`, 11-03).** Shadow SNR in dB, the median of the restored tiles:
+
+| Run | SIDD PSNR | SIDD SSIM | raw.pixls.us | RawNIND | HDR+ | SI-HDR | Pooled IQM [90 %] against the control |
+|---|---:|---:|---:|---:|---:|---:|---|
+| a_naf_s0, control | 30.61 | 0.717 | 21.53 | 26.56 | 27.29 | 25.91 | |
+| e_sensor2x_s0 | 30.17 | 0.685 | 22.84 | 26.59 | 27.36 | 26.20 | −0.036 [−0.077, −0.040]: 10 worse, 6 better |
+| d_realonly_s0 | 27.53 | 0.565 | 28.73 | 32.23 | 30.96 | 28.28 | −0.203 [−0.250, −0.156] |
+| NAFNet | 40.21 | 0.924 | 29.79 | 34.24 | 35.47 | 21.77 | |
+
+- **How it reads: the grain was a small part of it.**
+  - **raw.pixls.us's shadows rise 1.3 dB**, about four times naf's seed spread there (21.23 to 21.53 over three seeds), but under a fifth of the way to d_realonly's 28.73. The real sets do not move (+0.03 to +0.3 dB).
+  - **Texture pays for it:** texture_hf_fidelity −0.095 blind and −0.137 known, MTF50 −0.017 known, ΔE max −0.54 blind and −0.38 known in the gates' worlds. SIDD's −0.44 dB is inside naf's seed spread (29.33 to 30.61).
+  - **So fine grain in the synthetic pairs' noise is not what unteaches the shadows.** The candidate left, not tested, is the optics: the target is the sharp scene and the input is blurred by the camera, so the pairs teach sharpening, and sharpening a shadow amplifies its grain. A real pair's input and target share their optics, and d_realonly's shadows came from such pairs only.
+  - **Sensor scale stays 1.** The rule reads "drop": worse pooled, with texture cells worse. The IQM's interval lies wholly under zero; its point, −0.036, sits just above it, the percentile bootstrap's bias on cells that tie at zero (section 20.9), and the reading rests on the interval.
+- **Next: the real pairs' share.** The lever d_realonly showed is real noise against a clean target in the same optics, and the synthetic pairs are needed for texture and colour. SIDD's stacks add five phones' noise (the reduction runs the highest ISO first: by 01:20 on 11-03, all 10 bursts it had reduced at ISO 1,600 to 10,000 paired with all 24 inputs, where 8 of the first 24 at ISO 50 to 800 did not pair). The next run adds `sidd-dng` with `--real-weights` set so SIDD is about a fifth of the real draws, sensor scale 1, against a_naf_s0.
