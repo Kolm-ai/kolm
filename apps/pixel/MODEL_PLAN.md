@@ -1464,7 +1464,9 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
 
 - **What was pulled, under the four approved pulls.**
   - **SIDD's raw bursts:** the Hugging Face mirror MhdMohammadi/SIDD-CC-DNG (MIT), the 115 instances of SIDD Medium's training list, one zip of about 150 DNGs each (2 to 4 GB, 235 GB in all). A zip is reduced to a stack and deleted (`siddburst.py`), so the drive holds only what trains: about 0.4 GB per stack. The mirror's hashed validation and test instances stay held out.
-  - **RELLISUR** (Zenodo 5234969, CC BY 4.0, 8.9 GB): 850 scenes of five under-exposed shots and a normal-light reference, from a tripod. Not a training source until its pairs are read: whether they are raw or sRGB, and how well they register.
+  - **RELLISUR** (Zenodo 5234969, 8.9 GB): 850 scenes of five under-exposed shots and a normal-light reference, from a tripod. **Not a training source.**
+    - **Its terms:** the archive's own LICENSE.txt is CC BY-NC-SA, non-commercial only, though the Zenodo record's metadata says CC BY 4.0. The stricter terms are followed.
+    - **Its pairs:** 8-bit sRGB PNGs, the inputs 2.5 to 4.5 EV under and already downsampled to 625 px. Our model's inputs are raw frames. At most it is an evaluation set for 8-bit sRGB low-light input, which the card says no held-out set measures yet.
   - **RawNIND** is complete. **SNIC** is dropped: its noisy frames are synthetic (section 6).
   - **HDR+'s other frames are not pulled further.** The 45 GB pulled for our own merge was more than its use needed: d_nohdr (section 20.10) showed HDR+'s target noise is not what holds the shadows back. The full bursts are about 298 GB and would need their own approval.
 - **SIDD's bursts are not still, so a frame average is not a clean target as it lies.** On 0001, 0012 and 0017 the frames drift a few tenths of a pixel over the burst, a slow zoom as much as a shift, and now and then the tripod is knocked several pixels. The 105 stacks the first reducer made (no registration) had inputs 0.1 to 1.4 px off their mean; they are set aside (`raw/sidd-dng/stacks_old_1102`) and every zip is reduced again.

@@ -1894,15 +1894,15 @@
    "kind": "dataset",
    "access": "api",
    "url": "https://zenodo.org/records/5234969",
-   "license": "CC BY 4.0 (the Zenodo record's licence, read 2026-11-02)",
+   "license": "CC BY-NC-SA (the archive's own LICENSE.txt: non-commercial use only, share-alike; the Zenodo record's metadata says CC BY 4.0, and the stricter terms are followed; read 2026-11-02)",
    "size_bytes": 8857000000.0,
    "gives": "850 scenes, each five under-exposed low-light shots and a normal-light reference at three resolutions (Aakerberg, Nasrollahi and Moeslund, NeurIPS 2021 Datasets and Benchmarks); RELLISUR.zip, 8.9 GB",
-   "harness_use": "real low-light/normal-light pairs from one tripod; read before use (sRGB or raw, registration, licence of each part)",
+   "harness_use": "none in training (MODEL_PLAN 20.11): its terms are non-commercial, and its pairs are 8-bit sRGB PNGs, the low-light inputs 2.5 to 4.5 EV under and already downsampled to 625 px, where the model's inputs are raw frames. Kept for evaluation of 8-bit sRGB low-light input at most",
    "expander": "zenodo_record",
    "params": {
     "record": 5234969
    },
-   "notes": "Zenodo record 5234969, one archive (RELLISUR.zip) with its md5. raw/rellisur is a junction to C:/lens-harness-data/raw/rellisur. Not a training source until its pairs are read and checked."
+   "notes": "Zenodo record 5234969, one archive (RELLISUR.zip) with its md5. raw/rellisur is a junction to C:/lens-harness-data/raw/rellisur. Read 2026-11-02 without extracting: 3,611 train, 216 val and 426 test low-light PNGs (five exposures a scene, named <scene>-<EV>.png), the references at X1 625 px, X2 and X4; it also carries a create_nlhr_duplicates.py, never run."
   },
   {
    "id": "hf-mit-adobe-5k",
