@@ -38,8 +38,8 @@ import numpy as np
 from . import data_root, keeps_reserve, reserve_bytes
 from .decodedstore import _lower_priority
 from .label import file_filter
-from .realpairs import (CLIP, MAX_TILE_CLIPPED, STACK_SOURCES, TILE_DRAWS, Pair, capture_of, decode_raw, match_of,
-                        pair_scale, pairs_of, subpix_residual)
+from .realpairs import (CLIP, MAX_TILE_CLIPPED, STACK_SOURCES, TILE_DRAWS, Pair, capture_of, decode_raw, decoder_of,
+                        match_of, pair_scale, pairs_of, subpix_residual)
 from .subpix import residual_of, shifted_window
 
 STORE_DIR = "realstore"   # <data_root>/derived/realstore/<source>/<scene key>/{ref.npy, <pair key>.npy, <pair key>.json}
@@ -113,6 +113,7 @@ def write_scene(source: str, ref_file: str, pairs: list[Pair], scale: int, root:
     the stack's (noise), and the residual the integer shift leaves (subpix). Returns the metas written, rejected
     ones included; raises StoreFull, before the scene's
     decode or before an array's write, when the drive is at the store's floor (the pairs not written have no JSON)."""
+    decode = decoder_of(source, decode)
     base = Path(root) / "raw" / source
     d = scene_dir(source, pairs[0].scene, root)
     stack = source in STACK_SOURCES
@@ -368,9 +369,10 @@ class RealStore:
     whose reference is unclipped, as realpairs._draw_tiles accepts them. A pair whose reference the source's
     `clean.exclude` now names is left out, so a store built before the pattern needs no rebuild. With `subpix` a
     tile's reference is read at its pair's trusted residual on top of the integer shift (tile_at); a pair without
-    one (not measured, or not trusted) is read at its integer shift."""
+    one (not measured, or not trusted) is read at its integer shift. `weights` maps a source to its scenes' draw
+    weight (1 for a source not named): every scene has the same draw mass without it."""
     def __init__(self, sources: list[str], split: str = "train", root: Path | None = None, tile: int = 256,
-                 subpix: bool = False):
+                 subpix: bool = False, weights: dict[str, float] | None = None):
         self.root, self.split, self.tile, self.subpix = Path(root or data_root()), split, tile, bool(subpix)
         self.pairs: list[StoredPair] = []
         for s in sources:
@@ -396,7 +398,25 @@ class RealStore:
             by.setdefault((p.meta["source"], p.meta["scene"]), []).append(k)
         self._scene_pairs = list(by.values())
         self.scenes = len(self._scene_pairs)
+        self._cdf = self._scene_cdf(sources, weights)
         self._open: OrderedDict[Path, np.ndarray] = OrderedDict()
+
+    def _scene_cdf(self, sources: list[str], weights: dict[str, float] | None) -> np.ndarray | None:
+        """The scenes' cumulative draw mass under `weights`, or None when every scene has the same (the draw is
+        then rng.integers, as without weights)."""
+        if not weights:
+            return None
+        if set(weights) - set(sources):
+            raise ValueError(f"real-pair weights for {sorted(set(weights) - set(sources))}, not among {sources}")
+        w = np.array([float(weights.get(self.pairs[ks[0]].meta["source"], 1.0)) for ks in self._scene_pairs])
+        if (w < 0).any() or w.sum() <= 0:
+            raise ValueError(f"real-pair weights are non-negative and not all zero, got {weights}")
+        return None if (w == w[0]).all() else np.cumsum(w / w.sum())
+
+    def _scene(self, rng: np.random.Generator) -> int:
+        if self._cdf is None:
+            return int(rng.integers(len(self._scene_pairs)))
+        return min(int(np.searchsorted(self._cdf, rng.random(), side="right")), len(self._cdf) - 1)
 
     def __len__(self) -> int:
         return len(self.pairs)
@@ -445,12 +465,12 @@ class RealStore:
         return x, t, clipped
 
     def random_tile(self, rng: np.random.Generator, tile: int | None = None) -> dict:
-        """A tile of a random pair of a random scene (every scene has the same draw mass, its captures share it),
-        TILE_DRAWS positions tried per pair and PAIR_TRIES pairs, the first whose reference is clipped on at most
-        MAX_TILE_CLIPPED of its pixels."""
+        """A tile of a random pair of a random scene (every scene of a source has the same draw mass, its source's
+        weight, and its captures share it), TILE_DRAWS positions tried per pair and PAIR_TRIES pairs, the first whose
+        reference is clipped on at most MAX_TILE_CLIPPED of its pixels."""
         tile = tile or self.tile
         for _ in range(PAIR_TRIES):
-            ks = self._scene_pairs[int(rng.integers(len(self._scene_pairs)))]
+            ks = self._scene_pairs[self._scene(rng)]
             k = ks[int(rng.integers(len(ks)))]
             ylo, yhi, xlo, xhi = self.bounds(k, tile)
             if yhi < ylo or xhi < xlo:
@@ -464,12 +484,13 @@ class RealStore:
         raise ValueError(f"no tile with an unclipped reference in {PAIR_TRIES} pairs of {len(self.pairs)}")
 
     def shares(self) -> dict[str, float]:
-        """The draw mass per source: its share of the scenes."""
-        by: dict[str, int] = {}
-        for ks in self._scene_pairs:
+        """The draw mass per source: its share of the scenes, each scene's mass its source's weight."""
+        mass = np.ones(self.scenes) if self._cdf is None else np.diff(self._cdf, prepend=0.0)
+        by: dict[str, float] = {}
+        for ks, m in zip(self._scene_pairs, mass):
             s = self.pairs[ks[0]].meta["source"]
-            by[s] = by.get(s, 0) + 1
-        return {s: n / len(self._scene_pairs) for s, n in sorted(by.items())}
+            by[s] = by.get(s, 0.0) + float(m)
+        return {s: n / float(mass.sum()) for s, n in sorted(by.items())}
 
     def summary(self) -> str:
         by = {}

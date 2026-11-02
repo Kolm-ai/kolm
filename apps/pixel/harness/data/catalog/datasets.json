@@ -2608,14 +2608,14 @@
    "hf_rows_api_works": "untested",
    "license": "MIT",
    "size_gb": "473.36",
-   "n_items": "6602 images, 30 scenes x 4 sensors, ISO 100-12800",
-   "n_annotations": "calibration code shipped",
-   "annotation_type": "ISO series + calibration",
+   "n_items": "over 6,000 images: 30 scenes (15 indoor, 15 outdoor) x 4 sensors (iPhone 11 Pro main and tele, Sony RX100 IV, Sony A7R III)",
+   "n_annotations": "calibration and synthesis code shipped (github.com/nikbhatt-cu/SNIC)",
+   "annotation_type": "low-ISO clean frame + SYNTHETIC noisy ISO series (calibrated heteroscedastic noise models), RAW and TIFF",
    "artifact_coverage": [
     "noise"
    ],
    "access": "direct-download (Dataverse)",
-   "harness_use": "MIT-licensed multi-sensor ISO sweeps with calibration code: best open set for fitting shot+read vs ISO.",
+   "harness_use": "Not real noise and not averaged ground truth: the noisy frames are synthesized (Synthesized Noisy Images using Calibration, arXiv 2512.15905). Of use: the calibration method as a reference for our noise model, and 30 low-ISO clean raws per sensor; 473 GB of noise we can synthesize ourselves is not worth a pull.",
    "group": "D",
    "report": "iqa-vqa-raw"
   },

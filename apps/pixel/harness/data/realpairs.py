@@ -2,7 +2,7 @@
 
 The sampler's pairs are synthetic: a clean tile degraded by the camera model. A real pair is two captures of
 one scene by one camera, an exposure whose noise the model should remove (the input) and a reference whose
-own noise sits well below it (a long low-ISO exposure, or a merge of a burst). Three sources on disk give them:
+own noise sits well below it (a long low-ISO exposure, or a merge of a burst). Four sources on disk give them:
 
 - RawNIND (rawnind): per scene one or two low-ISO "GT" raws and an ISO sweep of noisy raws, on a tripod, one
   framing. The first GT on disk is the reference; the other GT and every noisy raw are inputs.
@@ -14,6 +14,9 @@ own noise sits well below it (a long low-ISO exposure, or a merge of a burst). T
   exposure (stack_reference): weighted by their noise, each left out where it is clipped or disagrees with the
   input beyond its noise (a ghost), the input itself never in it. The stack's noise law is measured on the
   frames against each other, so the input's is its own and not the pair's (decode_stack).
+- SIDD (sidd-dng): per instance a tripod burst of 150 raws at one setting, reduced by siddburst to INPUTS frames
+  kept as inputs and the per-pixel mean of the rest as their reference (stacks/<instance>_s<scene>/mean.npy). Its
+  frames and means decode through siddburst.decode_sidd at the DNGs' own levels (decoder_of).
 
 Both frames go through LibRaw as the labeller decodes raws (camera white balance, linear, no brightening) and the
 source's clean scale (box_downsample). Then: the integer shift between them from phase correlation of their
@@ -68,7 +71,8 @@ from .tilemetrics import tile_metrics
 RAWNIND = "rawnind"
 HDRPLUS = "hdr-plus-burst"
 SIHDR = "si-hdr"
-SOURCES = (RAWNIND, HDRPLUS, SIHDR)
+SIDD = "sidd-dng"
+SOURCES = (RAWNIND, HDRPLUS, SIHDR, SIDD)
 STACK_SOURCES = (SIHDR,)         # a pair's reference is a merge of the input's stack (decode_stack), not a file
 REALPAIR_DIR = "realpairs"       # <data_root>/derived/realpairs/<source>/s<seed>_n<n>_t<tile>_k<scale>.npz
 DEFAULT_SPLITS = ("val", "test")
@@ -341,7 +345,19 @@ def pairs_of(source: str, root: Path | None = None, log=None) -> list[Pair]:
         return hdrplus_pairs(root, log)
     if source == SIHDR:
         return sihdr_pairs(root, log)
+    if source == SIDD:
+        from .siddburst import sidd_pairs
+        return sidd_pairs(root, log)
     raise ValueError(f"no real pairs for {source!r}: one of {SOURCES}")
+
+
+def decoder_of(source: str, decode=None):
+    """The decoder a source's pairs go through: SIDD's own (siddburst.decode_sidd: its means are arrays, and its
+    DNGs need explicit levels) where the caller asks for the default, else the caller's (decode_raw by default)."""
+    if (decode is None or decode is decode_raw) and source == SIDD:
+        from .siddburst import decode_sidd
+        return decode_sidd
+    return decode or decode_raw
 
 
 # ---- decoding, alignment, gain, noise law ------------------------------------------------------------------------
@@ -789,7 +805,9 @@ def match_of(p: Pair, base: Path, scale: int, decode=decode_raw,
     noise too, in m["noise_pair"]) and what the merge used in m["stack"]; any other source's is the reference raw,
     decoded here unless `ref` gives it, with the input brought to its frame (input_fits; of several ways, the one
     that aligns with the higher correlation; how, in m["fit"], when it was cut or turned, and the input returned
-    so). Raises when the pair is not one (no fit of the shapes, not aligned)."""
+    so). Raises when the pair is not one (no fit of the shapes, not aligned). The default decoder is the
+    source's own (decoder_of)."""
+    decode = decoder_of(p.source, decode)
     if p.source in STACK_SOURCES:
         k = int(p.meta["frame"])
         st = decode_stack(base, p.ref_file, p.meta["frames"], scale, decode, p.meta.get("exposures_s"))

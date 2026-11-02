@@ -145,7 +145,7 @@ def input_shading(a: DegradeParams, h: int, w: int) -> np.ndarray | None:
 
 
 def render_pair(tile: np.ndarray, a: DegradeParams, b: DegradeParams, seed_a: int, seed_b: int,
-                is_hdr: bool, ss: int = 1) -> tuple[np.ndarray, np.ndarray, dict]:
+                is_hdr: bool, ss: int = 1, sensor: int = 1) -> tuple[np.ndarray, np.ndarray, dict]:
     """(A tile, B tile, B's metric vector against the clean tile in B's rendering intent), all linear. Lens shading is
     treated as scene: the target carries A's uncorrected shading unchanged (a tile cannot tell shading from
     scene lighting, and real pipelines correct it from calibration tables, not by inference), and B's own
@@ -153,12 +153,13 @@ def render_pair(tile: np.ndarray, a: DegradeParams, b: DegradeParams, seed_a: in
     scene lighting, ahead of B's camera and ISP, where the input had it: multiplying it in after the ISP (runs
     four to seven) left a third of the restore targets up to 2.5x darker than their inputs at mid-tones whenever
     the tone affine was on, since the sRGB affine does not commute with a multiply (DEGRADATION_PLAN section 7).
-    The label reports the shading."""
-    xa = degrade(tile, a, seed_a, ss, is_hdr)
+    The label reports the shading. `sensor` is the camera's sensor scale for all three renders (degrade)."""
+    xa = degrade(tile, a, seed_a, ss, is_hdr, sensor=sensor)
     b_render = b if b.shading_corrected else DegradeParams(**{**b.to_dict(), "shading_corrected": 1})
     shade = input_shading(a, tile.shape[0], tile.shape[1])
-    xb = degrade(tile, b_render, seed_b, ss, is_hdr, scene_gain=shade)
-    ref = xb if shade is None and b == restore_target(b) else degrade(tile, restore_target(b), seed_b, ss, is_hdr)
+    xb = degrade(tile, b_render, seed_b, ss, is_hdr, scene_gain=shade, sensor=sensor)
+    ref = xb if shade is None and b == restore_target(b) else degrade(tile, restore_target(b), seed_b, ss, is_hdr,
+                                                                      sensor=sensor)
     return xa, xb, tile_metrics(xb, ref)
 
 
@@ -360,38 +361,40 @@ def cond_vector(norm: Normaliser, s: dict, known: bool = True) -> np.ndarray:
     return np.concatenate([norm(s["metrics"]), cap]).astype(np.float32)
 
 
-def make_sample(src: TileSource, dists: Distributions, rng: np.random.Generator, ss: int = 1) -> dict:
+def make_sample(src: TileSource, dists: Distributions, rng: np.random.Generator, ss: int = 1,
+                sensor: int = 1) -> dict:
     """One rendered pair with its bookkeeping; the conditioning is the raw metric dict."""
     tile, it, y0, x0 = src.random_tile(rng)
-    return _rendered(tile, it, y0, x0, dists, rng, ss)
+    return _rendered(tile, it, y0, x0, dists, rng, ss, sensor)
 
 
-def dead_leaves_sample(tile: int, dists: Distributions, rng: np.random.Generator, ss: int = 1) -> dict:
+def dead_leaves_sample(tile: int, dists: Distributions, rng: np.random.Generator, ss: int = 1,
+                       sensor: int = 1) -> dict:
     """One rendered pair on a procedural colour dead-leaves tile (deadleaves.py): its item is (DEAD_LEAVES, seed),
     the seed reproducing the tile."""
     seed = int(rng.integers(1 << 62))
     clean = dead_leaves(np.random.default_rng(seed), tile)
-    return _rendered(clean, Item(DEAD_LEAVES, str(seed)), 0, 0, dists, rng, ss)
+    return _rendered(clean, Item(DEAD_LEAVES, str(seed)), 0, 0, dists, rng, ss, sensor)
 
 
 def _rendered(tile: np.ndarray, it: Item, y0: int, x0: int, dists: Distributions, rng: np.random.Generator,
-              ss: int) -> dict:
+              ss: int, sensor: int = 1) -> dict:
     a, b, restore = draw_pair(rng, dists)
     sa, sb = int(rng.integers(1 << 62)), int(rng.integers(1 << 62))
-    xa, xb, m = render_pair(tile, a, b, sa, sb, it.is_hdr, ss)
+    xa, xb, m = render_pair(tile, a, b, sa, sb, it.is_hdr, ss, sensor)
     return {"x": xa, "y": xb, "metrics": m, "restore": restore, "a": a, "b": b, "item": it, "y0": y0, "x0": x0,
             "seed_a": sa, "seed_b": sb}
 
 
 def fixed_set(sources: list[str], split: str, n: int, tile: int, seed: int, root: Path | None = None,
-              ss: int = 1, log=print, audit: bool = False) -> list[dict]:
+              ss: int = 1, log=print, audit: bool = False, sensor: int = 1) -> list[dict]:
     """n reproducible samples (seeded by split, n, tile and seed): the validation set and the calibration draw. With
-    `audit` the clean items are the target audit's (TileSource)."""
+    `audit` the clean items are the target audit's (TileSource); `sensor` as PairStream's."""
     src, dists = TileSource(sources, split, tile, root, audit=audit), Distributions.load(root)
     rng = np.random.default_rng(_h("fixed", split, n, tile, seed))
     out = []
     for i in range(n):
-        out.append(make_sample(src, dists, rng, ss))
+        out.append(make_sample(src, dists, rng, ss, sensor))
         if log and (i + 1) % 32 == 0:
             log(f"  fixed set {split}: {i + 1}/{n}")
     return out
@@ -430,15 +433,18 @@ class PairStream:
     stored real pairs of `real` (data.realstore); of the rendered pairs a share `p_dead_leaves` is drawn on a
     procedural colour dead-leaves tile (deadleaves.py) in place of a source tile. `real` says the sample is a stored
     real pair (train's --shift-real searches its registration); `audit` draws the clean items the target audit
-    keeps (TileSource); `subpix_real` reads each real pair's reference at its sub-pixel residual (RealStore)."""
+    keeps (TileSource); `subpix_real` reads each real pair's reference at its sub-pixel residual (RealStore);
+    `sensor` is the rendered pairs' sensor scale (degrade); `real_weights` each real source's scenes' draw weight
+    (RealStore)."""
     def __init__(self, sources: list[str], tile: int, normaliser: Normaliser, seed: int, root: Path | None = None,
                  ss: int = 1, real: tuple[str, ...] = (), p_real: float = 0.0, weights: dict[str, float] | None = None,
                  p_dead_leaves: float = 0.0, decoded_store: bool = True, audit: bool = False,
-                 subpix_real: bool = False):
-        self.audit, self.subpix_real = bool(audit), bool(subpix_real)
+                 subpix_real: bool = False, sensor: int = 1, real_weights: dict[str, float] | None = None):
+        self.audit, self.subpix_real, self.sensor = bool(audit), bool(subpix_real), int(sensor)
         self.sources, self.tile, self.norm, self.seed, self.root, self.ss = sources, tile, normaliser, seed, root, ss
         self.decoded_store = bool(decoded_store)
         self.real, self.p_real, self.weights = tuple(real), float(p_real), weights
+        self.real_weights = real_weights
         self.p_dead_leaves = float(p_dead_leaves)
         if self.p_real and not self.real:
             raise ValueError("p_real > 0 needs real sources")
@@ -455,16 +461,17 @@ class PairStream:
         store = None
         if self.real and self.p_real > 0:
             from ..data.realstore import RealStore
-            store = RealStore(list(self.real), "train", self.root, self.tile, subpix=self.subpix_real)
+            store = RealStore(list(self.real), "train", self.root, self.tile, subpix=self.subpix_real,
+                              weights=self.real_weights)
         dists = Distributions.load(self.root)
         rng = np.random.default_rng(_h("stream", self.seed, wid))
         while True:
             if store is not None and rng.random() < self.p_real:
                 s = real_sample(store, rng)
             elif self.p_dead_leaves > 0 and rng.random() < self.p_dead_leaves:
-                s = dead_leaves_sample(self.tile, dists, rng, self.ss)
+                s = dead_leaves_sample(self.tile, dists, rng, self.ss, self.sensor)
             else:
-                s = make_sample(src, dists, rng, self.ss)
+                s = make_sample(src, dists, rng, self.ss, self.sensor)
             x = torch.from_numpy(encode(s["x"])).permute(2, 0, 1).contiguous()
             y = torch.from_numpy(encode(s["y"])).permute(2, 0, 1).contiguous()
             c = torch.from_numpy(cond_vector(self.norm, s, rng.random() < P_CAPTURE_KNOWN))

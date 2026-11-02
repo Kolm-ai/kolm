@@ -2,7 +2,7 @@
 sources' weights and keeps them through a drop; cond_vector carries a measured capture or withholds it; PairStream at
 p_real 1 yields stored real pairs in the log domain with the capture known or withheld; the real validation set is
 seeded; a two-step run on the fake store logs the real validation and saves the real-pair and dead-leaves arguments;
-and the train CLI parses --real, --p-real, --weights, the loss weights and --p-dead-leaves."""
+and the train CLI parses --real, --p-real, --weights, --real-weights, the loss weights and --p-dead-leaves."""
 from __future__ import annotations
 
 import argparse
@@ -126,7 +126,8 @@ def test_train_two_steps_on_real_pairs_logs_the_real_validation_and_saves_the_ar
     out = tmp_path / "m"
     log = []
     v = train(str(out), ["tiny"], steps=2, batch=2, tile=32, workers=0, base=8, val_n=4, calib_n=8, ckpt_every=1,
-              device="cpu", real=("fake",), p_real=0.5, weights={"tiny": 2.0}, p_dead_leaves=0.5, log=log.append)
+              device="cpu", real=("fake",), p_real=0.5, weights={"tiny": 2.0}, real_weights={"fake": 2.0},
+              p_dead_leaves=0.5, log=log.append)
     assert np.isfinite(v["val_loss"]) and v["step"] == 2
     assert any(s.startswith("draw shares by source: tiny 100.0%") for s in log)
     assert any("real pairs drawn with probability 0.50: real store, split train: 1 pairs in 1 scenes (fake 1 drawn 100%)" in s for s in log)
@@ -142,7 +143,7 @@ def test_train_two_steps_on_real_pairs_logs_the_real_validation_and_saves_the_ar
     assert ck["train"]["sources"] == ["tiny"] and ck["step"] in (1, 2)
     assert ck["train"]["range_weight"] == 1.0 and ck["train"]["range_k"] == 3
     assert ck["train"]["flat_weight"] == 0.0 and ck["train"]["flat_k"] == 7 and ck["train"]["texture_weight"] == 0.0
-    assert ck["train"]["p_dead_leaves"] == 0.5
+    assert ck["train"]["p_dead_leaves"] == 0.5 and ck["train"]["real_weights"] == {"fake": 2.0}
 
 
 def test_train_cli_parses_real_pairs_and_weights():
@@ -150,7 +151,7 @@ def test_train_cli_parses_real_pairs_and_weights():
     ap = argparse.ArgumentParser()
     add_parser(ap.add_subparsers())
     a = ap.parse_args(["model", "train", "--out", "x", "--real", "rawnind,hdr-plus-burst", "--p-real", "0.5",
-                       "--weights", "rawnind=4,hdr-plus-burst=4"])
+                       "--weights", "rawnind=4,hdr-plus-burst=4", "--real-weights", "sidd-dng=4"])
     assert a.func is cmd_train and a.real == "rawnind,hdr-plus-burst" and a.p_real == 0.5
     assert a.range_weight is None and a.range_k is None and a.flat_weight is None and a.flat_k is None
     assert a.texture_weight is None
@@ -159,6 +160,7 @@ def test_train_cli_parses_real_pairs_and_weights():
     assert c.range_weight == 3.0 and c.range_k == 5 and c.flat_weight == 0.5 and c.flat_k == 9
     assert c.texture_weight == 0.7 and c.p_dead_leaves == 0.25 and a.p_dead_leaves == 0.0
     assert parse_weights(a.weights) == {"rawnind": 4.0, "hdr-plus-burst": 4.0}
+    assert parse_weights(a.real_weights) == {"sidd-dng": 4.0}
     assert a.overshoot_weight is None and a.pyramid_weight is None and a.resample == "learned"
     d = ap.parse_args(["model", "train", "--out", "x", "--overshoot-weight", "1.5", "--pyramid-weight", "0.5",
                        "--resample", "smooth"])
@@ -167,6 +169,7 @@ def test_train_cli_parses_real_pairs_and_weights():
         ap.parse_args(["model", "train", "--out", "x", "--resample", "nearest"])
     b = ap.parse_args(["model", "train", "--out", "x"])
     assert b.real is None and b.p_real == 0.0 and b.weights is None and parse_weights(b.weights) == {}
+    assert b.real_weights is None and parse_weights(b.real_weights) == {}
     assert parse_weights(" a = 2 , b=0.5,") == {"a": 2.0, "b": 0.5}
     with pytest.raises(ValueError, match="source=number"):
         parse_weights("rawnind")

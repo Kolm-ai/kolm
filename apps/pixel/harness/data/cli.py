@@ -223,6 +223,15 @@ def cmd_realstore(args) -> int:
     return rc
 
 
+def cmd_siddburst(args) -> int:
+    """SIDD's burst zips reduced to stacks (siddburst.py): per instance its inputs and the mean of its other frames,
+    the pairs the real store then reads (realpairs.SIDD)."""
+    from .siddburst import reduce_all
+    tally = reduce_all(workers=args.workers, background=args.background, delete_zips=args.delete_zips,
+                       instances=args.instances, log=print)
+    return 1 if tally["failed"] else 0
+
+
 def cmd_burststore(args) -> int:
     """The burst store (burststore.py): each HDR+ burst's other frames on disk, decoded at the real store's scale,
     fitted and registered to the burst's merge (a whole-frame shift and a grid of local ones), for the burst layer."""
@@ -375,7 +384,7 @@ def add_parser(sub) -> None:
     lb.set_defaults(func=cmd_label)
 
     rp = ds.add_parser("realpairs", help="real capture/reference pairs: aligned, gain-matched tiles with label rows")
-    rp.add_argument("--sources", nargs="+", default=["rawnind", "hdr-plus-burst"], help="real-pair sources: rawnind, hdr-plus-burst, si-hdr")
+    rp.add_argument("--sources", nargs="+", default=["rawnind", "hdr-plus-burst"], help="real-pair sources: rawnind, hdr-plus-burst, si-hdr, sidd-dng")
     rp.add_argument("--n", type=int, default=64, help="tiles in the set (a function of source, seed, n, tile, scale)")
     rp.add_argument("--tile", type=int, default=256)
     rp.add_argument("--scale", type=int, help="working scale (default: the manifest's clean scale)")
@@ -389,13 +398,21 @@ def add_parser(sub) -> None:
     rp.set_defaults(func=cmd_realpairs)
 
     st = ds.add_parser("realstore", help="real capture/reference pairs as a training store: every pair decoded once")
-    st.add_argument("--sources", nargs="+", default=["rawnind", "hdr-plus-burst"], help="real-pair sources: rawnind, hdr-plus-burst, si-hdr")
+    st.add_argument("--sources", nargs="+", default=["rawnind", "hdr-plus-burst"], help="real-pair sources: rawnind, hdr-plus-burst, si-hdr, sidd-dng")
     st.add_argument("--splits", nargs="+", default=["train"], help="scene splits to store (train for training, val for a real validation set)")
     st.add_argument("--scale", type=int, help="working scale (default: the manifest's pair scale; one store per source)")
     st.add_argument("--workers", type=int, default=8, help="scenes decoded at once")
     st.add_argument("--background", action="store_true", help="below normal priority, to run beside a training run")
     st.add_argument("--tile", type=int, default=256, help="tile size the summary reports draws for")
     st.set_defaults(func=cmd_realstore)
+
+    sb = ds.add_parser("siddburst", help="SIDD's burst zips reduced to inputs and the mean of the other frames")
+    sb.add_argument("--workers", type=int, default=2, help="zips reduced at once (about 1 GB of RAM each)")
+    sb.add_argument("--background", action="store_true", help="below normal priority, to run beside a training run")
+    sb.add_argument("--delete-zips", action="store_true",
+                    help="delete a zip once its stack pairs (one that does not is kept); the ledger keeps its sha256")
+    sb.add_argument("--instances", nargs="+", help="only these instances (e.g. 0001 0002)")
+    sb.set_defaults(func=cmd_siddburst)
 
     bs = ds.add_parser("burststore", help="HDR+ bursts' other frames registered to their merges, for the burst layer")
     bs.add_argument("--splits", nargs="+", default=["val"], help="scene splits to store (train, val)")
@@ -410,7 +427,7 @@ def add_parser(sub) -> None:
     bs.set_defaults(func=cmd_burststore)
 
     sx = ds.add_parser("subpix", help="the sub-pixel residual of every stored real pair, written into its JSON")
-    sx.add_argument("--sources", nargs="+", default=["rawnind", "hdr-plus-burst"], help="real-pair sources: rawnind, hdr-plus-burst, si-hdr")
+    sx.add_argument("--sources", nargs="+", default=["rawnind", "hdr-plus-burst"], help="real-pair sources: rawnind, hdr-plus-burst, si-hdr, sidd-dng")
     sx.add_argument("--workers", type=int, default=4, help="pairs measured at once")
     sx.add_argument("--background", action="store_true", help="below normal priority, to run beside a training run")
     sx.add_argument("--again", action="store_true", help="measure the pairs measured before as well")

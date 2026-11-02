@@ -260,19 +260,21 @@ def save(path: Path, model, ema, opt, step: int, norm: Normaliser, cond_restore,
 def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16, tile: int = 256, workers: int = 12,
           lr: float = 2e-4, minutes: float | None = None, seed: int = 0, base: int = 48, val_n: int = 48,
           calib_n: int = 128, log_every: int = 50, ckpt_every: int = 500, device: str | None = None,
-          real=(), p_real: float = 0.0, weights: dict | None = None, range_weight: float | None = None,
+          real=(), p_real: float = 0.0, weights: dict | None = None, real_weights: dict | None = None,
+          range_weight: float | None = None,
           range_k: int | None = None, flat_weight: float | None = None, flat_k: int | None = None,
           texture_weight: float | None = None, p_dead_leaves: float = 0.0, decoded_store: bool = True,
           mults: tuple = (1, 2, 4, 4), blocks: int | tuple = 2, mid_blocks: int | None = None,
           grad_ckpt: bool = False, ssim_weight: float | None = None, transfer_weight: float | None = None,
-          shift_real: bool = False, subpix_real: bool = False,
+          shift_real: bool = False, subpix_real: bool = False, sensor_scale: int = 1,
           noise_map: bool = False, compile_model: bool = False, warmup: int | None = None,
           lr_floor: float | None = None, target_audit: bool = False, overshoot_weight: float | None = None,
           pyramid_weight: float | None = None, resample: str = "learned", val_seed: int | None = None,
           schedule: str = "cosine", decay: int = 0, block: str = "res", dec_blocks: int | tuple | None = None,
           beta2: float = 0.99, weight_decay: float = 0.01, log=print) -> dict:
     """`real` names stored real-pair sources (data.realstore) drawn with probability `p_real` per sample; `weights`
-    maps a clean source to its draw weight (1 unnamed); `range_weight`, `range_k`, `flat_weight`, `flat_k` and
+    maps a clean source to its draw weight (1 unnamed), `real_weights` a real source to its scenes' (1 unnamed;
+    the real validation draw stays unweighted); `range_weight`, `range_k`, `flat_weight`, `flat_k` and
     `texture_weight` set the range, flat-texture and texture-deficit terms; `p_dead_leaves` is the share of rendered
     pairs drawn on procedural colour dead-leaves tiles (deadleaves.py). All are saved in the checkpoint's `train`
     record. `decoded_store` lets the loader workers read and fill the decoded clean-image store
@@ -281,7 +283,8 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
     compute for a fraction of the activation memory and changes nothing else. The fifteenth run's levers, each off by
     default and recorded: `ssim_weight` (the MS-SSIM term), `transfer_weight` (the coherent-transfer term), `shift_real` (each real pair scored at its best integer
     shift within a pixel, losses.best_shift), `subpix_real` (each real pair's reference read at its measured
-    sub-pixel residual on top of the integer shift, data.subpix), `noise_map` (the network reads the capture's noise
+    sub-pixel residual on top of the integer shift, data.subpix), `sensor_scale` (2: the rendered pairs' sensor and
+    demosaic at twice the tile's resolution, camera.simulate_frame), `noise_map` (the network reads the capture's noise
     law per pixel,
     net.noise_map), `compile_model` (torch.compile of the training forward), `warmup` and `lr_floor` (the schedule's
     warmup steps and its end as a share of `lr`), `target_audit` (the clean items the target audit keeps,
@@ -339,9 +342,11 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
     vs = seed if val_seed is None else int(val_seed)
     args = dict(sources=list(sources), steps=steps, batch=batch, tile=tile, lr=lr, seed=seed, val_seed=vs,
                 base=base,
-                real=list(real), p_real=p_real, weights=weights, p_dead_leaves=p_dead_leaves, mults=list(mults),
+                real=list(real), p_real=p_real, weights=weights, real_weights=real_weights or None,
+                p_dead_leaves=p_dead_leaves, mults=list(mults),
                 blocks=blocks if isinstance(blocks, int) else list(blocks), mid_blocks=mid_blocks,
-                shift_real=bool(shift_real), subpix_real=bool(subpix_real), noise_map=bool(noise_map), compile=bool(compile_model), warmup=warmup,
+                shift_real=bool(shift_real), subpix_real=bool(subpix_real), sensor_scale=int(sensor_scale),
+                noise_map=bool(noise_map), compile=bool(compile_model), warmup=warmup,
                 lr_floor=lr_floor, target_audit=bool(target_audit), resample=resample, schedule=schedule,
                 decay=decay, block=block, dec_blocks=dec_blocks if dec_blocks is None or isinstance(dec_blocks, int)
                 else list(dec_blocks), beta2=beta2, weight_decay=weight_decay, **loss_kw)
@@ -353,11 +358,12 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
         log(f"resuming from step {ck['step']}")
     else:
         log(f"calibration draw: {calib_n} samples")
-        calib = fixed_set(list(sources), "train", calib_n, min(tile, 128), vs + 1, log=quiet, audit=target_audit)
+        calib = fixed_set(list(sources), "train", calib_n, min(tile, 128), vs + 1, log=quiet, audit=target_audit,
+                          sensor=sensor_scale)
         norm = Normaliser.fit(np.array([[s["metrics"][m] for m in STILL_METRICS] for s in calib]))
         cond_restore = np.mean([norm(s["metrics"]) for s in calib if s["restore"]], axis=0).astype(np.float32)
     log(f"validation draw: {val_n} samples at {tile} px")
-    val = fixed_set(list(sources), "val", val_n, tile, vs + 2, log=quiet, audit=target_audit)
+    val = fixed_set(list(sources), "val", val_n, tile, vs + 2, log=quiet, audit=target_audit, sensor=sensor_scale)
     if target_audit:
         rep = TileSource(list(sources), "train", tile, audit=True).audit_report
         log("target audit: " + ("; ".join(f"{k} max_halo {r['max_halo']}: {r['kept']} kept, {r['over']} over, "
@@ -366,12 +372,14 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
     if weights:
         shares = TileSource(list(sources), "train", tile, weights=weights, audit=target_audit).shares()
         log("draw shares by source: " + ", ".join(f"{k} {v:.1%}" for k, v in sorted(shares.items(), key=lambda kv: -kv[1])))
+    if sensor_scale != 1:
+        log(f"sensor scale {sensor_scale}: rendered pairs' sensor and demosaic at {sensor_scale}x the tile, then a box")
     if p_dead_leaves > 0:
         log(f"dead leaves: {p_dead_leaves:.1%} of the rendered pairs on procedural tiles")
     val_real = None
     if real and p_real > 0:
         from ..data.realstore import RealStore
-        log(f"real pairs drawn with probability {p_real:.2f}: {RealStore(list(real), 'train', tile=tile, subpix=subpix_real).summary()}")
+        log(f"real pairs drawn with probability {p_real:.2f}: {RealStore(list(real), 'train', tile=tile, subpix=subpix_real, weights=real_weights or None).summary()}")
         try:
             val_real = real_fixed_set(list(real), "val", val_n, tile, vs + 3, subpix=subpix_real)
             log(f"real validation draw: {len(val_real)} tiles of the stored val scenes")
@@ -399,7 +407,7 @@ def train(out: str, sources=DEFAULT_SOURCES, steps: int = 20000, batch: int = 16
         log("decoded store: loader workers read clean images from derived/decoded and store the ones they decode")
     stream = PairStream(list(sources), tile, norm, seed + step, real=real, p_real=p_real, weights=weights or None,
                         p_dead_leaves=p_dead_leaves, decoded_store=decoded_store, audit=target_audit,
-                        subpix_real=subpix_real)
+                        subpix_real=subpix_real, sensor=sensor_scale, real_weights=real_weights or None)
     loader = DataLoader(StreamDataset(stream), batch_size=batch,
                         num_workers=workers, pin_memory=dev.type == "cuda", persistent_workers=workers > 0,
                         prefetch_factor=4 if workers > 0 else None, multiprocessing_context=loader_context(workers))

@@ -140,17 +140,19 @@ def render(release: Path, run: Path | None = None, capture_evals: list[Path] = (
 
     srcs = list(train.get("sources") or [])
     real = set(train.get("real") or [])
-    weights = train.get("weights") or {}
-    lic = _licences(srcs)
+    weights, real_w = train.get("weights") or {}, train.get("real_weights") or {}
+    every = srcs + sorted(real - set(srcs))          # a real-pair source that is not a clean source too
+    lic = _licences(every)
     out += ["## Training data", "",
             f"{train.get('steps', '-')} steps planned (the release is step {cfg['step']}), batch "
             f"{train.get('batch', '-')}, tiles of {train.get('tile', '-')} px, learning rate {train.get('lr', '-')}; "
             f"real capture/reference pairs drawn with probability {train.get('p_real', '-')}, degraded clean images "
             "otherwise.", "",
             "| source | licence (manifest) | sampling weight | real pairs |", "|---|---|---:|---|"]
-    for s in srcs:
-        out.append(f"| `{s}` | {_cell(lic[s])} | {_cell(weights.get(s, 1))} | {'yes' if s in real else '-'} |")
-    limited = [s for s in srcs if restricted(lic[s])]
+    for s in every:
+        rp = ("yes" + (f", scene weight {_cell(real_w[s])}" if s in real_w else "")) if s in real else "-"
+        out.append(f"| `{s}` | {_cell(lic[s])} | {_cell(weights.get(s, 1)) if s in srcs else '-'} | {rp} |")
+    limited = [s for s in every if restricted(lic[s])]
     out += ["", "Held out of training: every real pair's val and test scenes, RawNIND's test reserve, and raw-pixls-us "
             "(the raw evaluation set) entirely.", ""]
 
@@ -244,7 +246,7 @@ def render(release: Path, run: Path | None = None, capture_evals: list[Path] = (
                    "them.")
     else:
         out.append("No training source in the manifest is marked research-only or non-commercial.")
-    sa = [s for s in srcs if re.search(r"\bBY-SA\b", lic[s] or "", re.I)]
+    sa = [s for s in every if re.search(r"\bBY-SA\b", lic[s] or "", re.I)]
     if sa:
         out.append("")
         out.append("Source(s) under CC BY-SA (" + ", ".join(f"`{s}`" for s in sa) + ") are credited here; whether "

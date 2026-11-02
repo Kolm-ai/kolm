@@ -57,6 +57,7 @@ class CaptureConstraints:
     lens_transmission: float = 0.9  # absolute mode only; T in pi*T/(4N^2)
     black_pedestal_e: float | None = None  # ADC offset so the read-noise floor is not clipped at 0; None = 8 x read noise
     row_noise_e: float = 0.0  # sigma of a per-row offset shared along the row (horizontal streaks), electrons
+    sensor_scale: int = 1  # sensor pixels per output pixel along each axis, 1 or 2 (simulate_frame, SENSOR_VAR_RATIO)
 
     @property
     def f_number(self) -> float:
@@ -205,10 +206,36 @@ def shading_map(H: int, W: int, corner_stops: float) -> np.ndarray | None:
     return 2.0 ** (-corner_stops * r2)
 
 
+# sensor_scale 2: the variance a flat field's white sensor noise keeps through the bilinear demosaic at the output's
+# resolution, over what it keeps through the demosaic at twice it and a 2 x 2 box (per pixel; and per row for row
+# noise), measured on 4 x 512^2 draws (MODEL_PLAN 20.11): R, G, B read 1.443, 1.443, 1.439 per pixel and 1.22,
+# 1.10, 1.18 per row. Without a mosaic the box alone gives 4 and 2. Each pixel's noise variance at the sensor is
+# raised by this ratio, so the output's per-pixel noise level is sensor_scale 1's and only its grain is finer: the
+# Haar HH of the luminance reads 3.1 dB over its std, as LibRaw then a 2x box reads on real raws, against 9.6 dB.
+SENSOR_VAR_RATIO = {True: (1.442, 1.18), False: (4.0, 2.0)}   # bayer -> (pixel, row)
+
+
+def _at_sensor_scale(c: CaptureConstraints) -> tuple[CaptureConstraints, float]:
+    """The constraints the sensor runs under at sensor_scale 2, and the ratio its electrons per unit radiance take:
+    the well and the electrons per unit radiance divided by the pixel ratio (the clip stays at radiance 1, the shot
+    noise variance in radiance rises by it), read noise and an explicit pedestal by its root, row noise so the
+    output's row offsets keep their level."""
+    k, k_row = SENSOR_VAR_RATIO[bool(c.bayer)]
+    ped = None if c.black_pedestal_e is None else c.black_pedestal_e / math.sqrt(k)
+    return c.replace(full_well_e=c.full_well_e / k, read_noise_e=c.read_noise_e / math.sqrt(k),
+                     row_noise_e=c.row_noise_e * math.sqrt(k_row) / k, black_pedestal_e=ped, sensor_scale=1), k
+
+
 def simulate_frame(frame_ss: np.ndarray, c: CaptureConstraints, ss: int, rng: np.random.Generator,
                    white_radiance: float = 1.0) -> np.ndarray:
     """One frame. `white_radiance` is the exposure decision in relative mode (simulate_sequence passes the scene's
-    peak); ignored in absolute mode, where exposure_s and the f-number decide."""
+    peak); ignored in absolute mode, where exposure_s and the f-number decide. With c.sensor_scale 2 the sensor,
+    its mosaic and the demosaic run at twice the output's resolution (the optics' box to it, or the output's
+    radiance repeated when ss is odd) and a 2 x 2 box brings the result down, as a raw decoded at the sensor's
+    resolution and downscaled 2x is (SENSOR_VAR_RATIO keeps the noise level)."""
+    s = int(c.sensor_scale)
+    if s not in (1, 2):
+        raise ValueError(f"sensor_scale is 1 or 2, got {c.sensor_scale}")
     pitch_ss = c.pixel_pitch_um / ss
     optical = np.empty(frame_ss.shape, dtype=np.float64)
     for ch, lam in enumerate(c.wavelengths_nm):
@@ -220,20 +247,29 @@ def simulate_frame(frame_ss: np.ndarray, c: CaptureConstraints, ss: int, rng: np
         if sigma > 0.05:
             plane = gaussian_filter(plane, sigma, mode="nearest")
         optical[..., ch] = plane
-    radiance = np.clip(box_downsample(optical, ss), 0.0, None)
+    if s > 1 and ss % s == 0:
+        radiance = np.clip(box_downsample(optical, ss // s), 0.0, None)
+    else:
+        radiance = np.clip(box_downsample(optical, ss), 0.0, None)
+        if s > 1:
+            radiance = np.repeat(np.repeat(radiance, s, axis=0), s, axis=1)
     shade = shading_map(radiance.shape[0], radiance.shape[1], c.shading_corner_stops)
     if shade is not None:
         radiance = radiance * shade[..., None]  # less light reaches the corners before the sensor sees it
     gain = c.electrons_per_unit_radiance(white_radiance)  # electrons per unit radiance
+    sc = c
+    if s > 1:
+        sc, k = _at_sensor_scale(c)
+        gain = gain / k
     if c.bayer:
         cfa = bayer_mask(*radiance.shape[:2])
-        plane = _sensor((radiance * cfa).sum(axis=-1) * gain, c, rng)
+        plane = _sensor((radiance * cfa).sum(axis=-1) * gain, sc, rng)
         out = demosaic_bilinear(plane, cfa)
     else:
-        out = _sensor(radiance * gain, c, rng)
+        out = _sensor(radiance * gain, sc, rng)
     if shade is not None and c.shading_corrected:
         out = out / shade[..., None]  # the ISP's correction: brightness restored, corner noise multiplied with it
-    return out / gain
+    return box_downsample(out, s) / gain
 
 
 def simulate_sequence(scene: Scene, c: CaptureConstraints, seed: int = 0) -> np.ndarray:

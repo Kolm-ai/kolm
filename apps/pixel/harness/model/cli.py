@@ -42,12 +42,14 @@ def cmd_train(args) -> int:
           minutes=args.minutes, seed=args.seed, val_seed=args.val_seed, base=args.base, val_n=args.val_n,
           ckpt_every=args.ckpt_every,
           device=args.device, real=real, p_real=args.p_real, weights=parse_weights(args.weights),
+          real_weights=parse_weights(args.real_weights),
           range_weight=args.range_weight, range_k=args.range_k, flat_weight=args.flat_weight, flat_k=args.flat_k,
           texture_weight=args.texture_weight, p_dead_leaves=args.p_dead_leaves,
           decoded_store=not args.no_decoded_store, mults=parse_ints(args.mults), blocks=parse_blocks(args.blocks),
           mid_blocks=args.mid_blocks, grad_ckpt=args.grad_ckpt, ssim_weight=args.ssim_weight,
           transfer_weight=args.transfer_weight,
-          shift_real=args.shift_real, subpix_real=args.subpix_real, noise_map=args.noise_map, compile_model=args.compile, warmup=args.warmup,
+          shift_real=args.shift_real, subpix_real=args.subpix_real, sensor_scale=args.sensor_scale,
+          noise_map=args.noise_map, compile_model=args.compile, warmup=args.warmup,
           lr_floor=args.lr_floor, target_audit=args.target_audit, overshoot_weight=args.overshoot_weight,
           pyramid_weight=args.pyramid_weight, resample=args.resample, schedule=args.schedule, decay=args.decay,
           block=args.block, dec_blocks=parse_blocks(args.dec_blocks) if args.dec_blocks else None, beta2=args.beta2,
@@ -198,6 +200,8 @@ def add_parser(sub) -> None:
                                   "realstore): rawnind, hdr-plus-burst")
     t.add_argument("--p-real", type=float, default=0.0, help="probability a sample is a real pair rather than a rendered one")
     t.add_argument("--weights", help="draw weights of the clean sources, source=number,... (1 for a source not named)")
+    t.add_argument("--real-weights", help="draw weights of the real sources' scenes, source=number,... (1 for a "
+                                         "source not named; every scene the same without)")
     t.add_argument("--range-weight", type=float,
                    help="weight of the range term (output beyond the target's local range; default 1.0, 0 turns it off)")
     t.add_argument("--range-k", type=int, help="window of the range term in px, odd (default 3)")
@@ -238,6 +242,9 @@ def add_parser(sub) -> None:
     t.add_argument("--subpix-real", action="store_true",
                    help="read each real pair's reference at its measured sub-pixel residual on top of the integer "
                         "shift (data.subpix; python -m harness data subpix measures a store written before)")
+    t.add_argument("--sensor-scale", type=int, choices=(1, 2), default=1,
+                   help="2: the rendered pairs' sensor and demosaic run at twice the tile's resolution, then a 2x "
+                        "box, as the real pairs are decoded; same noise level, finer grain (camera.simulate_frame)")
     t.add_argument("--noise-map", action="store_true",
                    help="one more input channel: the capture's noise law per pixel (net.noise_map)")
     t.add_argument("--compile", action="store_true", help="torch.compile the training forward")

@@ -95,6 +95,20 @@ def fs(p: Path | str) -> str:
     return s
 
 
+CONSUMED = ".consumed"
+
+
+def consumed_marker(path: Path | str) -> Path:
+    """The marker a reducer leaves beside a download it reduced and deleted (siddburst's zips): the ledger's file
+    counts as present while the marker is there, so a later collect does not fetch it again. Remove the marker to
+    have it fetched."""
+    return Path(str(path) + CONSUMED)
+
+
+def present(path: Path | str) -> bool:
+    return os.path.exists(fs(path)) or os.path.exists(fs(consumed_marker(path)))
+
+
 def _digest(path: Path | str, algo: str) -> str:
     h = hashlib.new(algo)
     with open(fs(path), "rb") as f:
@@ -223,7 +237,7 @@ class Collector:
     def fetch_source(self, source: Source, specs: list[FileSpec] | None = None) -> dict:
         specs = list(specs if specs is not None else source.files)
         todo = [s for s in specs
-                if (source.id, s.path) not in self.done or not os.path.exists(fs(self.target(source, s)))]
+                if (source.id, s.path) not in self.done or not present(self.target(source, s))]
         summary = {"source": source.id, "requested": len(specs), "already": len(specs) - len(todo),
                    "done": 0, "failed": 0, "bytes": 0, "errors": []}
         if self.dry_run:
@@ -255,7 +269,7 @@ class Collector:
                     if self._spent + spec.size > self.max_bytes:
                         raise RuntimeError("byte budget exhausted")
                     self._spent += spec.size
-            if not keeps_reserve(self.raw, spec.size or 0, reserve_bytes("HARNESS_COLLECT_RESERVE_GB", 150)):
+            if not keeps_reserve(dst.parent, spec.size or 0, reserve_bytes("HARNESS_COLLECT_RESERVE_GB", 150)):
                 raise RuntimeError("disk reserve: the drive would fall below its free-space floor "
                                    "(HARNESS_COLLECT_RESERVE_GB, default 150)")
             os.makedirs(fs(dst.parent), exist_ok=True)

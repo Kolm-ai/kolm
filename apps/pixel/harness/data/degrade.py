@@ -391,7 +391,7 @@ def chromatic_shift(f: np.ndarray, shift_px: float) -> np.ndarray:
     return out
 
 
-def _camera(t: np.ndarray, p: DegradeParams, rng: np.random.Generator, ss: int) -> np.ndarray:
+def _camera(t: np.ndarray, p: DegradeParams, rng: np.random.Generator, ss: int, sensor: int = 1) -> np.ndarray:
     from ..scene import box_downsample
     f = _upsample(t, ss)
     if p.ca_shift_px:
@@ -399,7 +399,8 @@ def _camera(t: np.ndarray, p: DegradeParams, rng: np.random.Generator, ss: int) 
     shade = tile_shading(f.shape[0], f.shape[1], p, ss)
     if shade is not None:
         f = f * shade[..., None]
-    out = simulate_frame(f, _constraints(p), ss, rng, white_radiance=1.0)
+    c = _constraints(p)
+    out = simulate_frame(f, c.replace(sensor_scale=sensor) if sensor != 1 else c, ss, rng, white_radiance=1.0)
     if shade is not None and p.shading_corrected:
         out = out / box_downsample(shade, ss)[..., None]
     return np.clip(out, 0.0, 1.0)
@@ -435,17 +436,18 @@ def _isp(t: np.ndarray, p: DegradeParams) -> np.ndarray:
 
 
 def degrade(tile: np.ndarray, params: DegradeParams, seed: int = 0, ss: int = 1, is_hdr: bool = False,
-            scene_gain: np.ndarray | None = None) -> np.ndarray:
+            scene_gain: np.ndarray | None = None, sensor: int = 1) -> np.ndarray:
     """(clean linear tile, params, seed) -> degraded linear tile, same shape. Deterministic in (params, seed).
     `ss` supersamples the optics (1 = tile resolution, the labeller's default for throughput). `scene_gain` (h, w)
     multiplies the prepared tile before the camera and the ISP: a lighting map that belongs to the scene. The
     model's pairs pass the input's uncorrected lens shading here so the target carries it where the input had
-    it, ahead of the tone affine, which does not commute with a multiply."""
+    it, ahead of the tone affine, which does not commute with a multiply. `sensor` 2 runs the camera's sensor and
+    demosaic at twice the tile's resolution, then a 2x box (camera.simulate_frame): finer grain, same level."""
     t = prepare_tile(tile, params, is_hdr)
     if scene_gain is not None:
         t = t * np.asarray(scene_gain, dtype=np.float64)[..., None]
     if params.camera_on:
-        t = _camera(t, params, np.random.default_rng(int(seed)), ss)
+        t = _camera(t, params, np.random.default_rng(int(seed)), ss, sensor)
     return _isp(t, params)
 
 

@@ -168,7 +168,8 @@ def test_card_states_the_release_its_reports_and_the_licences(tmp_path):
     run.mkdir()
     ck = _checkpoint(run / "best.pt")
     c = torch.load(ck, weights_only=False)
-    c["train"] = {"sources": ["hf-tid2013", "polyhaven-hdris"], "real": [], "weights": {"polyhaven-hdris": 2}}
+    c["train"] = {"sources": ["hf-tid2013", "polyhaven-hdris"], "real": ["rawnind", "sidd-dng"],
+                  "weights": {"polyhaven-hdris": 2}, "real_weights": {"sidd-dng": 4}}
     torch.save(c, ck)
     gate = {"name": "artifacts", "status": "fail", "checks": [
         {"metric": "edge_overshoot", "status": "fail", "detail": "loses capture, margin -0.02"}]}
@@ -185,8 +186,12 @@ def test_card_states_the_release_its_reports_and_the_licences(tmp_path):
     assert "| `heldout_real_fake_known` | Real-pair evaluation: heldout_real_fake_known | 8 | **PASS** |" in md
     assert "capture: artifacts: edge_overshoot loses capture, margin -0.02" in md
     assert "Every gate set passes on 1 of 2 set(s): `heldout_real_fake_known`." in md
+    assert "| `polyhaven-hdris` | " in md and "| 2 | - |" in md                    # a clean source, no real pairs
+    assert "| `sidd-dng` | MIT" in md and "| - | yes, scene weight 4 |" in md    # real pairs only, weighted
+    assert "| `rawnind` | CC BY-SA 4.0 | - | yes |" in md
     lic = md.split("## Licence", 1)[1]
-    assert "`hf-tid2013`" in lic and "polyhaven" not in lic
+    assert "`hf-tid2013`" in lic and "polyhaven" not in lic and "sidd-dng" not in lic.split("CC BY-SA", 1)[0]
+    assert "`rawnind`) are credited here" in lic
     cal = tmp_path / "calib_s1.json"
     cal.write_text(json.dumps({"scale": 1, "method": "blocks", "crop": 1024, "pairs": 4, "factor": 2.5,
                                "spread": {"n": 4, "median": 0.398, "p10": 0.2, "p90": 0.5},

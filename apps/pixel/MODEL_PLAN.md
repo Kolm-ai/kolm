@@ -183,9 +183,9 @@ These come before any download, ranked by measured impact and cost.
 | 2 | **KADID-10k and TID2013 to evaluation only.** | 106 references (81 + 25), under 2 % of the clean set. Research-only terms; KADID references reportedly Pixabay-licensed, TID references mostly Kodak (both unverified). | drop two source ids from the run lines |
 | 3 | **Scene split everywhere, plus perceptual-hash dedup against every evaluation set:** demo, raw.pixls.us, real val/test, SIDD val, RealSR and the rest. | Near-duplicate leakage reaches about 10 % in public sets. Commons Featured and Quality overlap; burst frames are near-duplicates by nature. | a hash pass over the corpus |
 | 4 | **Real-pair hygiene:** sub-pixel registration (today: integer phase correlation refined to ±REFINE px, checked per quadrant, in `realpairs.py`); a per-pair 3×3 colour matrix; reject NCC below 0.9; mask clipped and misaligned pixels; drop the worst 2–3 % by loss. | BurstSR and RawNIND recipes. Misregistration lowers the coherent ratio at high frequency for both capture and model: it is part of why the capture scores 0.88, not 1. | `realpairs.py` and the real store |
-| 5 | **Retire HDR+ `merged.dng` as a target once real averaged ground truth is in** (section 6: SIDD, SNIC). Until then, tag rows by target type. | A merged target caps the model at HDR+'s quality, artifacts included. Averaged static bursts are the published real ground truth. | a target-type field per row |
+| 5 | **Retire HDR+ `merged.dng` as a target once real averaged ground truth is in** (section 6: SIDD). Until then, tag rows by target type. | A merged target caps the model at HDR+'s quality, artifacts included. Averaged static bursts are the published real ground truth. | a target-type field per row |
 | 6 | **`wikimedia-quality-images` gets a clean block** (scale 2, low-quality scale 4). | It was read at scale 1. | done, uncommitted |
-| 7 | **Real evaluation sets to ≥ 60 held-out scenes each** (today HDR+ 9–10, RawNIND 9). | Scene-level resampling: n_eff ≈ number of scenes. At about 97 % power per gate (what an all-gates claim needs), an effect of 0.5 SD needs about 59 scenes and 0.3 SD about 164. | HDR+ full release, SNIC, SIDD validation (section 6) |
+| 7 | **Real evaluation sets to ≥ 60 held-out scenes each** (today HDR+ 9–10, RawNIND 9). | Scene-level resampling: n_eff ≈ number of scenes. At about 97 % power per gate (what an all-gates claim needs), an effect of 0.5 SD needs about 59 scenes and 0.3 SD about 164. | HDR+ full release, SIDD validation (section 6) |
 
 ## 5. What the degradation still lacks
 
@@ -225,7 +225,7 @@ Sizes are lean pulls (the census pass, corrected where it found errors). Licence
   - Stage 1 is every burst's merge, camera JPEG, reference-frame index and colour/timing text: 92 GB.
   - Stage 2 is each burst's own reference frame and its lens-shading map: about 73 GB. It is picked by an exact names file, built from stage 1's indexes (`names_file` on `gcs_bucket`).
   - The two neighbour frames wait for section 9.
-- **Row 4, SNIC, is manual.** The Dataverse answers 403 to every datafile request the collector makes. A person fetches the files in a browser into `raw/snic/`, and they are checked against the record's MD5s.
+- **Row 4, SNIC, is dropped (11-02).** Its own record and README say it: *Synthesized* Noisy Images using Calibration. The noisy frames are made from a low-ISO frame with calibrated noise models ([arXiv 2512.15905](https://arxiv.org/abs/2512.15905), [code](https://github.com/nikbhatt-cu/SNIC)), so it is neither real noise nor averaged ground truth, and this row had it wrong. Its paper's NAFNet gap between its synthetic and real noise (1.7 to 1.9 dB on the iPhone) is one more reading that synthetic noise is not real noise. The calibration method stays a reference for `noise.py`; the 473 GB is noise we can synthesize ourselves. (Its Dataverse also answers 403 to the collector.)
 - **Row 6, UHD-IQA.** Its host reset every connection on 2026-10-28. Retry it with the collector as it is.
 
 | # | Source | Size | Licence | Role | Why |
@@ -233,7 +233,7 @@ Sizes are lean pulls (the census pass, corrected where it found errors). Licence
 | 1 | HDR+ full release: reference frame (plus 2 neighbours later), `merged.dng` and `final.jpg` per burst | 165 GB now (92 + 73); 350–400 GB with the neighbours | CC BY-SA 4.0 | real scenes for evaluation (3,640 bursts), bursts for section 9, the phone's own output as the best-case camera baseline | the single biggest step for the claim: scenes, bursts and a real baseline in one |
 | 2 | PixelShift200 (merged RGGB `.mat`, camera ARWs, previews) | about 75 GB as listed | CC BY 4.0 | full-colour ground truth with no demosaicing, for the raw path | demosaic training +1.16 dB over DIV2K-derived targets (secondary) |
 | 3 | Commons Featured (the remaining 15,955 as listed) plus Quality Images ≥ 8 MP (to ~40k files) | 164.5 + ~250 GB | CC BY / BY-SA / PD per file; attribution manifest | clean content: about 5k → about 45k images, after the section 4 filters | diversity over count (DiverSeg); the step that makes a 30–120M net worth having |
-| 4 | SNIC subset (30 scenes; iPhone 11 Pro, RX100 IV, A7R III; ISO 100–12800, dark and grey frames); manual (403) | ~150 GB | MIT | tripod-averaged real ground truth on large sensors, plus dark frames for the bank | the only large permissive averaged-ground-truth set beyond SIDD |
+| 4 | ~~SNIC~~ dropped 11-02: its noisy frames are synthetic (calibrated models on a low-ISO frame), not averaged real ground truth | (473 GB) | MIT | none for training; the calibration method is a reference | see the note above the table |
 | 5 | SI-HDR (raw stacks, references, inputs; not the other methods' reconstructions) | 24.5 GB | CC BY 4.0 | 181 HDR scenes, raw plus reference: highlights and dynamic range | the tone gates |
 | 6 | UHD-IQA | 10.7 GB | CC0 | 6,073 images at 3840 px: clean content | permissive and large-format |
 | 7 | SIDD-CC DNG bursts (10 of 115 instances on disk, 22 of 234.5 GB) | up to 235 GB; a subset is enough | MIT per the official page; the mirror says "sidd-terms-of-use" (to confirm) | 10 static indoor scenes × 5 phones × 150 frames: frame-averaged ground truth, N2N pairs, noise fitting. A noise and burst source, not a content source. | real averaged ground truth; split val/test by scene number |
@@ -266,7 +266,7 @@ The user asked whether the same data can be labelled several ways, and whether v
 - a linear reference (Poly Haven, SI-HDR);
 - a raw ground truth (RawNIND);
 - a burst merge (HDR+);
-- a frame average (SIDD, SNIC);
+- a frame average (SIDD);
 - a pixel-shift capture (PixelShift200).
 
 Label each row with its target type. Train the faithful layer only on targets at least as clean as the claim needs. Use the rest for pretraining or evaluation.
@@ -425,7 +425,7 @@ Add:
 
 - synthetic bursts from clean stills, with sampled homography plus local flow and per-frame noise, rendered on the GPU (section 8.5);
 - HDR+ bursts (section 6, row 1);
-- SIDD and SNIC static bursts with averaged ground truth;
+- SIDD static bursts with averaged ground truth;
 - REDS and Tears of Steel for video;
 - Hypersim for known flow.
 
@@ -1444,3 +1444,45 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
   - **d_realonly beyond d_nohdr:** the synthetic pairs hurt as rendered. The fix is to run the sensor and its demosaic at twice the tile's resolution and box-downsample, as the real pairs are made, with read noise scaled so that the fitted noise levels still hold at the tile.
   - **Neither moves:** the pairs' noise is not the cause, and what is left is length (1/57 of NAFNet's tiles) and the loss.
   - 402 scenes is few for d_realonly: a gain there that d_nohdr lacks may still be real, and a loss on the synthetic-only metrics (periodicity, colour, the gates' worlds) is expected.
+- **The result (seed 0, blind; `.tmp/pair_table.md`).** Shadow SNR in dB, the median of the restored tiles:
+
+| Run | SIDD PSNR | SIDD SSIM | raw.pixls.us | RawNIND | HDR+ | SI-HDR | Pooled IQM [90 %] against the control |
+|---|---:|---:|---:|---:|---:|---:|---|
+| a_naf_s0, control | 30.61 | 0.717 | 21.53 | 26.56 | 27.29 | 25.91 | |
+| d_nohdr_s0 | 30.49 | 0.695 | 20.97 | 28.94 | 25.67 | 26.49 | −0.119 [−0.139, −0.087]: 12 worse, 5 better |
+| d_realonly_s0 | 27.53 | 0.565 | 28.73 | 32.23 | 30.96 | 28.28 | −0.203 [−0.250, −0.156]: 37 worse, 22 better |
+| NAFNet | 40.21 | 0.924 | 29.79 | 34.24 | 35.47 | 21.77 | |
+| input | 23.66 | 0.334 | 26.02 | 15.00 | 21.32 | 8.50 | |
+
+- **How it reads.**
+  - **d_nohdr does not move.** It gains on RawNIND's shadows (+2.4 dB) and loses on HDR+'s (−1.6 dB), the sets each run trains on. raw.pixls.us is flat. Finding 1 is real but is not what holds the shadows back. Our own merge of HDR+'s other frames is worth little for the cost: a burst's other one to nine handheld frames give a target whose noise std is only 1/√(n − 1) of a frame's, and with HDR+ out of the pairs raw.pixls.us's shadows did not move. It is not built.
+  - **d_realonly moves the shadows the whole way.** +7.2 and +6.6 dB in the gates' worlds and +2 to +6 dB on every real set; raw.pixls.us reaches 28.73 against NAFNet's 29.79, above the input for the first time. The real pairs teach the shadows; the synthetic pairs, as rendered, unteach them (finding 2).
+  - **It pays for it everywhere else.** texture_hf_fidelity −0.30 to −0.35, MTF50 −0.10, periodicity, colour (ΔE max −0.6 to −1.3 on HDR+), and SIDD PSNR −3.1 dB. 402 scenes of two sources do not hold texture, sharpness or colour; the synthetic pairs do.
+  - **So the data needs both, fixed.** Content (texture, sharpness, colour) comes from the synthetic pairs, so their noise must have real noise's grain: the 2× sensor and box downsample above, the larger lever. Real noise with clean targets comes from more cameras: SIDD (section 20.11) adds five phones' noise at about 40 frames' averaging, but only 10 indoor scenes, so it adds noise, not content.
+
+### 20.11 The data: SIDD's bursts as pairs, and the synthetic pairs' grain (11-02)
+
+- **What was pulled, under the four approved pulls.**
+  - **SIDD's raw bursts:** the Hugging Face mirror MhdMohammadi/SIDD-CC-DNG (MIT), the 115 instances of SIDD Medium's training list, one zip of about 150 DNGs each (2 to 4 GB, 235 GB in all). A zip is reduced to a stack and deleted (`siddburst.py`), so the drive holds only what trains: about 0.4 GB per stack. The mirror's hashed validation and test instances stay held out.
+  - **RELLISUR** (Zenodo 5234969, CC BY 4.0, 8.9 GB): 850 scenes of five under-exposed shots and a normal-light reference, from a tripod. Not a training source until its pairs are read: whether they are raw or sRGB, and how well they register.
+  - **RawNIND** is complete. **SNIC** is dropped: its noisy frames are synthetic (section 6).
+  - **HDR+'s other frames are not pulled further.** The 45 GB pulled for our own merge was more than its use needed: d_nohdr (section 20.10) showed HDR+'s target noise is not what holds the shadows back. The full bursts are about 298 GB and would need their own approval.
+- **SIDD's bursts are not still, so a frame average is not a clean target as it lies.** On 0001, 0012 and 0017 the frames drift a few tenths of a pixel over the burst, a slow zoom as much as a shift, and now and then the tripod is knocked several pixels. The 105 stacks the first reducer made (no registration) had inputs 0.1 to 1.4 px off their mean; they are set aside (`raw/sidd-dng/stacks_old_1102`) and every zip is reduced again.
+  - **Registration.** Each frame is registered on its 2 × 2 quads' luminance: an integer shift of the whole frame, then per patch an integer offset by phase correlation and a sub-quad one by Gauss-Newton, and an affine map fitted to the patches robustly. It fits the motion to 0.01 to 0.02 quads at five places across the frame.
+  - **The inputs** are up to 24 frames, spread over the burst, that lie within 0.25 px of one frame at every corner. The mean is made in their average geometry; training's sub-pixel read (`--subpix-real`) takes out what offset is left.
+  - **The merge is kernel regression, not a warp.** A cubic warp of each frame, averaged, is biased wherever the scene has detail near a Bayer plane's Nyquist, which is every edge. On a synthetic aliased scene its edges were 10 to 20 times further off than the kernel's. On real bursts its mean sat 2 to 6 noise variances off the still inputs' own mean at edges (0017), where the kernel's sat 0.2 to 0.4. Order-1 kernel regression fits a plane per pixel to every frame's nearest raw samples, with nothing interpolated. At MERGE_SIGMA 0.15 the mean's noise is about that of a 40-frame average (n_eff), independent of every input's.
+- **Each input is judged against the mean before it trains (the pair gate).** pair_excess is the input's mismatch with the mean beyond the noise both carry, in the input's noise variances: the worse of edges and flat pixels, the median over the planes. An input is kept at 1.5 or under. A burst pairs when at least 8 inputs are kept and 64 frames are in the mean.
+  - **The calibration (six bursts, 117 inputs).** The still inputs read at most 0.012, 0.83, 0.59, 0.065 and 0.042 on 0001, 0003, 0008, 0051 and 0097. On 0017 one input of 24, 0.249 px off the mean, read 2.16 and was dropped.
+  - **The excess grows as the offset squared:** 11 to 33 noise variances per px² at ISO 100, and a 1 px move reads about 27. 0017's dropped input is its offset alone (2.08 predicted, and no block stands out). The gate stays at 1.5 and errs toward dropping: 1 input in 117 is the price.
+- **The synthetic pairs' grain (finding 2 of section 20.10), fixed as the real pairs are made.** `--sensor-scale 2` runs the sensor, its mosaic and the bilinear demosaic at twice the tile's resolution, then a 2 × 2 box (`camera.simulate_frame`). Default 1, unchanged.
+  - **The noise level is kept.** The ratio of the variance white sensor noise keeps through the demosaic at the tile to what it keeps at 2× and a box was measured on 4 × 512² draws: R, G, B 1.443, 1.443 and 1.439 per pixel, and 1.22, 1.10 and 1.18 per row; without a mosaic the box alone gives 4 and 2. Each pixel's noise variance at the sensor is raised by it (`SENSOR_VAR_RATIO`): the well and the electrons per unit radiance divided by it, read noise and an explicit pedestal by its root, row noise so the row offsets keep their level.
+  - **Only the grain changes.** The luminance's Haar HH reads 9.6 dB over its std at the tile and 3.1 dB at 2× and a box. That is where the real pairs and SIDD read it (1 to 3 dB).
+  - **Sensor scale 1 is bit-identical to the code before it**, checked against the old `simulate_frame` on 8 cases: the defaults, no mosaic, row noise with shading, and read noise with a pedestal, each at supersampling 1 and 2.
+  - **The cost** is about 20 % more CPU per sample: 0.15 against 0.125 s per 256 px dead-leaves sample on 2 threads.
+- **SIDD's pairs in training, and their share of the draw.** The store is built as the others are (`python -m harness data realstore --sources sidd-dng --splits train val`). A real pair is drawn by scene, every scene the same, and HDR+ holds 3,183 of the about 3,585 real training scenes: about 90 SIDD stacks would be 2.4 % of the real draws. `--real-weights source=w` scales a source's scenes' draw mass (1 for a source not named). Without it the draw is the one before, the same random numbers, checked. The real validation draw stays unweighted, and the model card lists a real-pair source that is not a clean one, with its licence and weight.
+- **Once SIDD trains, its validation score is the standard protocol but not held-out content.** NAFNet's 40.21 dB was trained on SIDD Medium, and ours will be too, so the two compare as the papers compare them. SIDD's validation blocks come from the same 10 scenes as its training instances, though, so a gain there is not a gain on unseen content. raw.pixls.us stays the held-out set that decides.
+- **The screen: e_sensor2x** (`.tmp/sensor_screen.sh`, from `.tmp/frozen_sensor`). One change from a_naf_s0, the control: `--real rawnind,hdr-plus-burst,si-hdr --p-real 0.5 --sensor-scale 2`, NAFNet's arm, seed 0, 28,000 steps. Its validation renders at sensor scale 2 too, so its validation loss does not compare with the control's. The held-out sets, SIDD and the verdict do.
+- **How to read it.**
+  - **Shadow SNR on raw.pixls.us rises toward d_realonly's (28.73) with texture, MTF50 and colour held:** the synthetic pairs' grain was the cause. Sensor scale 2 goes into every run after, and SIDD's pairs are added to it.
+  - **It rises with texture lost:** the coarse grain was hiding detail the synthetic pairs taught. Read the per-metric table before deciding.
+  - **It does not move:** the grain is not what the synthetic pairs unteach. What is left is how few real pairs there are against synthetic ones, and SIDD's pairs are the next step either way.

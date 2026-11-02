@@ -275,11 +275,15 @@ class PlaneStats:
         if len(self.kept) < self.keep:
             self.kept.append(x)
 
-    def finish(self) -> dict:
+    def finish(self, fit_span: float | None = None) -> dict:
+        """`fit_span`, DN above black, narrows the range the bins and the fit window cover from white - black
+        (pixels above it out of the bins): a dim burst's pixels all sit in the first few bins of the full span."""
         mean, var = self.w.mean, self.w.variance()
         black, white = self.black, self.white
-        bins = bin_variance(mean, var, black, white, n_frames=int(self.w.n))
-        fit = fit_nlf(bins, black, white)
+        top = black + fit_span if fit_span and fit_span < white - black else white
+        sel = mean <= top if top < white else np.ones(mean.shape, dtype=bool)
+        bins = bin_variance(mean[sel], var[sel], black, top, n_frames=int(self.w.n))
+        fit = fit_nlf(bins, black, top)
         out = {"n_frames": int(self.w.n), "n_pixels": int(mean.size), "black": black, "white": white,
                "mean_dn_above_black": float(mean.mean() - black),
                "clipped_fraction": float(np.mean(mean >= white - 1.0)), "bins": bins, "fit": fit,
@@ -291,8 +295,9 @@ class PlaneStats:
             flat = flat_mask(mean, var_pred)
             out["fit_all_pixels"] = fit
             out["flat_fraction"] = float(flat.mean())
-            bins_flat = bin_variance(mean[flat], var[flat], black, white, n_frames=int(self.w.n))
-            fit_flat = fit_nlf(bins_flat, black, white)
+            flat_in = flat & sel
+            bins_flat = bin_variance(mean[flat_in], var[flat_in], black, top, n_frames=int(self.w.n))
+            fit_flat = fit_nlf(bins_flat, black, top)
             if fit_flat["ok"]:
                 bins, fit = bins_flat, fit_flat
                 out["bins"], out["fit"] = bins, fit

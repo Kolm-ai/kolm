@@ -82,3 +82,34 @@ def test_row_noise_is_shared_along_rows():
     col_means = out.mean(axis=0) - out.mean()
     assert row_means.std() > 5 * col_means.std()
     assert row_means.std() == pytest.approx(50.0, rel=0.3)
+
+
+def _hh_gap_db(img):
+    """The luminance's std over its finest Haar diagonal detail's, in dB: 0 for white noise, more when coarser."""
+    lum = img[8:-8, 8:-8] @ np.array([0.2126, 0.7152, 0.0722])
+    hh = (lum[0::2, 0::2] - lum[0::2, 1::2] - lum[1::2, 0::2] + lum[1::2, 1::2]) / 2
+    return 20 * np.log10(lum.std() / (np.median(np.abs(hh)) / 0.6745))
+
+
+@pytest.mark.parametrize("ss", [1, 2])
+@pytest.mark.parametrize("level,read", [(0.3, 5.0), (0.01, 12.0)])
+def test_sensor_scale_2_keeps_the_noise_level_and_makes_its_grain_fine(ss, level, read):
+    c = _cam(bayer=True, read_noise_e=read)
+    flat = _flat(level, 256 * ss, 256 * ss)
+    one = simulate_frame(flat, c, ss, np.random.default_rng(0))
+    two = simulate_frame(flat, c.replace(sensor_scale=2), ss, np.random.default_rng(0))
+    assert two.shape == one.shape == (256, 256, 3)
+    assert two[8:-8, 8:-8].mean(axis=(0, 1)) == pytest.approx(one[8:-8, 8:-8].mean(axis=(0, 1)), rel=0.01)
+    assert two[8:-8, 8:-8].std(axis=(0, 1)) == pytest.approx(one[8:-8, 8:-8].std(axis=(0, 1)), rel=0.05)
+    assert _hh_gap_db(one) > 8.0 and _hh_gap_db(two) < 4.5   # 9.6 and 3.1 dB for white sensor noise
+
+
+def test_sensor_scale_2_keeps_row_noise_and_the_clip():
+    c = _cam(bayer=True, row_noise_e=50.0, read_noise_e=0.0)
+    rows = [simulate_frame(_flat(0.5, 128, 256), c.replace(sensor_scale=s), 1, np.random.default_rng(1))
+            [8:-8, 8:-8].mean(axis=1).std(axis=0) for s in (1, 2)]
+    assert rows[1] == pytest.approx(rows[0], rel=0.15)
+    hot = simulate_frame(_flat(2.0), c.replace(sensor_scale=2), 1, np.random.default_rng(0))
+    assert hot.max() == pytest.approx(1.0 / c.white_fill, rel=0.01)   # the well clips at the same radiance
+    with pytest.raises(ValueError):
+        simulate_frame(_flat(0.5), c.replace(sensor_scale=3), 1, np.random.default_rng(0))

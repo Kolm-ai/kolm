@@ -1,7 +1,8 @@
 """The real-pair training store (harness.data.realstore): a build over the fake pairs that stores the aligned
 scenes once, records the rejected pair and resumes without decoding; the store that serves unclipped tiles whose
 input, target, shift, gains and capture descriptor are realpairs.match_pair's; a reference the source's
-clean.exclude names left out at load; HDR+'s synthetic chart bursts excluded; and the CLI wiring."""
+clean.exclude names left out at load; per-source scene weights on the draw; HDR+'s synthetic chart
+bursts excluded; and the CLI wiring."""
 from __future__ import annotations
 
 import argparse
@@ -118,6 +119,38 @@ def test_real_store_serves_match_pairs_tiles_with_their_capture(tmp_path):
     text = train.summary()
     assert "split train: 1 pairs in 1 scenes (fake 1 drawn 100%)" in text and "electrons at clip" in text
     assert CLIP > 0.9
+
+
+def test_real_store_weights_scale_a_sources_scene_draws_and_leave_the_default_draw_as_it_was(tmp_path):
+    import shutil
+    imgs, pairs = _fake_pairs(np.random.default_rng(5))
+    build_store("fake", ("train", "val"), scale=1, root=tmp_path, workers=1, log=None, decode=_decoder(imgs, []),
+                pairs=pairs)
+    shutil.copytree(store_dir("fake", tmp_path), store_dir("fake2", tmp_path))
+    for j in store_dir("fake2", tmp_path).glob("*/*.json"):              # the same scene, a second source
+        meta = json.loads(j.read_text(encoding="utf-8"))
+        j.write_text(json.dumps({**meta, "source": "fake2"}), encoding="utf-8")
+
+    def drawn(store, n=400):
+        rng = np.random.default_rng(1)
+        got = [store.pairs[store.random_tile(rng)["pair"]].meta["source"] for _ in range(n)]
+        return got.count("fake2") / n, got
+
+    flat = RealStore(["fake", "fake2"], "train", tmp_path, tile=64)
+    assert flat.scenes == 2 and flat.shares() == {"fake": 0.5, "fake2": 0.5}
+    share, base = drawn(flat)
+    assert 0.4 < share < 0.6
+    for same in ({"fake": 1}, {"fake": 2, "fake2": 2}):                  # one mass for every scene: the old draw
+        assert drawn(RealStore(["fake", "fake2"], "train", tmp_path, tile=64, weights=same))[1] == base
+    heavy = RealStore(["fake", "fake2"], "train", tmp_path, tile=64, weights={"fake2": 3})
+    assert heavy.shares() == pytest.approx({"fake": 0.25, "fake2": 0.75})
+    assert 0.68 < drawn(heavy)[0] < 0.82 and "fake 1 drawn 25%, fake2 1 drawn 75%" in heavy.summary()
+    assert drawn(RealStore(["fake", "fake2"], "train", tmp_path, tile=64, weights={"fake": 0}))[0] == 1.0
+    with pytest.raises(ValueError, match="nope"):
+        RealStore(["fake", "fake2"], "train", tmp_path, weights={"nope": 2})
+    for bad in ({"fake": -1}, {"fake": 0, "fake2": 0}):
+        with pytest.raises(ValueError, match="non-negative"):
+            RealStore(["fake", "fake2"], "train", tmp_path, weights=bad)
 
 
 def test_real_store_leaves_out_a_reference_the_clean_exclude_names(tmp_path, monkeypatch):

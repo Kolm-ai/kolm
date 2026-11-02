@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from harness.data.collect import Collector, sha256_of
+from harness.data.collect import Collector, consumed_marker, sha256_of
 from harness.data.manifest import FileSpec, Source, load_manifest, validate
 
 
@@ -45,6 +45,20 @@ def test_collector_is_idempotent_and_verifies(tmp_path):
     assert not (tmp_path / "data" / "raw" / "bad" / "x.txt").exists()
     lines = (tmp_path / "data" / "ledger.jsonl").read_text().splitlines()
     assert sum(json.loads(l)["status"] == "failed" for l in lines) == 1
+
+
+def test_a_consumed_download_counts_as_present_until_its_marker_goes(tmp_path):
+    src = _local_source(tmp_path)
+    root = tmp_path / "data"
+    assert Collector(root=root, log=lambda *_: None).fetch_source(src)["done"] == 3
+    f0 = root / "raw" / "local" / "sub" / "f0.txt"
+    consumed_marker(f0).write_text("{}\n")
+    f0.unlink()  # a reducer consumed it
+    s = Collector(root=root, log=lambda *_: None).fetch_source(src)
+    assert s["already"] == 3 and s["done"] == 0 and not f0.exists()
+    consumed_marker(f0).unlink()
+    s = Collector(root=root, log=lambda *_: None).fetch_source(src)
+    assert s["done"] == 1 and f0.exists()
 
 
 def test_ledger_survives_a_torn_line_and_locks_its_append(tmp_path):

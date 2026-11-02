@@ -1866,6 +1866,45 @@
    "notes": "catalog:sidd. Unofficial DNG mirror of the SIDD source bursts (115 instances x 150 DNG, 234.5 GB); metadata/train_metadata.csv gives camera, ISO, shutter per instance. Bounded pull used: --param pattern='data/train/(0063|0130|0064|0108)_DNG' --max-bytes 1e10 (Google Pixel at ISO 100/400/1600/6400, 8.5 GB); second camera: pattern='data/train/(0028|0068|0032|0030)_DNG' then '(0088|0134)_DNG' (two brighter iPhone 7 ISO 100 bursts, 5.0 GB, step 12) --max-bytes 1e10 (iPhone 7 at ISO 100/200/800/1600, 9.1 GB; the ISO 100 burst is a dark scene and fails the fit with 3 of 4 usable bins); any regex on the repo path works, e.g. pattern='README|metadata' for the metadata alone."
   },
   {
+   "id": "sidd-dng",
+   "name": "SIDD source bursts (DNG), as training pairs",
+   "kind": "dataset",
+   "access": "api",
+   "url": "https://huggingface.co/datasets/MhdMohammadi/SIDD-CC-DNG",
+   "license": "MIT (SIDD's terms, abdokamel.github.io/sidd; the mirror carries the same 115 instances)",
+   "size_bytes": 234500000000.0,
+   "gives": "115 SIDD Medium training instances (5 smartphones, ISO 50 to 10000), 150 raw DNG frames each of a static scene on a tripod: real noisy frames and, from the frames that are not inputs, their own clean reference",
+   "harness_use": "real noisy/clean raw pairs (MODEL_PLAN 20.11): siddburst registers every frame (an affine map on the 2x2 quads' luminance), keeps as inputs up to 24 frames spread over the burst that lie within 0.25 px of one frame at every corner, and merges the other frames that hold (none with a plane mean off the burst's, each scaled per plane to the burst's level) onto each CFA plane in raw DN by order-1 kernel regression in the inputs' average geometry, so the target holds none of its input's noise; an input whose mismatch with the mean beyond the noise (pair excess) is over 1.5 is dropped, and a burst with fewer than 8 inputs kept or 64 frames in the mean gives no pairs. Its frames and means decode at the DNGs' own levels (siddburst.decode_sidd)",
+   "expander": "hf_hub_files",
+   "params": {
+    "repo": "MhdMohammadi/SIDD-CC-DNG",
+    "pattern": "^(README[.]md|metadata/.*|data/train/[0-9]{4}_DNG[.]zip)$"
+   },
+   "clean": {
+    "scale": 2,
+    "pair_scale": 2,
+    "scene": "^stacks/[0-9]{4}_s([0-9]{3})/",
+    "include": ["stacks/*/mean.npy"]
+   },
+   "notes": "catalog:sidd. The split keys on SIDD's scene number (the stack directory's _sNNN), not the instance, so one scene shot by several phones, ISOs and lights is on one side of it; the only clean items are the stacks' means, never a zip's noisy DNGs. The same Hub repo as hf-sidd-dng-mirror under its own id, so its files land on their own drive (raw/sidd-dng is a junction to C:/lens-harness-data/raw/sidd-dng) and the noise check's ten bursts stay where they are. Every instance is in SIDD Medium's training list; none is a SIDD validation or benchmark instance, so the SIDD validation score stays clean. User's decision 2026-11-02: SIDD is a training source; its hashed val and test scenes stay out of training. Each zip is reduced (siddburst) and may then be deleted; the ledger keeps its sha256."
+  },
+  {
+   "id": "rellisur",
+   "name": "RELLISUR (real low-light image super-resolution pairs)",
+   "kind": "dataset",
+   "access": "api",
+   "url": "https://zenodo.org/records/5234969",
+   "license": "CC BY 4.0 (the Zenodo record's licence, read 2026-11-02)",
+   "size_bytes": 8857000000.0,
+   "gives": "850 scenes, each five under-exposed low-light shots and a normal-light reference at three resolutions (Aakerberg, Nasrollahi and Moeslund, NeurIPS 2021 Datasets and Benchmarks); RELLISUR.zip, 8.9 GB",
+   "harness_use": "real low-light/normal-light pairs from one tripod; read before use (sRGB or raw, registration, licence of each part)",
+   "expander": "zenodo_record",
+   "params": {
+    "record": 5234969
+   },
+   "notes": "Zenodo record 5234969, one archive (RELLISUR.zip) with its md5. raw/rellisur is a junction to C:/lens-harness-data/raw/rellisur. Not a training source until its pairs are read and checked."
+  },
+  {
    "id": "hf-mit-adobe-5k",
    "name": "MIT-Adobe FiveK",
    "kind": "dataset",
@@ -2107,8 +2146,8 @@
    "url": "https://doi.org/10.7910/DVN/SGHDCP",
    "license": "MIT",
    "size_bytes": 473360000000.0,
-   "gives": "14 files, 473 GB: 12 zips of 38 GB each per phone camera and scene set (e.g. iphone_11_pro_main/indoor), a .tab index and a README",
-   "harness_use": "ISO series + calibration frames, MIT, Harvard Dataverse",
+   "gives": "14 files, 473 GB: 12 zips of 26 to 50 GB, one per sensor and scene set (iPhone 11 Pro main and tele, Sony RX100 IV, Sony A7R III; indoor/outdoor), a .tab index and a README",
+   "harness_use": "SYNTHETIC noisy ISO series on a low-ISO clean frame per scene (calibrated noise models, arXiv 2512.15905), MIT, Harvard Dataverse: not real-noise pairs and not averaged ground truth; its calibration method is a reference for noise.py, not a pull",
    "expander": "dataverse_dataset",
    "params": {
     "server": "https://dataverse.harvard.edu",
