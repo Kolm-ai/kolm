@@ -1637,3 +1637,118 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
     - **The efficient runs keep their lead at matched shadows:** the efficiency is real. The next long run is r0t0's loss at length, with the scale as the release's strength control.
     - **Their lead closes as they are pushed clean:** the margin was noise and detail sharpened together, not a better trade, and the data and the loss are the levers again.
     - **The scale does not move the shadows:** the models read their noise from the image, not the descriptor, so the operating point has to be trained.
+- **The result of the inference sweeps (11-03; `.tmp/noise_sweep.md`, `.tmp/own_ladder.md`, `.tmp/own_ladder_pertile.md`).**
+  - **Setup.** The control (a_naf_s0), p_r0t0_s2, v15, v17 and v18s0, all in known mode.
+  - **Reproduction.** Each sweep's default arm reproduces the stored reports.
+  - **Frontier.** It is the gate's, read at each output's own shadow SNR.
+  - **The stated noise, ×1 to ×8: the third case.** The probe's noise ×2 had already shown it.
+    - **raw.pixls.us:** at ×8 the shadows move +0.3 to +0.9 dB. The probe's −0.02 dB here predicted this, so this half of the sweep was not needed.
+    - **RawNIND:** the shadows peak at ×2 to ×3, +1.3 to +1.8 dB (the control 29.21 → 30.52), then fall back. v15's do not rise.
+  - **The stated blur, raw.pixls.us only (RawNIND states none): +1.7 to +2.4 dB from the blur as rendered to none.**
+    - With no mosaic, or the noise ×8 on top, the gain reaches +3.4 dB.
+    - Every run's margin falls as its shadows rise.
+    - Each cell is shadow SNR / texture / texture − frontier:
+
+| Run | Blur as rendered | Blur ×½ | No blur | No blur, no mosaic | No blur, noise ×8 |
+|---|---|---|---|---|---|
+| a_naf_s0, control | 21.66 / 0.565 / +0.217 | 22.35 / 0.539 / +0.207 | 23.32 / 0.502 / +0.199 | 23.64 / 0.441 / +0.165 | 23.86 / 0.473 / +0.194 |
+| p_r0t0_s2 | 19.89 / 0.677 / +0.294 | 21.32 / 0.578 / +0.249 | 22.33 / 0.465 / +0.150 | 23.29 / 0.449 / +0.161 | 22.19 / 0.523 / +0.213 |
+| v15 | 20.36 / 0.676 / +0.296 | 21.33 / 0.584 / +0.230 | 22.78 / 0.474 / +0.164 | 22.77 / 0.438 / +0.149 | 22.91 / 0.457 / +0.158 |
+| v17 | 18.67 / 0.797 / +0.355 | 19.52 / 0.701 / +0.283 | 20.45 / 0.574 / +0.194 | 21.59 / 0.566 / +0.230 | 21.45 / 0.546 / +0.211 |
+| v18s0 | 19.67 / 0.984 / +0.534 | 20.61 / 0.874 / +0.480 | 21.49 / 0.782 / +0.406 | 21.41 / 0.799 / +0.447 | 22.20 / 0.715 / +0.376 |
+
+  - **The stated target shadow SNR, both sets: the widest control, and it turns over.**
+    - **The control:** the conditioning's own z for the target's shadow SNR, set from 0 to 6 with its mask at 1.
+    - **The default:** the calibration restores' mean, stated on 43 % of tiles.
+    - **Shadow SNR in dB:**
+
+| Run | raw.pixls.us z 0 | Peak (z) | z 6 | RawNIND z 0 | Peak (z) | z 6 |
+|---|---:|---:|---:|---:|---:|---:|
+| a_naf_s0, control | 20.73 | 25.31 (3) | 23.34 | 27.74 | 31.55 (2) | 30.69 |
+| p_r0t0_s2 | 18.52 | 23.41 (6) | 23.41 | 23.06 | 28.82 (4) | 28.18 |
+| v15 | 18.93 | 23.44 (3) | 20.05 | 24.56 | 27.53 (3) | 23.90 |
+| v17 | 17.38 | 22.67 (2) | 16.85 | 23.06 | 27.86 (2) | 25.61 |
+| v18s0 | 19.11 | 21.54 (2) | 15.96 | 22.63 | 27.15 (3) | 24.26 |
+
+    - **The range from z 0 to the peak is 2.4 to 5.8 dB.** p_r0t0 is flat on raw.pixls.us from z 3 (23.11 to 23.41 dB).
+    - **Past the peak the shadows fall and texture rises again.** v18s0 at z 6 reads 15.96 dB and texture 1.213.
+      - A reading, not checked: z 2 to 3 (36 to 51 dB stated) is where the training targets' stated shadow SNR thins out.
+    - **Reach.** No run reaches the input's 26.02 dB on raw.pixls.us. On RawNIND only the control reaches SCUNet's 29.76, and none reaches NAFNet's 34.24.
+    - **Texture over 1 is oversharpening.**
+      - texture_hf_fidelity is a regression gain onto the truth's detail, unbounded above 1. p_r0t0 on RawNIND reads 1.009 at the default and 1.157 at z 0.
+      - Its margin over the frontier then overstates true detail.
+      - v18s0's MTF50 of 0.500 on raw.pixls.us is the metric's ceiling at Nyquist.
+    - **Along the stated target and the blur, raw.pixls.us at matched shadow SNR** (texture / texture − frontier):
+
+| Run | Stated target, 21 dB | Stated target, 22 dB | Stated target, 23 dB | Blur, 22 dB |
+|---|---|---|---|---|
+| a_naf_s0, control | 0.604 / +0.235 | 0.547 / +0.216 | 0.490 / +0.196 | 0.557 / +0.216 |
+| p_r0t0_s2 | 0.622 / +0.282 | 0.575 / +0.266 | 0.530 / +0.245 | 0.511 / +0.190 |
+| v15 | 0.621 / +0.267 | 0.567 / +0.248 | 0.506 / +0.221 | 0.523 / +0.190 |
+| v17 | 0.670 / +0.313 | 0.596 / +0.277 | not reached | not reached |
+| v18s0 | 0.897 / +0.517 | not reached | not reached | not reached |
+
+  - **Each restorer's own ladder: every one at exactly the same noise** (`.tmp/own_ladder.py`).
+    - **What it is.** The frontier's construction, the Wiener ladder fitted per tile and channel on the truth, is run on each restorer's output instead of the input.
+    - **What it measures.** At a given shadow SNR, it is the most true detail a linear strength control could keep from that output.
+    - **Limits.** It is an oracle, not deployable. It is the same for every restorer and for the input, whose ladder is the frontier.
+    - **How it is read.** Each tile is placed at the target on its own ladder, as the gate matches (`.tmp/own_ladder_pertile.py`).
+      - Read this way, the gate's frontier at each output's own SNR reproduces heldout.json: 0.348 for the control on raw.pixls.us, 0.138 on RawNIND.
+      - At most 8 of 64 tiles are clamped to a ladder's end.
+    - **Texture at matched shadow SNR, known / blind:**
+
+| Restorer | raw.pixls.us 22 dB | 26.02 (input) | 29.79 (NAFNet) | RawNIND 26 dB | 29.76 (SCUNet) | 34.24 (NAFNet) |
+|---|---|---|---|---|---|---|
+| *input: the frontier* | 0.329 | 0.196 | 0.121 | 0.223 | 0.127 | 0.054 |
+| a_naf_s0, control | 0.470 / 0.452 | 0.298 / 0.275 | 0.162 / 0.158 | 0.432 / 0.313 | 0.248 / 0.165 | 0.119 / 0.080 |
+| p_r0t0_s2 | 0.460 / 0.447 | 0.245 / 0.247 | 0.144 / 0.136 | 0.549 / 0.430 | 0.323 / 0.244 | 0.157 / 0.124 |
+| v15 | 0.404 / 0.400 | 0.224 / 0.232 | 0.144 / 0.145 | 0.587 / 0.362 | 0.333 / 0.223 | 0.151 / 0.110 |
+| v17 | 0.390 / 0.399 | 0.202 / 0.213 | 0.128 / 0.115 | 0.484 / 0.403 | 0.278 / 0.228 | 0.125 / 0.115 |
+| v18s0 | 0.620 / 0.599 | 0.353 / 0.318 | 0.198 / 0.188 | 0.581 / 0.467 | 0.363 / 0.285 | 0.180 / 0.130 |
+| *NAFNet, blind* | 0.222 | 0.129 | 0.074 | 0.161 | 0.095 | 0.051 |
+| *Restormer, blind* | 0.304 | 0.183 | 0.115 | 0.135 | 0.080 | 0.035 |
+| *SCUNet, blind* | 0.221 | 0.140 | 0.108 | 0.129 | 0.074 | 0.040 |
+
+    - **The median curve reads one rung for every tile.**
+      - **raw.pixls.us:** values move −0.04 to +0.11 from the per-tile read.
+        - v18s0 still leads everywhere, and p_r0t0, v15 and v17 in known mode are still at or under the control.
+        - p_r0t0 blind reads above the control at 22 and 26.02 dB (0.557 and 0.302 against 0.515 and 0.293).
+      - **RawNIND:** it lifts the input's ladder (0.385 against 0.127 at 29.76 dB) and narrows our runs' spread (0.476 to 0.534 known, against 0.248 to 0.363). The baselines are nearly unchanged (0.096 to 0.111).
+      - **Why:** RawNIND's tiles differ widely in noise, so a single rung leaves the clean tiles their detail. The per-tile read is the gate's, so it leads.
+- **How it reads.**
+  - **The inference knobs move each run along its own trade, and none takes it to a finished image's shadows.**
+    - **How far each moves the shadows:** the stated noise up to 0.9 dB on raw.pixls.us and 1.8 on RawNIND, the blur 1.7 to 2.4, the stated target 2.4 to 5.8 before it turns over.
+    - **Reach:** no run reaches the input's shadows on raw.pixls.us.
+    - **Which case:** the third for the noise, and in part for the others. The operating point has to be trained.
+  - **v18s0 keeps its lead at matched noise: on both sets, in both modes and in every read.**
+    - **raw.pixls.us, at the input's 26.02 dB per tile:** 0.353 known, against the control's 0.298 and the frontier's 0.196.
+    - **raw.pixls.us, along the stated target at 21 dB:** margin +0.517 against +0.235.
+    - **RawNIND, at SCUNet's 29.76 dB:** 0.363 against 0.248.
+    - **So length and data are the lever that held.**
+  - **On raw.pixls.us, p_r0t0's, v15's and v17's lead depends on the read: the second case there.**
+    - **Along the stated target** they keep +0.03 to +0.08 of margin over the control at 21 to 23 dB.
+    - **Along the blur** they fall under it: +0.190 against +0.216 at 22 dB.
+    - **On their own ladders** they are at or under it: 0.390 to 0.460 against 0.470 at 22 dB, and 0.202 to 0.245 against 0.298 at 26.02.
+    - **A likely reading.** texture_hf_fidelity is a regression gain, so sharpening raises it; the oracle filter refits each band's gain and takes that out. Their default margins were sharpening and noise together.
+  - **On RawNIND's real pairs every efficient run keeps a lead at matched noise.**
+    - Along the stated target at 28 dB, p_r0t0's margin is +0.485 against the control's +0.144.
+    - On the ladders at 29.76 dB per tile, the runs keep 0.278 to 0.363 against 0.248.
+  - **Against the public baselines at their own noise on real pairs, ours keep 2.6 to 4.9 times their true detail known, and 1.7 to 3.9 times blind.**
+    - **RawNIND, per tile at SCUNet's 29.76 dB:** ours keep 0.248 to 0.363 known and 0.165 to 0.285 blind. SCUNet keeps 0.074, Restormer 0.080 and NAFNet 0.095, all under the input's own frontier (0.127).
+    - **Deployed, not oracle:**
+      - The control at 29.76 dB along the stated target keeps texture 0.275, MTF50 0.277, margin +0.146.
+      - SCUNet's output keeps 0.076, MTF50 0.177, margin −0.043.
+    - **raw.pixls.us, at the input's 26.02 dB:** ours keep 0.202 to 0.353 against the baselines' 0.129 to 0.183.
+  - **Blind trails known on real pairs:** per tile at 29.76 dB, by 0.05 to 0.11. On raw.pixls.us the two modes are within 0.035.
+  - **Caveats.**
+    - The ladders are an oracle fitted on the truth. They bound what a linear strength control could keep, not what a deployed one does.
+    - There is one seed per v run, and v18s0 also changed the data (UHD-IQA), the seed and the validation draw.
+    - raw.pixls.us is rendered by our own renderer.
+    - Texture over 1 overstates true detail.
+- **Next: a deployable strength control, then the long run on v18s0's path.**
+  - **The control, evaluation only.**
+    - One per-band gain curve per strength is fitted on the calibration restores' outputs against their targets, not on the held-out truth.
+    - It is applied to every run's held-out output and read against that run's own oracle ladder, the same way.
+  - **Read in advance:**
+    - **It comes within reach of the oracle.** The release has its strength control without training, and the next long run is chosen on matched-noise detail alone: v18s0's recipe at length on the widest licensed data.
+    - **It falls well short.** The operating point is trained: the stated target becomes the control, with the training targets' stated shadow SNR widened to the range inference needs.
