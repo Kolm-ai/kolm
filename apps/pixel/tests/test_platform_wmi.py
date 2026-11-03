@@ -3,7 +3,7 @@ import platform
 import sys
 
 import pytest
-import torch
+torch = pytest.importorskip("torch")  # the model extra is optional; CI installs only [data,dev]
 from torch.utils.data import DataLoader, Dataset
 
 import harness  # noqa: F401  (importing the package is the fix)

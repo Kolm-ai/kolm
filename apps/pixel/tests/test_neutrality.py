@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import torch
+torch = pytest.importorskip("torch")  # the model extra is optional; CI installs only [data,dev]
 
 from harness.model import neutrality as N
 from harness.model import train as T

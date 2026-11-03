@@ -2,7 +2,7 @@
 renderer geometry."""
 import numpy as np
 import pytest
-import torch
+torch = pytest.importorskip("torch")  # the model extra is optional; CI installs only [data,dev]
 
 from harness.data.burststore import WARP_MARGIN
 from harness.data.degrade import DegradeParams

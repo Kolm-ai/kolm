@@ -121,6 +121,7 @@ def test_photo_command_takes_a_folder(tmp_path):
 
 
 def test_export_writes_a_release_that_restores_as_the_checkpoint_does(tmp_path):
+    pytest.importorskip("safetensors")
     from harness.model.apply import load_model, restore_frames
     from harness.model.export import CONFIG, export
     ck = _checkpoint(tmp_path / "m.pt")
@@ -162,6 +163,7 @@ def test_capture_eval_scores_the_three_modes(tmp_path, monkeypatch):
 
 
 def test_card_states_the_release_its_reports_and_the_licences(tmp_path):
+    pytest.importorskip("safetensors")
     from harness.model.card import render
     from harness.model.export import export
     run = tmp_path / "recovered_x"

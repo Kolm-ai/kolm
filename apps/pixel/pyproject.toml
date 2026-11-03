@@ -18,7 +18,7 @@ measure = ["rawpy>=0.19", "optiland>=0.3"]
 # Windows and manylinux_2_28. Without them the labeller records such items as skipped with a reason.
 decode = ["rawpy>=0.19", "OpenEXR>=3.2"]
 # `python -m harness model train|apply`: the recovered layer
-model = ["torch>=2.3"]
+model = ["torch>=2.3", "safetensors>=0.4"]
 # video candidates and the h264 delivery check
 video = ["imageio>=2.31", "imageio-ffmpeg>=0.4"]
 # `python -m harness model baseline`: the vendored Restormer and SCUNet reshape with einops; SIDD validation is LMDB

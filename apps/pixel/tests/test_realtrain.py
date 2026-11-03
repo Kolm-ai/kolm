@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import torch
+torch = pytest.importorskip("torch")  # the model extra is optional; CI installs only [data,dev]
 from PIL import Image
 
 import harness.model.data as D

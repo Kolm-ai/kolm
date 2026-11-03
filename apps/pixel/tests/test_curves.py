@@ -7,6 +7,8 @@ import json
 import numpy as np
 import pytest
 
+torch = pytest.importorskip("torch")  # harness.model imports torch; the model extra is optional in CI
+
 from harness.model import curves as C
 
 TRUE = (0.30, 2.0, 0.6, 2e-6)

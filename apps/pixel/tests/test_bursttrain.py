@@ -9,7 +9,7 @@ import shutil
 
 import numpy as np
 import pytest
-import torch
+torch = pytest.importorskip("torch")  # the model extra is optional; CI installs only [data,dev]
 
 import harness.model.data as D
 from harness.data import data_root
