@@ -542,7 +542,7 @@ import {
 } from './trace-translator.js';
 
 // Per-IP rate limiters (S5, S10). Express trust-proxy is set to 2 in
-// server.js so X-Forwarded-For resolves through the Vercel→Railway chain.
+// server.js so X-Forwarded-For resolves through the Vercel→ALB chain.
 // Vercel rotates client egress IPs within a /24 subnet on each request, so
 // exact-IP keying would never accumulate hits. We coalesce IPv4 to /24 and
 // IPv6 to /48 so a single client (NAT'd or not) maps to a stable key.
@@ -979,7 +979,7 @@ const teamAcceptBackoff = _wc14BackoffMiddleware('team_accept_invite');
 // Discriminator:
 //   KOLM_LOCAL_DAEMON=1      → local-daemon mode (no auth, sentinel tenant)
 //   KOLM_PRODUCTION=1        → hosted mode (auth required on inference)
-//   isProductionRuntime()    → hosted mode fallback (Railway/Vercel/Lambda)
+//   isProductionRuntime()    → hosted mode fallback (AWS/Vercel)
 //   anything else            → local-daemon mode (developer laptop)
 //
 // We resolve hostname once at module load; it never changes for a given
@@ -1171,7 +1171,7 @@ const RECEIPT_SECRET = (() => {
   const s = effectiveReceiptSecret();
   if (s) return s;
   if (isProductionRuntime()) {
-    console.error('[router] WARNING: RECIPE_RECEIPT_SECRET not set - receipt endpoints will 503. Set it on Railway env.');
+    console.error('[router] WARNING: RECIPE_RECEIPT_SECRET not set - receipt endpoints will 503. Set it in the API host env (SSM parameter).');
     return null;
   }
   return null;
@@ -1768,12 +1768,12 @@ export function buildRouter() {
         }
       }
     } catch (_) { /* deliberate: cleanup */ }
-    // Allow env override (Vercel exposes VERCEL_GIT_COMMIT_SHA, Railway
-    // exposes RAILWAY_GIT_COMMIT_SHA on the build machine).
+    // Allow env override (Vercel exposes VERCEL_GIT_COMMIT_SHA; the container
+    // build passes GIT_COMMIT_SHA as a build arg, see Dockerfile).
     gitCommit = gitCommit
       || process.env.KOLM_GIT_COMMIT
       || process.env.VERCEL_GIT_COMMIT_SHA
-      || process.env.RAILWAY_GIT_COMMIT_SHA
+      || process.env.GIT_COMMIT_SHA
       || null;
     if (gitCommit && gitCommit.length > 12) gitCommit = gitCommit.slice(0, 12);
 
@@ -1828,7 +1828,7 @@ export function buildRouter() {
       version: '0.2.0',
       library_version: LIBRARY_VERSION,
       git: gitCommit,
-      region: process.env.RAILWAY_REGION || process.env.REGION || 'local',
+      region: process.env.REGION || process.env.AWS_REGION || 'local',
       uptime_s: Math.round(process.uptime()),
       gateway: 'ok',
       capture_store: captureStoreState,
@@ -3228,7 +3228,7 @@ export function buildRouter() {
         plan_tier: provisionedPlan,
         kind: 'signup',
         outcome: requiresBilling ? 'pending_billing' : 'success',
-        region: process.env.RAILWAY_REGION || process.env.REGION || process.env.VERCEL_REGION || null,
+        region: process.env.REGION || process.env.AWS_REGION || process.env.VERCEL_REGION || null,
       });
     } catch (_) { /* metrics outage must not break signup */ }
 
@@ -5612,7 +5612,7 @@ export function buildRouter() {
   // hosted-inference metering wrapper above; the rest still flow to the
   // unmetered passthrough since they aren't on the billing-units catalog yet.
   // W411 - every inference passthrough is gated by __w411HostedAuthGate so the
-  // hosted server (KOLM_PRODUCTION=1 / Railway / Vercel / Lambda) rejects
+  // hosted server (KOLM_PRODUCTION=1 / AWS / Vercel) rejects
   // anonymous requests with 401 {error:'unauthorized'}. The local daemon
   // (KOLM_LOCAL_DAEMON=1 or developer laptop) stays unauthenticated; the gate
   // stamps req.tenant = 'local:<hostname>' so captures still carry a tenant.
@@ -6816,7 +6816,7 @@ export function buildRouter() {
         recordMetricEvent({
           tenant, plan_tier: _plan, kind: 'gateway_dispatch',
           outcome: 'rate_limit',
-          region: process.env.RAILWAY_REGION || process.env.REGION || process.env.VERCEL_REGION || null,
+          region: process.env.REGION || process.env.AWS_REGION || process.env.VERCEL_REGION || null,
           namespace_id: nsSlug,
         });
       } catch (_) {} // deliberate: cleanup
@@ -7057,7 +7057,7 @@ export function buildRouter() {
         } catch (_) { /* routing is best-effort; keep the static chain */ }
       }
       // Vercel function env vars land as lowercase (anthropic_api_key) while
-      // local + Railway use UPPERCASE; walk 4 case variants per provider so
+      // local + the API host use UPPERCASE; walk 4 case variants per provider so
       // the dispatch path works on every host. Mirrors _w869FirstEnv in the
       // teacher proxy above.
       const _firstEnv = (names) => {
@@ -7074,7 +7074,7 @@ export function buildRouter() {
         fireworks:  _firstEnv(['FIREWORKS_API_KEY', 'fireworks_api_key', 'FIREWORKS_KEY', 'fireworks_key']),
         deepseek:   _firstEnv(['DEEPSEEK_API_KEY', 'deepseek_api_key', 'DEEPSEEK_KEY', 'deepseek_key']),
       };
-      // W-M wave / Vercel teacher-chat proxy fallback. When this Railway
+      // W-M wave / Vercel teacher-chat proxy fallback. When this API
       // service has no upstream key locally, the legacy adapters
       // (anthropic/openai/openrouter) will proxy through kolm.ai's
       // /v1/teacher/chat Vercel function - which DOES have the keys - 
@@ -7412,7 +7412,7 @@ export function buildRouter() {
             recordMetricEvent({
               tenant, plan_tier: _plan, kind: 'gateway_dispatch',
               outcome: (result && Number(result.status) >= 200 && Number(result.status) < 300) ? 'success' : 'failure',
-              region: process.env.RAILWAY_REGION || process.env.REGION || process.env.VERCEL_REGION || null,
+              region: process.env.REGION || process.env.AWS_REGION || process.env.VERCEL_REGION || null,
               namespace_id: nsSlug,
             });
           } catch (_) {} // deliberate: cleanup
@@ -7430,7 +7430,7 @@ export function buildRouter() {
         recordMetricEvent({
           tenant, plan_tier: _plan, kind: 'gateway_dispatch',
           outcome: (result && Number(result.status) >= 200 && Number(result.status) < 300) ? 'success' : 'failure',
-          region: process.env.RAILWAY_REGION || process.env.REGION || process.env.VERCEL_REGION || null,
+          region: process.env.REGION || process.env.AWS_REGION || process.env.VERCEL_REGION || null,
           namespace_id: nsSlug,
         });
       } catch (_) {} // deliberate: cleanup
@@ -7456,7 +7456,7 @@ export function buildRouter() {
         recordMetricEvent({
           tenant, plan_tier: _plan, kind: 'gateway_dispatch',
           outcome: 'failure',
-          region: process.env.RAILWAY_REGION || process.env.REGION || process.env.VERCEL_REGION || null,
+          region: process.env.REGION || process.env.AWS_REGION || process.env.VERCEL_REGION || null,
           namespace_id: nsSlug,
         });
       } catch (_) {} // deliberate: cleanup
@@ -7477,7 +7477,7 @@ export function buildRouter() {
       status: 'ok',
       version: '0.2.0',
       library_version: LIBRARY_VERSION,
-      region: process.env.RAILWAY_REGION || process.env.REGION || 'local',
+      region: process.env.REGION || process.env.AWS_REGION || 'local',
       uptime_s: Math.round(process.uptime()),
       stats: storeStats(),
       feature_flags: {
@@ -8882,7 +8882,7 @@ export function buildRouter() {
           tenant: req.tenant_record?.id || req.tenant,
           plan_tier: String((req.tenant_record && req.tenant_record.plan) || 'unknown').toLowerCase(),
           kind: 'compile', outcome: _outcomeC,
-          region: process.env.RAILWAY_REGION || process.env.REGION || process.env.VERCEL_REGION || null,
+          region: process.env.REGION || process.env.AWS_REGION || process.env.VERCEL_REGION || null,
           namespace_id: namespace || null,
         });
       } catch (_) {} // deliberate: cleanup
@@ -8959,7 +8959,7 @@ export function buildRouter() {
         tenant: req.tenant_record?.id || req.tenant,
         plan_tier: String((req.tenant_record && req.tenant_record.plan) || 'unknown').toLowerCase(),
         kind: 'compile', outcome: 'queued',
-        region: process.env.RAILWAY_REGION || process.env.REGION || process.env.VERCEL_REGION || null,
+        region: process.env.REGION || process.env.AWS_REGION || process.env.VERCEL_REGION || null,
         namespace_id: namespace || null,
       });
     } catch (_) {} // deliberate: cleanup
@@ -10742,10 +10742,10 @@ export function buildRouter() {
   //     (authMiddleware)). Tenant scope is enforced inside getMetricSnapshot
   //     so a caller can never read another tenant's rows even if they pass
   //     a forged ?tenant= query.
-  //   - region is best-effort: pulled from RAILWAY_REGION / REGION /
+  //   - region is best-effort: pulled from REGION / AWS_REGION /
   //     VERCEL_REGION and bucketed at write time. Empty becomes null.
   function _metricsBucketedRegion() {
-    const r = process.env.RAILWAY_REGION || process.env.REGION || process.env.VERCEL_REGION || '';
+    const r = process.env.REGION || process.env.AWS_REGION || process.env.VERCEL_REGION || '';
     if (!r) return null;
     const s = String(r).slice(0, 32).toLowerCase();
     return s || null;
@@ -13657,7 +13657,7 @@ export function buildRouter() {
     try { store_stats = storeStats(); } catch (_) {} // deliberate: cleanup
     res.json({
       now: new Date().toISOString(),
-      region: process.env.REGION || process.env.RAILWAY_REGION || 'unknown',
+      region: process.env.REGION || process.env.AWS_REGION || 'unknown',
       node_version: process.version,
       uptime_sec: Math.floor(process.uptime()),
       store: store_stats,
@@ -15110,7 +15110,7 @@ export function buildRouter() {
         KOLM_ALLOW_JSON_STORE: process.env.KOLM_ALLOW_JSON_STORE,
         KOLM_ALLOW_JSON_STORE_strict_true: process.env.KOLM_ALLOW_JSON_STORE === 'true',
         RECIPE_RECEIPT_SECRET_len: (process.env.RECIPE_RECEIPT_SECRET || '').length,
-        RAILWAY_ENVIRONMENT: process.env.RAILWAY_ENVIRONMENT,
+        AWS_EXECUTION_ENV: process.env.AWS_EXECUTION_ENV,
       },
       cwd: process.cwd(),
       data_dir: checkDir(dataDir),
@@ -15624,7 +15624,7 @@ export function buildRouter() {
         // WC06 CRITICAL PII FIX - previously this branch console.log'd the
         // full `text` payload, which embeds email + intended_use + notes for
         // every enterprise lead. That is a tenant-PII leak through stdout
-        // (Vercel/Railway log retention). Now we log only the byte size +
+        // (Vercel/CloudWatch log retention). Now we log only the byte size +
         // a hash-anchored lead id; the in-memory record still has the full
         // body for the founder to retrieve via GET /v1/lead/enterprise/:id.
         wclog.warn('lead/enterprise', 'email skipped via config', {
@@ -17279,7 +17279,7 @@ export function buildRouter() {
   // out_dir, namespace, max_steps }. Returns trainer envelope or no_trainer_installed.
   // GW (async trainer contract) - run a synchronous trainer as a background job
   // and return 202 immediately, so a real (multi-minute) training run is never
-  // killed by the Vercel/Railway proxy timeout the way an inline-blocking handler
+  // killed by the Vercel/ALB proxy timeout the way an inline-blocking handler
   // would be. Registers a jobs.js record, runs the trainer on a background fiber
   // (writing stdout/result into the job log so the GW-1 SSE stream surfaces it),
   // and emits the distill.completed webhook on success. Mirrors the auto-distill
@@ -17996,7 +17996,7 @@ export function buildRouter() {
           tenant: __tenantId,
           plan_tier: String((req.tenant_record && req.tenant_record.plan) || 'unknown').toLowerCase(),
           kind: 'capture_write', outcome: 'failure',
-          region: process.env.RAILWAY_REGION || process.env.REGION || process.env.VERCEL_REGION || null,
+          region: process.env.REGION || process.env.AWS_REGION || process.env.VERCEL_REGION || null,
           namespace_id: cleanNs,
         });
       } catch (_) {} // deliberate: cleanup
@@ -18022,7 +18022,7 @@ export function buildRouter() {
         plan_tier: String((req.tenant_record && req.tenant_record.plan) || 'unknown').toLowerCase(),
         kind: 'capture_write',
         outcome: failures.length > 0 ? 'partial' : 'success',
-        region: process.env.RAILWAY_REGION || process.env.REGION || process.env.VERCEL_REGION || null,
+        region: process.env.REGION || process.env.AWS_REGION || process.env.VERCEL_REGION || null,
         namespace_id: cleanNs,
       });
     } catch (_) {} // deliberate: cleanup
@@ -19985,7 +19985,7 @@ export function buildRouter() {
     const token = req.params.token;
     // wave 104: collision with public receipt route /r/:hash (vercel.json:200 →
     // /r.html?hash=:hash). On Vercel the rewrite fires first so this handler
-    // only ever sees real tunnel tokens, but Railway-direct and self-host hit
+    // only ever sees real tunnel tokens, but ALB-direct and self-host hit
     // Express straight and would 502 every receipt URL. Fall through when the
     // token isn't a known tunnel so the receipt handler in server.js can serve
     // public/r.html.
@@ -26524,7 +26524,7 @@ res.json({
           tenant,
           plan_tier: String((req.tenant_record && req.tenant_record.plan) || 'unknown').toLowerCase(),
           kind: 'deploy', outcome: 'success',
-          region: process.env.RAILWAY_REGION || process.env.REGION || process.env.VERCEL_REGION || null,
+          region: process.env.REGION || process.env.AWS_REGION || process.env.VERCEL_REGION || null,
           namespace_id: slug,
         });
       } catch (_) {} // deliberate: cleanup
@@ -26536,7 +26536,7 @@ res.json({
           tenant: req.tenant_record.id,
           plan_tier: String((req.tenant_record && req.tenant_record.plan) || 'unknown').toLowerCase(),
           kind: 'deploy', outcome: 'failure',
-          region: process.env.RAILWAY_REGION || process.env.REGION || process.env.VERCEL_REGION || null,
+          region: process.env.REGION || process.env.AWS_REGION || process.env.VERCEL_REGION || null,
           namespace_id: slug,
         });
       } catch (_) {} // deliberate: cleanup

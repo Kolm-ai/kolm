@@ -215,7 +215,7 @@ export async function putRateLimitRules(zone_id, rules) {
 }
 
 // Defense-in-depth on top of in-process rate limiting in src/router.js. These
-// cut traffic at the edge before it ever reaches Railway.
+// cut traffic at the edge before it ever reaches the API host.
 export function defaultRateLimitRules() {
   return [
     {

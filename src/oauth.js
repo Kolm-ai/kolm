@@ -3,7 +3,7 @@
 // exchange code for access_token, fetch /userinfo, find-or-create the tenant,
 // drop a kolm_session cookie, redirect back to the originally requested page.
 //
-// Configuration (set on Railway):
+// Configuration (set on the API host via SSM):
 //   GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET
 //   GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET
 //   OAUTH_REDIRECT_BASE = https://kolm.ai

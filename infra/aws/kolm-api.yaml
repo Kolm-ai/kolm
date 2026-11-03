@@ -1,0 +1,550 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  kolm API on ECS Fargate behind an ALB, with EFS mounted at /var/lib/kolm
+  for the sqlite store, event log, Ed25519 signing key and artifacts.
+  Exactly one task runs at a time (sqlite is single-writer), so a deploy
+  stops the old task before the new one starts; expect ~60s of 502s per
+  deploy. Secrets come from SSM Parameter Store under SsmPrefix
+  (scripts/setup-prod.sh writes them; scripts/aws/check-ssm-params.sh
+  verifies the set this template references).
+
+Parameters:
+  NetworkStackName:
+    Type: String
+    Default: kolm-prod-network
+  EcrStackName:
+    Type: String
+    Default: kolm-ecr
+  ImageTag:
+    Type: String
+    Default: prod
+    Description: Tag in the ECR repository to run. Deploys move `prod`; rollbacks retag it.
+  CertificateArn:
+    Type: String
+    AllowedPattern: '^arn:aws:acm:.+$'
+    Description: ACM certificate for the API hostname (scripts/aws/provision.sh cert).
+  PublicBase:
+    Type: String
+    Default: https://kolm.ai
+    Description: Public origin of the product site that fronts this API (PUBLIC_BASE).
+  SsmPrefix:
+    Type: String
+    Default: /kolm/prod
+    AllowedPattern: '^/[A-Za-z0-9_./-]+[^/]$'
+  Cpu:
+    Type: String
+    Default: '1024'
+    AllowedValues: ['512', '1024', '2048', '4096']
+  Memory:
+    Type: String
+    Default: '2048'
+    AllowedValues: ['1024', '2048', '3072', '4096', '8192']
+  DesiredCount:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    MaxValue: 1
+    Description: 0 or 1. Never more than one writer against the sqlite store.
+  AlbIdleTimeoutSeconds:
+    Type: Number
+    Default: 300
+    MinValue: 60
+    MaxValue: 4000
+    Description: Long enough for compile requests; the ALB closes idle connections after this.
+  HealthCheckGracePeriodSeconds:
+    Type: Number
+    Default: 120
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [7, 14, 30, 60, 90, 180, 365]
+  AlarmTopicArn:
+    Type: String
+    Default: ''
+    Description: Optional SNS topic for the unhealthy-target and 5xx alarms.
+
+Conditions:
+  HasAlarmTopic: !Not [!Equals [!Ref AlarmTopicArn, '']]
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${AWS::StackName}'
+      RetentionInDays: !Ref LogRetentionDays
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref AWS::StackName
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+  # --- Security groups -------------------------------------------------------
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub '${AWS::StackName} ALB'
+      VpcId:
+        Fn::ImportValue: !Sub '${NetworkStackName}-VpcId'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP (redirects to HTTPS)
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-alb'
+
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub '${AWS::StackName} API tasks'
+      VpcId:
+        Fn::ImportValue: !Sub '${NetworkStackName}-VpcId'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8787
+          ToPort: 8787
+          SourceSecurityGroupId: !Ref AlbSecurityGroup
+          Description: from the ALB only
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-task'
+
+  EfsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub '${AWS::StackName} EFS mount targets'
+      VpcId:
+        Fn::ImportValue: !Sub '${NetworkStackName}-VpcId'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref TaskSecurityGroup
+          Description: NFS from the API tasks
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-efs'
+
+  # --- Persistent data (EFS) -------------------------------------------------
+  FileSystem:
+    Type: AWS::EFS::FileSystem
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Encrypted: true
+      PerformanceMode: generalPurpose
+      ThroughputMode: elastic
+      BackupPolicy:
+        Status: ENABLED
+      LifecyclePolicies:
+        - TransitionToIA: AFTER_30_DAYS
+        - TransitionToPrimaryStorageClass: AFTER_1_ACCESS
+      FileSystemTags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-data'
+
+  MountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId:
+        Fn::ImportValue: !Sub '${NetworkStackName}-PublicSubnet1Id'
+      SecurityGroups:
+        - !Ref EfsSecurityGroup
+
+  MountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId:
+        Fn::ImportValue: !Sub '${NetworkStackName}-PublicSubnet2Id'
+      SecurityGroups:
+        - !Ref EfsSecurityGroup
+
+  # Every file operation through this access point runs as uid/gid 1000, the
+  # `node` user in the image, so ownership never drifts between deploys.
+  AccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref FileSystem
+      PosixUser:
+        Uid: '1000'
+        Gid: '1000'
+      RootDirectory:
+        Path: /kolm
+        CreationInfo:
+          OwnerUid: '1000'
+          OwnerGid: '1000'
+          Permissions: '0755'
+      AccessPointTags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-data'
+
+  # --- IAM -------------------------------------------------------------------
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-execution'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: read-ssm-secrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameters
+                  - ssm:GetParameter
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/*'
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-task'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: efs-data-volume
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticfilesystem:ClientMount
+                  - elasticfilesystem:ClientWrite
+                Resource: !GetAtt FileSystem.Arn
+                Condition:
+                  StringEquals:
+                    elasticfilesystem:AccessPointArn: !GetAtt AccessPoint.Arn
+        # ECS Exec (aws ecs execute-command) for operator shells into the task.
+        - PolicyName: ecs-exec
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: '*'
+
+  # --- Task definition -------------------------------------------------------
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref AWS::StackName
+      Cpu: !Ref Cpu
+      Memory: !Ref Memory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+        CpuArchitecture: X86_64
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      Volumes:
+        - Name: data
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref FileSystem
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !Ref AccessPoint
+              IAM: ENABLED
+      ContainerDefinitions:
+        - Name: api
+          Image: !Sub
+            - '${RepoUri}:${ImageTag}'
+            - RepoUri:
+                Fn::ImportValue: !Sub '${EcrStackName}-RepositoryUri'
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8787
+              Protocol: tcp
+          Environment:
+            - Name: PORT
+              Value: '8787'
+            - Name: KOLM_DATA_DIR
+              Value: /var/lib/kolm
+            - Name: KOLM_ARTIFACT_DIR
+              Value: /var/lib/kolm/artifacts
+            - Name: KOLM_STORE_DRIVER
+              Value: sqlite
+            # WAL needs local shared memory; on EFS use a rollback journal (src/store.js).
+            - Name: KOLM_SQLITE_JOURNAL_MODE
+              Value: TRUNCATE
+            - Name: REGION
+              Value: !Ref AWS::Region
+            - Name: PUBLIC_BASE
+              Value: !Ref PublicBase
+          # Each entry must exist in SSM or the task fails to start. Keep this
+          # list in sync with scripts/setup-prod.sh; scripts/aws/check-ssm-params.sh
+          # reads the names from this file and reports what is missing.
+          Secrets:
+            - Name: ANTHROPIC_API_KEY
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/ANTHROPIC_API_KEY'
+            - Name: ADMIN_KEY
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/ADMIN_KEY'
+            - Name: RECIPE_RECEIPT_SECRET
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/RECIPE_RECEIPT_SECRET'
+            - Name: STRIPE_SECRET_KEY
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/STRIPE_SECRET_KEY'
+            - Name: STRIPE_WEBHOOK_SECRET
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/STRIPE_WEBHOOK_SECRET'
+            - Name: STRIPE_PAYMENT_LINK_STARTER
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/STRIPE_PAYMENT_LINK_STARTER'
+            - Name: STRIPE_PAYMENT_LINK_PRO
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/STRIPE_PAYMENT_LINK_PRO'
+            - Name: STRIPE_PAYMENT_LINK_TEAMS
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/STRIPE_PAYMENT_LINK_TEAMS'
+            - Name: STRIPE_PAYMENT_LINK_BUSINESS
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/STRIPE_PAYMENT_LINK_BUSINESS'
+            - Name: STRIPE_PAYMENT_LINK_ENT
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/STRIPE_PAYMENT_LINK_ENT'
+            - Name: GOOGLE_OAUTH_CLIENT_ID
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/GOOGLE_OAUTH_CLIENT_ID'
+            - Name: GOOGLE_OAUTH_CLIENT_SECRET
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/GOOGLE_OAUTH_CLIENT_SECRET'
+            - Name: GITHUB_OAUTH_CLIENT_ID
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/GITHUB_OAUTH_CLIENT_ID'
+            - Name: GITHUB_OAUTH_CLIENT_SECRET
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/GITHUB_OAUTH_CLIENT_SECRET'
+            - Name: OAUTH_REDIRECT_BASE
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/OAUTH_REDIRECT_BASE'
+            - Name: RESEND_API_KEY
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/RESEND_API_KEY'
+            - Name: EMAIL_FROM
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/EMAIL_FROM'
+            - Name: EMAIL_REPLY_TO
+              ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/EMAIL_REPLY_TO'
+          MountPoints:
+            - SourceVolume: data
+              ContainerPath: /var/lib/kolm
+              ReadOnly: false
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: api
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - wget -qO- http://localhost:8787/health || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+          StopTimeout: 30
+
+  # --- Load balancer ---------------------------------------------------------
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Ref AWS::StackName
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets: !Split
+        - ','
+        - Fn::ImportValue: !Sub '${NetworkStackName}-PublicSubnetIds'
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: !Ref AlbIdleTimeoutSeconds
+        - Key: routing.http.drop_invalid_header_fields.enabled
+          Value: 'true'
+        - Key: deletion_protection.enabled
+          Value: 'true'
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId:
+        Fn::ImportValue: !Sub '${NetworkStackName}-VpcId'
+      TargetType: ip
+      Protocol: HTTP
+      Port: 8787
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: '200'
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: '443'
+            StatusCode: HTTP_301
+
+  # --- Service ---------------------------------------------------------------
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - HttpsListener
+      - HttpListener
+      - MountTarget1
+      - MountTarget2
+    Properties:
+      ServiceName: kolm-api
+      Cluster: !Ref Cluster
+      LaunchType: FARGATE
+      PlatformVersion: LATEST
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref DesiredCount
+      EnableExecuteCommand: true
+      EnableECSManagedTags: true
+      PropagateTags: SERVICE
+      HealthCheckGracePeriodSeconds: !Ref HealthCheckGracePeriodSeconds
+      # Single writer: stop the old task before starting the new one.
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets: !Split
+            - ','
+            - Fn::ImportValue: !Sub '${NetworkStackName}-PublicSubnetIds'
+          SecurityGroups:
+            - !Ref TaskSecurityGroup
+      LoadBalancers:
+        - ContainerName: api
+          ContainerPort: 8787
+          TargetGroupArn: !Ref TargetGroup
+
+  # --- Alarms (optional notification) ---------------------------------------
+  UnhealthyTargetsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-unhealthy-targets'
+      AlarmDescription: No healthy API task behind the ALB for 3 minutes.
+      Namespace: AWS/ApplicationELB
+      MetricName: HealthyHostCount
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt LoadBalancer.LoadBalancerFullName
+        - Name: TargetGroup
+          Value: !GetAtt TargetGroup.TargetGroupFullName
+      Statistic: Minimum
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref AWS::NoValue]
+      OKActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref AWS::NoValue]
+
+  Target5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-target-5xx'
+      AlarmDescription: More than 20 5xx responses from the API in 5 minutes.
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_Target_5XX_Count
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt LoadBalancer.LoadBalancerFullName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 20
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref AWS::NoValue]
+
+Outputs:
+  ClusterName:
+    Value: !Ref Cluster
+    Export:
+      Name: !Sub '${AWS::StackName}-ClusterName'
+  ServiceName:
+    Value: !GetAtt Service.Name
+    Export:
+      Name: !Sub '${AWS::StackName}-ServiceName'
+  TaskDefinitionArn:
+    Value: !Ref TaskDefinition
+  LoadBalancerDnsName:
+    Description: CNAME target for the API hostname.
+    Value: !GetAtt LoadBalancer.DNSName
+    Export:
+      Name: !Sub '${AWS::StackName}-LoadBalancerDnsName'
+  LoadBalancerHostedZoneId:
+    Value: !GetAtt LoadBalancer.CanonicalHostedZoneID
+  TargetGroupArn:
+    Value: !Ref TargetGroup
+  FileSystemId:
+    Value: !Ref FileSystem
+    Export:
+      Name: !Sub '${AWS::StackName}-FileSystemId'
+  AccessPointId:
+    Value: !Ref AccessPoint
+  TaskSecurityGroupId:
+    Value: !Ref TaskSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskSecurityGroupId'
+  LogGroupName:
+    Value: !Ref LogGroup
+  TaskRoleArn:
+    Value: !GetAtt TaskRole.Arn
+  ExecutionRoleArn:
+    Value: !GetAtt TaskExecutionRole.Arn

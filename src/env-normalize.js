@@ -1,6 +1,6 @@
 // Provider-key env-var name normalization.
 //
-// Operators keep their keys in Vercel/Railway under whatever casing the dashboard
+// Operators keep their keys in Vercel/AWS under whatever casing the dashboard
 // gave them - `runpod_api_key`, `cerebras_api`, `anthropic_api_key`,
 // `Cloudflare_api_token`, `google_api_key`, ... - but the code reads canonical
 // UPPER_SNAKE names (`RUNPOD_API_KEY`, `CEREBRAS_API_KEY`, ...). Without this,

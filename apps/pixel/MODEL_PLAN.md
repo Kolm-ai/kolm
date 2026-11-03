@@ -1,0 +1,1905 @@
+# Model plan: the data, losses and architecture a model needs to beat the camera
+
+Status 2026-10-29. This is a plan, not a record: nothing in it is built unless it says so. It draws on two kinds of evidence.
+
+- **Six research passes run today:** data impact, dataset census, faithful architecture and loss, burst and video, the rendered layer, and evaluation with baselines. They read the web, so a paper's number is on that paper's benchmark, not on our gates. Figures marked (unverified) were not read at the primary source, and (est) marks an estimate.
+- **Measurements on this machine:** the loader, the decoded store, the corpus, the gates and the thirteenth run.
+
+The companion document is [DEGRADATION_PLAN.md](DEGRADATION_PLAN.md), which covers the sampler. The papers' numbers rank the levers against each other; they do not predict our gates.
+
+## 0. The short version
+
+1. **The first blocker is the claim's definition, not the model.** On the real pairs, two of the eight gates cannot be passed by any model (section 2.1).
+   - `mtf50_cpp`: the noisy capture already sits at the metric's Nyquist ceiling (0.5).
+   - `texture_hf_fidelity`: it rewards gain above the truth's, so sharpening passes and faithful restoration cannot.
+
+   Fixing the definition is the user's call, and it comes before any amount of data or size.
+2. **Then information.** A single frame through a network that minimises error ties the capture's coherent detail at best. Only more information beats it:
+   - bursts: +1.5 to 2.5 dB on real data, at 14 frames; at 3 to 4 frames the published gain is 0.2 to 0.65 dB (section 20.6);
+   - the raw mosaic: +2.9 to 4.5 dB over processed input.
+
+   This is where "beats the best-case camera" comes from. It is not parameter count.
+3. **Then the loss.** The three standard-deviation terms of the eleventh to thirteenth runs look only at output statistics. They cannot tell a correct edge from a halo, or coherent texture from invented texture. That is the trade-off the twelfth run measured. Replace them with residual-based and phase-aware terms (section 8).
+4. **Then data quality before data volume.**
+   - JPEG references below about q90 and sharpened references teach their artifacts: q75 costs 0.54 dB, q50 about 2.9.
+   - Two training sources carry research-only licences.
+   - Each real evaluation set has 9 to 10 scenes; a claim needs at least 60.
+   - The noise model lacks the three parts that measured best: heavy-tailed read noise, a dark-frame bank, and unprocessing into camera RGB.
+5. **Size: billions, where billions help.**
+
+   | Layer | Size | Role |
+   |---|---|---|
+   | Faithful (recovered) | 30–120M, chosen by a measured ladder | single-frame restoration |
+   | Burst/video | about 150M | the information lever |
+   | Rendered | 6B (Z-Image) or 20B (Qwen-Image-Edit-2511), both Apache and already on this machine (section 16) | declared enhancement, masked and labelled |
+
+   That is about 6.3B parameters in the product, or about 20.3B with the larger rendered base; nearly all of it sits in the declared layer. No faithful restorer in the literature gains from going past about 100M at our data scale. A 0.5–1.1B faithful network would see under a tenth of the samples published recipes use (section 3).
+6. **Data to add.** The first seven sources in section 6 total about 0.94 TB and fit in D:'s 1.33 TB free, but only once we decide whether the grown corpus is also decoded into the store (section 13). They bring real scenes for evaluation, bursts, demosaic ground truth without demosaicing, tripod-averaged ground truth, HDR scenes, and roughly 8× the clean content.
+7. **The ComfyUI install on this machine** already holds about 175 GB of Apache weights (and 21 GB of FLUX under a non-commercial licence) that the rendered layer and the generative baselines need, and the tools that train LoRAs on them. It is not a source of training images: generated images have no capture physics (section 16).
+8. **Every change is read before it is trained (section 20).**
+   - A CPU check reads what a loss teaches, against the incumbent's recipe.
+   - A curve fit says what more steps of a recipe buy.
+   - A scene-level verdict replaces the cascaded gate count.
+
+   A change past the check's screen gets a probe of about a tenth of a run, not a full run.
+
+## 1. Where the model stands
+
+The thirteenth run (`recovered_v13`, 8.2M parameters) is at step 24,000 of 30,000.
+
+- **Real validation** (input → output): mtf50 0.50 → 0.38, texture 0.88 → 0.54, shadow SNR 13.7 → 20.9 dB, banding 0.023 → 0.013, edge overshoot 0.0049 → 0.0022, ΔE mean 0.78 → 0.52.
+- **Synthetic validation loss:** 0.4515, against a best of 0.4511.
+
+So it denoises well, keeps edges clean and improves colour. It loses about 40 % of the coherent high-frequency detail the capture holds. Every run since the ninth makes the same trade, with different weights on each side.
+
+The furthest any run has reached is the twelfth: seven of eight gates on the demo still, failing at micro_detail. On the real pairs it beats on noise and banding and loses mtf50 and texture on every set. The thirteenth will be scored eight ways when it finishes (`.tmp/score_run.sh v13`).
+
+## 2. Why it stalls, in order
+
+### 2.1 Two real-pair gates cannot be passed by construction (found today, in the code)
+
+**mtf50.** `tilemetrics.mtf50_cpp` returns 0.5 when the transfer never falls below one half. The noisy capture against its clean reference has a coherent transfer near 1 at every frequency, because noise averages out of the cross spectrum. So its median mtf50 is exactly 0.50, the ceiling.
+
+`beats_camera` needs a candidate above 0.52 (tie band 0.02), which no output can reach. On real pairs this gate fails for every model, including a perfect one.
+
+**texture.** `texture_hf_fidelity` is the same coherent ratio above the cutoff, registered with `higher_is_better=True` and no ceiling. The capture scores 0.88 (not 1, because of residual misregistration and demosaicing).
+
+- A restorer that is optimal in mean squared error shrinks detail whose phase it cannot know, so it scores below the capture (Blau–Michaeli; v11 to v13 all do).
+- A sharpener that multiplies coherent detail by 1.3 scores above it, and passes.
+
+The gate therefore rewards the one behaviour the provenance and artifact gates exist to stop.
+
+**On the demo still neither problem bites.** The simulated camera blurs, so its transfer is well below 1 and approaching the truth beats it. That is why the still is where the runs get furthest.
+
+**Proposed fix (the claim's definition, so the user's call):**
+
+1. **Score both transfer metrics by distance to the truth's**, so a value above the truth's counts as error just as a value below does:
+   - `|1 − T|` for the texture ratio;
+   - `|mtf50 − mtf50_truth|` for mtf50, or MTF50P together with overshoot, as ISO 12233 practice does.
+
+   On the still this changes nothing for an honest model; on any set it closes the sharpening route.
+2. **On real pairs, compare against two baselines.**
+   - **The raw capture:** gate the transfer metrics as `ties_or_beats` within 1 JND, and require a beat on noise, banding, colour and dynamic range. That is "denoise without losing detail", which is the real achievement against a signal no camera ships.
+   - **The camera's delivered image**, where one exists: the phone's `final.jpg` in the full HDR+ release (not in our lean pull: its `results_*` folders hold only `merged.dng` and `reference_frame.txt`), or a fixed reference ISP for RawNIND. Require a beat on every gate here. This is "the best-case camera", and the burst layer is the one expected to beat it.
+
+**Done (2026-10-28), as proposed, with two deviations.**
+
+1. **Distance to the truth.**
+   - Each tile is also scored against itself (`tilemetrics.self_metrics`, the truth's own values).
+   - `mtf50_cpp` and `texture_hf_fidelity` are judged by `|baseline − truth| − |candidate − truth|` (`MetricInfo.to_truth`), so detail beyond the reference counts as error.
+   - A `beats_camera` check on a truth-bound metric passes on a tie when the baseline already sits at the truth (`at_truth`), and its detail says so. A gate with nothing left to win can now be passed, and only by matching the truth.
+2. **Two baselines on real pairs**, judged on the medians (`heldout.CAPTURE_GATES`, `heldout.CAMERA_GATES`):
+   - **against the capture:** shadow SNR and banding must beat it, everything else tie or beat;
+   - **against the camera's photo:** beat it on every metric (mtf50 and texture by distance, tied at the truth), dynamic range tie or beat.
+3. **The camera's photo.**
+   - The HDR+ pull now keeps `final.jpg`.
+   - `realpairs.match_camera` fits its rendering to the target on pixels blurred at 2 px: a per-channel isotonic tone curve, then a 3×3 colour matrix. A local luminance gain at σ 8 px, clamped to [0.25, 4], takes out its local tone mapping. What is compared is its detail, noise and artifacts, not its look.
+   - Sets save the matched tiles, and `attach_cameras` fills them into sets cached before.
+   - RawNIND has no camera photo, so its camera gates are absent, not passed.
+
+**The deviations:**
+
+- **Colour and dynamic range are tie-or-beat against the capture, not beat.** The captures' median delta E (0.68 HDR+, 0.74 RawNIND) is within the 0.5 tie margin of anything a candidate can reach, and their dynamic-range steps are at the tiles' ceiling. A required beat there would fail every model, the same trap as mtf50.
+- **Highlight loss is out of both real gate sets.** It reads clean pixels above 1. A real target is clipped at 1, and tiles with clipped reference pixels are rejected, so the metric is always undefined and would hold every verdict at INCOMPLETE. The simulated gates keep it.
+
+Tests: `tests/test_truthgates.py`.
+
+**Still unfair to a denoiser, so a third gate set (10-29, section 18).** Tie-or-beat against the capture on mtf50 and texture still asks a denoiser to keep detail that the best linear filter, fitted on the truth itself, loses at the same noise. The frontier gates judge the output against that oracle at the output's own shadow SNR, and the capture gates stay as they are.
+
+### 2.2 Information
+
+A single-frame faithful restorer is bounded by what the frame holds. Published real-data figures:
+
+- Merging a burst moves the bound: real BurstSR +1.5 to 2.5 dB over a single frame, with architecture choice under 1 dB of that, and alignment about 1.3 dB.
+- Raw input before demosaicing moves it too: Zoom-to-Learn +4.5 dB over 8-bit input (confounded), and real raw +2.9 dB over synthetic raw.
+
+Our recovered layer sees one demosaicked linear RGB frame, so demosaic errors are fixed before the network sees anything. Both levers are sections 8.2 and 9.
+
+### 2.3 Loss
+
+- **v11 range term** (3×3 local range excess) and **v12 flat term** (7×7 std excess on flat targets): they charge output statistics and never deficit. Where the model cannot tell the phase of fine detail, the cheapest output is a smooth one (v12: mtf50 0.337 → 0.240 on the still).
+- **v13 texture term** (7×7 std deficit on textured targets): it rewards energy whatever its phase. The gate it is meant to serve counts only coherent detail, so the term pushes towards invented texture.
+
+All three measure the output rather than the residual against the target. The replacements in section 8.3 measure the residual and its phase.
+
+### 2.4 Data
+
+Detail in sections 4 to 6:
+
+- JPEG references from Commons at q75–q90 carry ringing and sharpening into the targets.
+- KADID-10k and TID2013 references are in training under research-only terms.
+- The HDR+ `merged.dng` targets cap the model at HDR+'s own quality and artifacts.
+- Real pairs are aligned to the integer pixel.
+- Each real evaluation set has 9 to 10 scenes.
+- The noise model is missing heavy-tailed read noise, dark frames and camera-RGB unprocessing.
+
+## 3. Size: the evidence and the three-layer system
+
+### 3.1 What the literature shows for faithful restoration
+
+- **No PSNR-track restorer of 2025–26 with hundreds of millions of parameters beats the 20–40M ones.** The NTIRE 2024 and 2026 fidelity podiums are 20–40M models or ensembles of them. The only entry above 100M was a 4B FLUX model in the perceptual track, at 25.6 dB.
+- **Naive scaling loses.** Hi-IR: 15.7M → 57.6M lost 0.19 dB on Set5 and 0.57 dB on Urban100 at ×2. After architecture fixes (1×1 bottlenecks, dot-product attention), 39M beat 15M by 0.16–0.41 dB.
+- **Depth saturates.** NAFNet on SIDD with 9, 18, 36 and 72 blocks: 39.78, 39.90, 39.96, 39.95 dB.
+- **Narrower and deeper beats wider.** Restormer with channel width 48, 64, 80 scored 29.71, 29.63, 29.56.
+- **Data, not parameters, is the binding constraint at our scale.**
+  - Klug–Heckel: the power-law exponent drops from about 0.005 to 0.002 beyond about 6k images, and at 10k–30k images larger U-Nets gained nothing.
+  - DiverSeg: going from 3k to 85k–260k filtered images bought +0.4 to +0.6 dB; 1.2M unfiltered images did worse than 259k filtered.
+- **Compute.** 12 h on our GPU lets a 1.1B net see about 0.44M tiles, a 496M about 1.0M, and a 26M about 4.1M. Published recipes use 9.6M (X-Restormer) to 25.6M (NAFNet). AdamW state alone is 17.6 GB at 1.1B.
+- **Our loader.** It renders 35–40 pairs/s, so 12 h holds at most about 1.6M distinct pairs until the degradation moves to the GPU (section 8.5).
+
+### 3.2 Where billions do help
+
+Billions help in generation: inventing plausible detail the input does not hold. That is the rendered layer, which must be declared and masked (section 10).
+
+### 3.3 The system
+
+| Layer | What it does | Size | Base and licence | What it may claim |
+|---|---|---|---|---|
+| Recovered (faithful) | single frame, raw or linear in, linear out, per-pixel variance out | 30–120M, by the ladder in 3.4 | NAFNet / X-Restormer blocks (MIT) with our FiLM conditioning | every gate; no invention (provenance ≤ 1 %) |
+| Burst and video | 2–15 frames or a stream, aligned and merged | about 150M (est) | SEA-RAFT (BSD-3) flow, BasicVSR++-style recurrence (Apache) | every gate, plus the temporal gates and a multi-frame gain gate |
+| Rendered (declared) | detail above the recovered layer's cutoff, inside a mask only | 6–20B | Z-Image 6B or Qwen-Image-Edit-2511 20B (Apache, on disk); video Wan2.2 A14B (Apache, on disk) or Wan2.1-1.3B | nothing hidden: area, bands and precision declared, C2PA region |
+
+That totals about 6.3B parameters with Z-Image, or about 20.3B with Qwen-Image-Edit. A user gets a faithful image, and optionally a declared enhancement whose every rendered pixel is labelled.
+
+### 3.4 The ladder
+
+The faithful size is measured, not assumed:
+
+- three points, about 8M, 30M and 120M;
+- the same data, loss and wall time for each (245 min, the thirteenth run's budget);
+- v13 is the 8M point.
+
+**Stop rule:** if 120M's real and synthetic validation do not improve on 30M's by more than the spread between two seeds of one size, the faithful layer stays at 30M and further capacity goes to the burst layer.
+
+This replaces the single 12 h run of shape J (496M) planned earlier, which the evidence above argues against.
+
+## 4. Fixes to the data we already have
+
+These come before any download, ranked by measured impact and cost.
+
+| # | Fix | Why (evidence) | Cost |
+|---|---|---|---|
+| 1 | **Estimate each JPEG reference's quality from its quantisation tables.** q ≥ 90 at clean scale 2; 75–90 at scale 4; below 75 out of training (evaluation or rendered-layer data only). Add the HQ-50K / LucidFlux filters: short side ≥ 1024, Laplacian variance 150–8000, under 50 % flat patches. | DiverSeg: references at q95 cost 0.12–0.23 dB, q85 0.21–0.30, q75 0.54–0.56, q50 2.2–2.9. Sharpened references teach halos (Real-ESRGAN+). The model learns the target's artifacts. | a label column plus a sampler filter, no new data |
+| 2 | **KADID-10k and TID2013 to evaluation only.** | 106 references (81 + 25), under 2 % of the clean set. Research-only terms; KADID references reportedly Pixabay-licensed, TID references mostly Kodak (both unverified). | drop two source ids from the run lines |
+| 3 | **Scene split everywhere, plus perceptual-hash dedup against every evaluation set:** demo, raw.pixls.us, real val/test, SIDD val, RealSR and the rest. | Near-duplicate leakage reaches about 10 % in public sets. Commons Featured and Quality overlap; burst frames are near-duplicates by nature. | a hash pass over the corpus |
+| 4 | **Real-pair hygiene:** sub-pixel registration (today: integer phase correlation refined to ±REFINE px, checked per quadrant, in `realpairs.py`); a per-pair 3×3 colour matrix; reject NCC below 0.9; mask clipped and misaligned pixels; drop the worst 2–3 % by loss. | BurstSR and RawNIND recipes. Misregistration lowers the coherent ratio at high frequency for both capture and model: it is part of why the capture scores 0.88, not 1. | `realpairs.py` and the real store |
+| 5 | **Retire HDR+ `merged.dng` as a target once real averaged ground truth is in** (section 6: SIDD). Until then, tag rows by target type. | A merged target caps the model at HDR+'s quality, artifacts included. Averaged static bursts are the published real ground truth. | a target-type field per row |
+| 6 | **`wikimedia-quality-images` gets a clean block** (scale 2, low-quality scale 4). | It was read at scale 1. | done, uncommitted |
+| 7 | **Real evaluation sets to ≥ 60 held-out scenes each** (today HDR+ 9–10, RawNIND 9). | Scene-level resampling: n_eff ≈ number of scenes. At about 97 % power per gate (what an all-gates claim needs), an effect of 0.5 SD needs about 59 scenes and 0.3 SD about 164. | HDR+ full release, SIDD validation (section 6) |
+
+## 5. What the degradation still lacks
+
+[harness/data/degrade.py](harness/data/degrade.py) already has:
+
+- shot noise;
+- measured read-noise ladders;
+- row noise;
+- ADC quantisation;
+- an RGGB mosaic with bilinear demosaic;
+- posterisation;
+- JPEG fitted to TID2013;
+- a white-balance cast from HDR+ as-shot neutrals.
+
+Missing, in order of measured impact:
+
+| # | Addition | Evidence | Needs |
+|---|---|---|---|
+| 1 | **Dark-frame bank:** about 10 real lens-cap frames per ISO, added as sampled real dark noise (hot pixels, fixed pattern, dark shading). | SFRN / PMN: +2.2 to 2.9 dB over pixelwise noise models; dark shading alone +0.8 to 2.4 dB (extreme low light). | Frames from the user's own camera, which is a manual step. Dark frames inside the downloaded raw sets where they exist. |
+| 2 | **Heavy-tailed read noise** (Tukey-lambda), fitted per camera from the bank. | ELD on SID: Gaussian 32.99, Poisson-Gaussian 33.93, true Poisson 35.36, + Tukey-lambda 37.08, + row 37.38, + quantisation 37.57, against real pairs 37.32. We have the row and quantisation terms; Tukey is the largest missing step. | the bank (row 1) |
+| 3 | **Unprocessing into camera RGB.** Sample a camera colour matrix and white-balance gains, invert them, add noise in camera space, mosaic, then re-process. Today noise is added in linear sRGB primaries. | Brooks et al. on DND: removing unprocessing cost 1.33 dB, and a 4× larger model without it recovered only 0.33 dB. Additive Gaussian alone cost 1.70 dB. | Colour matrices from the training raws' DNG metadata (HDR+, RawNIND, SIDD), never from raw.pixls.us, which is held out |
+| 4 | **Per-pixel noise variance as an input channel**, σ²(x) = k·x + σr² from the sampled parameters at training, and from metadata or an estimator at inference. | Brooks: +0.37 dB raw, +0.54 dB sRGB over blind. A 31-dimensional global FiLM vector cannot express signal-dependent per-pixel variance. | the sampler already knows k and σr |
+| 5 | **Raw output of the sampler:** packed RGGB plus the noise map, for the raw path (section 8.2). | Zoom-to-Learn and RawNIND: linear MS-SSIM 0.956 against 0.928 developed. | the mosaic stage exists; emit it before demosaicing |
+| 6 | **Augmentation:** flips and 90° rotations that keep Bayer phase, RGB channel permutation, CutBlur, progressive patches 128 → 256 → 384. No Cutout, no mixup. | RGB permutation +0.09/+0.13; CutBlur +0.05/+0.23; all together +0.09/+0.27; progressive patches +0.07; Cutout −0.1. | sampler and loader |
+
+The measured read-noise ladders stay: measured beats the Brooks log-normal prior where we have the camera. The coverage diagnostic (`realpairs` against the label rows) is how to check the sampler spans the real pairs.
+
+## 6. Data to add, ranked
+
+Sizes are lean pulls (the census pass, corrected where it found errors). Licences are per source in [harness/data/sources.json](harness/data/sources.json) when added; ShareAlike rows carry a tag so they can be dropped later.
+
+**Pulls, 2026-10-28.** The user gave one go-ahead for the whole of this section. Rows 1, 2, 3 and 5 are downloading to D:.
+
+- **Collector floor.** The collector refuses a file that would take the drive below 150 GB free (`HARNESS_COLLECT_RESERVE_GB`).
+- **Decoded store floor.** The decoded store refuses a write below 300 GB free (`HARNESS_DECODED_RESERVE_GB`), so the cache gives way before the raw data does.
+- **Row 1, HDR+, in two stages.**
+  - Stage 1 is every burst's merge, camera JPEG, reference-frame index and colour/timing text: 92 GB.
+  - Stage 2 is each burst's own reference frame and its lens-shading map: about 73 GB. It is picked by an exact names file, built from stage 1's indexes (`names_file` on `gcs_bucket`).
+  - The two neighbour frames wait for section 9.
+- **Row 4, SNIC, is dropped (11-02).** Its own record and README say it: *Synthesized* Noisy Images using Calibration. The noisy frames are made from a low-ISO frame with calibrated noise models ([arXiv 2512.15905](https://arxiv.org/abs/2512.15905), [code](https://github.com/nikbhatt-cu/SNIC)), so it is neither real noise nor averaged ground truth, and this row had it wrong. Its paper's NAFNet gap between its synthetic and real noise (1.7 to 1.9 dB on the iPhone) is one more reading that synthetic noise is not real noise. The calibration method stays a reference for `noise.py`; the 473 GB is noise we can synthesize ourselves. (Its Dataverse also answers 403 to the collector.)
+- **Row 6, UHD-IQA.** Its host reset every connection on 2026-10-28. Retry it with the collector as it is.
+
+| # | Source | Size | Licence | Role | Why |
+|---|---|---|---|---|---|
+| 1 | HDR+ full release: reference frame (plus 2 neighbours later), `merged.dng` and `final.jpg` per burst | 165 GB now (92 + 73); 350–400 GB with the neighbours | CC BY-SA 4.0 | real scenes for evaluation (3,640 bursts), bursts for section 9, the phone's own output as the best-case camera baseline | the single biggest step for the claim: scenes, bursts and a real baseline in one |
+| 2 | PixelShift200 (merged RGGB `.mat`, camera ARWs, previews) | about 75 GB as listed | CC BY 4.0 | full-colour ground truth with no demosaicing, for the raw path | demosaic training +1.16 dB over DIV2K-derived targets (secondary) |
+| 3 | Commons Featured (the remaining 15,955 as listed) plus Quality Images ≥ 8 MP (to ~40k files) | 164.5 + ~250 GB | CC BY / BY-SA / PD per file; attribution manifest | clean content: about 5k → about 45k images, after the section 4 filters | diversity over count (DiverSeg); the step that makes a 30–120M net worth having |
+| 4 | ~~SNIC~~ dropped 11-02: its noisy frames are synthetic (calibrated models on a low-ISO frame), not averaged real ground truth | (473 GB) | MIT | none for training; the calibration method is a reference | see the note above the table |
+| 5 | SI-HDR (raw stacks, references, inputs; not the other methods' reconstructions) | 24.5 GB | CC BY 4.0 | 181 HDR scenes, raw plus reference: highlights and dynamic range | the tone gates |
+| 6 | UHD-IQA | 10.7 GB | CC0 | 6,073 images at 3840 px: clean content | permissive and large-format |
+| 7 | SIDD-CC DNG bursts (10 of 115 instances on disk, 22 of 234.5 GB) | up to 235 GB; a subset is enough | MIT per the official page; the mirror says "sidd-terms-of-use" (to confirm) | 10 static indoor scenes × 5 phones × 150 frames: frame-averaged ground truth, N2N pairs, noise fitting. A noise and burst source, not a content source. | real averaged ground truth; split val/test by scene number |
+| 8 | REDS train_orig (120 fps) | 180 GB | CC BY 4.0 | video, temporal training | the video layer |
+| 9 | Tears of Steel footage and linear EXR, every 10th frame | cap 200 GB | CC BY 3.0 | linear video with real motion | linear ground truth for video |
+| 10 | Hypersim final HDF5 | ~300 GB | CC BY-SA 3.0 | exact linear ground truth with depth and motion | synthetic bursts with known flow |
+| 11 | Web pool (CommonCatalog CC-BY, PD12M, Megalith ≥ 8 MP), deduplicated | cap 300 GB | per row | content scale-up after 3 | only once 3 is exhausted |
+
+**Do not train on:**
+
+- **Held without a data licence:** SID, DRV/SMID, RawHDR, BurstSR, RealBSR.
+- **Evaluation only:** LSDIR, DIV2K/DIV8K, Flickr2K, FiveK, RAISE, ELD, DND, PolyU.
+- **Banned for ML scraping:** Pexels, Pixabay, Unsplash Full.
+- **Mirrors whose licence tag differs from the origin's** (e.g. LSDIR on HF tagged Apache; origin academic): follow the origin.
+
+**Netflix Open Content is not uniformly CC BY.** El Fuente, Meridian and Sol Levante are BY-NC-ND. Sparks needs its bundled licence read before any pull.
+
+## 7. More labels from the same data
+
+The user asked whether the same data can be labelled several ways, and whether video's 30–60 fps can be used. Yes, with two cautions.
+
+**Many degradations per clean tile.** The sampler already draws `--per-tile` parameter vectors per crop, and a row reproduces its pair bit for bit, so K draws give K distinct pairs at no storage cost.
+
+- This multiplies degradation diversity, which the noise results reward.
+- It does not multiply content diversity, which the size results say is the binding constraint.
+- With the degradation on the GPU (section 8.5) it is free: draw fresh parameters every step and never store pairs at all.
+
+**Several targets per scene.** One scene can have:
+
+- a linear reference (Poly Haven, SI-HDR);
+- a raw ground truth (RawNIND);
+- a burst merge (HDR+);
+- a frame average (SIDD);
+- a pixel-shift capture (PixelShift200).
+
+Label each row with its target type. Train the faithful layer only on targets at least as clean as the claim needs. Use the rest for pretraining or evaluation.
+
+**Video frames: count per-shot content, not per-frame.**
+
+- **As content,** consecutive frames are near-duplicates: about one frame per shot or per second adds diversity, and the rest is leakage across splits.
+- **As supervision,** every frame counts:
+  - static-camera clips give frame-averaged ground truth (the SIDD recipe);
+  - moving clips give burst training samples with real motion;
+  - flow-warped neighbours give MF2F self-supervised targets with occlusion masks, within about 0.35–0.7 dB of supervised training.
+
+  Split video by clip, never by frame.
+
+**Noise2Noise from bursts, raw domain only.** On SIDD raw, N2N matched supervised training (50.62 against 50.60 dB). In sRGB the correlated noise breaks it: neighbour methods score 28–34 dB against 40 supervised. So any raw burst, including the user's own camera's, becomes real training pairs without ground truth. Fixed-pattern noise survives averaging and needs the dark-frame bank to remove.
+
+**Other cheap gains:**
+
+| Gain | Measured |
+|---|---|
+| ×8 self-ensemble at inference | +0.05–0.22 dB |
+| Loss-based pruning (keep the top half by loss minus the hardest 5 %) | +0.12 dB |
+| EMA 0.9999 on long runs (we use 0.999) | +0.46 dB on GoPro |
+| GainTuning test-time adaptation, out-of-distribution noise | +2.7–6.1 dB |
+| GainTuning test-time adaptation, out-of-distribution content | +0.4–1.3 dB |
+
+**Two traps.**
+
+- **No learned image-quality score as a loss or a filter on the faithful layer.** CLIP-IQA rises while MANIQA and LPIPS fall: the model learns the metric, not the image.
+- **No self-training on the model's own outputs.** Iterated, it collapses.
+
+## 8. The recovered (faithful) layer
+
+### 8.1 Architecture
+
+Keep the U shape, the residual output, identity at initialisation and the 31-dimensional FiLM descriptor at every level. Change the blocks to NAFNet / X-Restormer style (MIT):
+
+- simple gate;
+- 1×1 → 3×3 → 1×1 bottleneck convolutions;
+- channel attention at full resolution;
+- dot-product (transposed) attention at the two lowest levels;
+- deeper, not wider.
+
+Parameters sit at the bottom levels, where they cost the least FLOPs. `net.CondUNet` already scales by width, levels and depth (`--base`, `--mults`, `--blocks`, `--mid-blocks`, `--grad-ckpt`), so the ladder can start on the current blocks and the block change follows as its own A/B.
+
+### 8.2 Input
+
+- **Today:** demosaicked linear RGB in `log1p(4096x)`. In the log domain shot-noise standard deviation goes as 1/√x, so an L1 loss there over-weights the shadows.
+- **Add** the σ²(x) channel (section 5, row 4).
+- **Ablate** a variance-stabilised domain (k-sigma or the generalised Anscombe transform): PMRID 39.76 against 39.65 for a concatenated map and 39.57 blind.
+- **Then a raw path:** packed RGGB (4 channels at half resolution) plus the noise map, for every camera whose raw we can read (the decoders PR 15 added). The network denoises before demosaicing, which is where the published burst and raw winners do it.
+
+### 8.3 Loss
+
+Replace the range, flat and texture terms with:
+
+| Term | Weight / setting | Evidence |
+|---|---|---|
+| Charbonnier (or L1) on the target | base | L1 34.42 dB against L2 33.18 (Zhao) |
+| + MS-SSIM | α = 0.84 | 34.61 dB |
+| + LDL artifact map | 7×7 local variance of the residual, scaled var^(1/5), penalised only where the current model is worse than its EMA (Apache) | RRDB+LDL against ESRGAN on DIV2K: 28.82 against 28.18 dB. It charges the residual, so a correct edge costs nothing and a halo costs its energy. |
+| + high-band L1 on the residual's wavelet (SWT, one level) or FFT coefficients | about 0.05 | the NTIRE 2026 winner used this. It is phase-aware: detail in the wrong place costs, detail in the right place pays, which is what the texture gate counts. |
+| + optional ΔE / Lab term | for the colour gate | |
+| On real pairs: minimum over ±1 px shifts, or CoBi | | misregistration must not teach blur |
+
+Avoid Gram and contextual losses, which match statistics, not alignment, and avoid any learned-IQA loss. The texture metric on the gates becomes the per-band coherent ratio, plus invention per band (section 2.1).
+
+**Measured on v13 (2026-10-28).** Two of these rows were tried on the thirteenth run's checkpoint before v15.
+
+- **MS-SSIM fails as a sharpening lever.** On the display rendering the fine bands sit far under SSIM's C2 constant, so the term barely sees them. No weight moved v13's best fine-band gain past 0.9 (0.7–0.9 across weights). The row is dropped; `--ssim-weight` stays at 0.
+- **The coherent-transfer term replaces the high-band row.**
+  - It is the texture gate as a loss: per radial band of 1/32 cycles per pixel, from 1/16 up, e = (⟨|Y|²⟩ − Re⟨P Y*⟩) / (⟨|Y|²⟩ + 10⁻³ × mean band power), under a Charbonnier with δ = 0.02. It reads the gate's texture value to 10⁻³.
+  - It is two-sided: a band transferred above 1 costs as much as one below. Detail in the wrong place lowers Re⟨P Y*⟩, so it never pays.
+  - v13 transfers 0.52–0.61 of the fine bands where the real capture carries 0.83–0.94.
+  - At weight 1 its gradient is 2–7 times the base loss's.
+  - RawNIND's best fine-band gain from a short fine-tune of v13: 0.8 at weight 0, then 0.9, 1.1, 1.2 and 1.4 at 0.03, 0.1, 0.3 and 1.
+  - It is `--transfer-weight` (losses.transfer_loss).
+
+### 8.4 Recipe
+
+| Setting | Value |
+|---|---|
+| Batch | ≥ 32 (bf16 at 256 px fits at 30M; above that, gradient checkpointing or accumulation) |
+| Optimiser | AdamW, lr 1e-3 → 3e-4 falling with size |
+| Schedule | warmup 2–5 % of steps, cosine to 1e-6 |
+| EMA | 0.999, 0.9999 on runs past about 100k steps |
+| Patches | progressive, 128 → 256 → 384 |
+| Seeds | ≥ 3 for any claimed number |
+| Avoid | stochastic depth (−0.45 dB) |
+
+Together these are +0.3 to 0.6 dB in the published ablations (est for us).
+
+### 8.5 Loader: the degradation on the GPU
+
+v13 is loader-bound.
+
+- `render_pair` takes 0.17 s alone and 0.31 s with 12 workers busy, for 35–40 pairs/s.
+- The GPU averages 15 % use, with bursts to 97 %.
+- The costs are the FFT PSF (12 %), the sRGB transfer curves (16 %), the ISP (28 % cumulative) and the tile metrics (about 15 %). All of these are torch-native operations.
+- JPEG on the GPU (torchvision nvjpeg) takes 0.69–0.85 ms per tile, against 1.1–1.9 ms in PIL. The bytes cross to the host between encode and decode.
+
+Porting the sampler stage for stage to batched torch:
+
+- removes the ceiling, which is what lets a 30–120M net see the published 10M+ samples;
+- makes the fresh-draw-every-step labelling of section 7 free;
+- is required for burst training, where N frames per sample multiply render cost by N.
+
+The decoded store (EXR half ZIP, 3.4× smaller than float32, read in 0.086 s, about 170 GB for the current clean corpus) feeds it.
+
+### 8.6 Inference
+
+Today `apply` does EMA weights, 512 px tiles with 64 px raised-cosine overlap, and fp32.
+
+Add:
+
+- the ×8 self-ensemble (flips and rotations; Bayer phase preserved on raw);
+- GainTuning for out-of-distribution noise;
+- the per-pixel variance output.
+
+**The fidelity dial.** Freirich et al. show that interpolating between the minimum-error estimate and a perceptual sample is optimal in the perception–distortion plane. The product exposes a single α, certified at the largest value whose invention stays at or below 1 % per band and whose overshoot stays at or below 0.005.
+
+## 9. The burst and video layer
+
+**Why.** It is the only lever that moves the bound on real data.
+
+- Multi-frame gains +1.5 to 2.5 dB over single-frame on real BurstSR.
+- Gains saturate near 8 frames: DBSR real with 1, 4, 8, 14 frames scored 46.41, 47.06, 47.52, 47.76 dB.
+- A net trained only at N = 8 does worse at N = 2 than a single-frame net, so train with N varying from 2 to 15, weighted to 8.
+- No published comparison exists of a learned merge against the HDR+ Wiener merge on real bursts against real ground truth. That is an open result we can fill.
+
+**Sketch (about 150M, est; 0.15–0.4 s per 1080p frame in bf16, est).**
+
+- **Inputs:** a reference frame and K−1 neighbours (packed Bayer or linear RGB), plus:
+  - the noise map;
+  - per-frame gain and exposure ratio;
+  - the FiLM descriptor, extended with N, mode and timing.
+- **Alignment:** SEA-RAFT flow (BSD-3) at half resolution, refined by flow-guided deformable alignment at quarter resolution.
+- **Masks:** forward–backward consistency and photometric error against 2σ²(x).
+- **Fusion:** per-pixel softmax weights. In video mode, a recurrent warped state: per FLOP, recurrence beats a sliding window (BasicVSR++ 7.3M scored 32.39 dB on REDS4, against VRT 35.6M at 32.19, and is 3× faster).
+- **Trunk:** a U-Net with its parameters at 1/8 to 1/32 resolution.
+- **Outputs:**
+  - a linear image;
+  - a log-variance;
+  - the effective number of frames per pixel;
+  - a prior-reliance map: |output − classical merge| / √variance.
+
+**Losses:**
+
+- Charbonnier in the log domain, plus FFT-magnitude L1;
+- Gaussian negative log-likelihood on the variance head;
+- a masked relative temporal loss: |W(y_{t−1}) − y_t| − |W(gt_{t−1}) − gt_t|;
+- MF2F on real video;
+- a high-frequency penalty where support is low.
+
+**Data:**
+
+- synthetic bursts from clean stills, with sampled homography plus local flow and per-frame noise, rendered on the GPU (section 8.5);
+- HDR+ bursts (section 6, row 1);
+- SIDD static bursts with averaged ground truth;
+- REDS and Tears of Steel for video;
+- Hypersim for known flow.
+
+**Gates added:**
+
+- masked warping error (flow from a pinned SEA-RAFT);
+- tOF;
+- tLP;
+- static-tile flicker;
+- a multi-frame gain gate: the burst output must beat the single-frame net on the same reference frame.
+
+Each temporal gate is paired with mtf50 and texture, because blur games warping error: VEnhancer has the best warping error and the worst PSNR.
+
+**Licences.** HDR+'s IPOL code is AGPL, so we implement our own merge. timothybrooks/hdr-plus (Halide, MIT) runs as the classical baseline. Burstormer and BSRT are MIT; BasicVSR++ is Apache. DBSR, VRT and RVRT are non-commercial and stay out.
+
+## 10. The rendered layer (declared)
+
+**Bases (32 GB, clean licences).**
+
+| Use | Base | Licence | Note |
+|---|---|---|---|
+| Stills, first | Z-Image 6B | Apache | on disk as Turbo (distilled); training needs the base release or a de-distillation adapter (check) |
+| Stills, larger | Qwen-Image-Edit-2511 20B | Apache | on disk in fp8 (19 GB); takes a reference image natively; an 8-step Lightning LoRA (Apache) is on disk |
+| Stills, smallest | FLUX.2 klein-base-4B | Apache | not on disk; the 9B is non-commercial; the FLUX 3 klein on disk is not Apache (section 16) |
+| Video | Wan2.2 A14B low-noise expert, or Wan2.1-1.3B + a FlashVSR-style LoRA | Apache | Wan2.2 on disk in fp8 with 4-step lightx2v LoRAs; the 1.3B needs 18.3 GB at 768×1408 |
+| Baseline now, off the shelf | SeedVR2-3B | Apache | over-generates on light degradations |
+
+**Composition.** Y = R + M ⊙ w · (G − R), per half-octave band.
+
+- R is the recovered output and G the generated one.
+- The low bands always come from R. Only bands above the descriptor's cutoff are rendered.
+- Outside the mask M, Y equals R exactly, so provenance there is R's.
+- The knob w runs from 0 to 1 and is certified at 1.
+- M comes from a band-gain detector on G against R. Its threshold is set by conformal risk control on about 1,000 ground-truth pairs per input domain, recalibrated on shift.
+- M is exported as a C2PA region with a `digitalSourceType`.
+
+**Limit.** No published method gives a per-image, per-pixel guarantee on invented detail: conformal masks are marginal and collapse under shift. We report declared area and declared precision, not a guarantee.
+
+**Gate addition.** `evaluate.py` accepts a declared rendered map, with undeclared = flag & ~declared, but it puts no cap on how much may be declared. Add:
+
+- a cap on rendered fraction, or at minimum report it alongside the precision of the declaration;
+- a check of the detector by injecting known hallucinations and publishing its recall.
+
+A huge M is a quality failure, not a pass.
+
+**Training.** Condition the base on the VAE latent of R, plus the descriptor through an MLP into the timestep modulation, with a fixed empty text embedding.
+
+- **Data:** ground truth → degrade → frozen recovered layer → R. Cache latents: about 1 MB per 1024², about 0.2 TB per 95k images.
+- **Stage A:** a PMRF rectified-flow LoRA (rank 64–128), at 512 then 1024, with gradient checkpointing and 8-bit Adam.
+- **Stage B:** one-step adversarial distillation (RpGAN, R1/R2, feature matching on frozen-base features).
+
+That is about 150–300 hours on the 5090 for stills (est), and hundreds more for video.
+
+**Licence traps.** FLUX.1-dev; FLUX.2 9B; FLUX 3 Image Klein (on disk; FLUX Kommunity License, section 16); OpenRAIL++ models (SD 2.x, SDXL, PixArt); SD3.5's revenue cap; LTX; HunyuanVideo; CogVideoX; S-Lab non-commercial models (InvSR, Upscale-A-Video); SUPIR; HYPIR; LucidFlux. Weights for ODTSR, TEASR, InfVSR and ReCaVSR are unconfirmed. SD-2.1 returned 404 on Hugging Face on 2026-10-28, so the default download for OSEDiff, PiSA-SR, SeeSR and DiffBIR is broken, and any mirror's provenance must be checked.
+
+## 11. Evaluation
+
+### 11.1 Statistics
+
+- Resample by scene, not tile: 64 tiles from 9 scenes is n_eff ≈ 9.
+- Paired cluster bootstrap with at least 10k resamples, reporting the one-sided 97.5 % lower bound per gate.
+- The null hypothesis per gate is a margin of at most 1 JND, pre-registered.
+- "All gates pass" is an intersection–union test, so it needs no multiplicity correction. But at 90 % power per gate, seven gates pass together only 48 % of the time, so each gate needs about 97 % power. That is where ≥ 60 scenes comes from (section 4, row 7). Per-gate claims use Holm.
+- At least 3 seeds or checkpoints for our own model.
+- The held-out sets are frozen before the run that claims on them.
+
+### 11.2 Standard-conformant gates
+
+| Gate | Standard / method |
+|---|---|
+| Resolution | ISO 12233:2023 e-SFR via the open SFRMAT5 Python port: MTF50P together with overshoot, on 4:1 edges at 3–7° |
+| Micro-detail | ISO/TS 19567-2 dead leaves, the cross or intrinsic method with sub-pixel registration (0.15 px misregistration matters). The direct method is fooled by noise, denoising and sharpening; edge MTF and dead leaves diverge above about 0.3–0.4 c/px. |
+| Dynamic range | ISO 15739:2023, stating the SNR threshold |
+| Colour | ΔE2000 mean and p95 per patch |
+| Optional | IEEE 1858-2023 CPIQ quality loss in JND, so "beats" means "by at least 1 JND" |
+
+### 11.3 Baselines
+
+Every baseline runs through the same gates; licences were read today.
+
+| Kind | Models | Licences |
+|---|---|---|
+| Faithful | NAFNet-SIDD, Restormer, X-Restormer | MIT |
+| | SwinIR, HAT / HAT-L, SCUNet | Apache |
+| | Real-ESRGAN | BSD-3 |
+| | BSRGAN | Apache |
+| Classical ISP reference | timothybrooks/hdr-plus | MIT |
+| Generative (they test the provenance gate) | OSEDiff, PiSA-SR, SeedVR2-3B | Apache |
+| Generative, local through ComfyUI's API (section 16) | Qwen-Image-Edit-2511 + Lightning, Z-Image-Turbo, Wan2.2 | Apache |
+| | FLUX 3 Image Klein, evaluation only | FLUX Kommunity |
+| Evaluation only, outputs never in training | SUPIR, HYPIR, InvSR, DiT4SR | non-commercial |
+
+Commercial tools are run by the user under their EULA, or the claim says they were not tested.
+
+**Wired so far (10-29):** NAFNet-SIDD-width64, Restormer's real denoiser and SCUNet's real-noise PSNR model, through `python -m harness model baseline heldout|sidd` (baselines.py). Their weights come through the collector (sources.json `baseline-*`, hash-checked). Their architectures are vendored in `harness/model/baseline_archs/` from megvii-research/NAFNet 2b4af71e, swz30/Restormer 68dc6ac4 and cszn/SCUNet 52e440a8. Each file says what was changed and carries its licence text. The changes are imports, a print and demo code, plus NAFNet's LayerNorm2d and timm's DropPath re-expressed with the same forward. A CPU check on 16 evenly spaced SIDD validation blocks (10-30) gives 40.58 dB for NAFNet and 40.49 dB for Restormer, near their reported 40.30 and 40.02 on all 1,280. SCUNet's real model, which was not trained on SIDD, gives 35.25 dB. The input is 23.76 dB. They are scored blind on the held-out sets and on SIDD validation, and our releases are scored on SIDD too, in the gap after the burst run on v17 and before v18 (section 19).
+
+**Public evaluation-only sets:**
+
+- SIDD validation (1,280 blocks; current sRGB best about 40.5 dB);
+- the SIDD benchmark (Kaggle);
+- PolyU (non-commercial);
+- RealSR test, DRealSR, RealLQ250;
+- video: UDM10, REDS4, YouHQ40, VideoLQ.
+
+Always report position on the perception–distortion plane, never one score. DND gets one submission, at the end.
+
+### 11.4 Human study
+
+- 2AFC with at least 20 screened observers and at least 50 scenes at 1:1, at a fixed viewing size.
+- Honeypots; Bradley–Terry or JOD scaling.
+- About 194 votes per comparison to detect 60 % against 50 %.
+- A lab panel for micro-detail.
+
+### 11.5 Claim wording
+
+"On N held-out real scenes, … exceeds the reference camera and every evaluated open baseline [list] on gates A–G, each margin ≥ 1 JND at the one-sided 97.5 % scene-level paired-bootstrap lower bound; fidelity and perceptual scores both reported; invented detail < 1 % by a detector validated at Y % recall; commercial tools not tested."
+
+Not "better than any lens on Earth": the still and video gates compare against a simulated camera.
+
+## 12. What it ships as
+
+The aim is "fully functioning and useful", and the gates are only half of that.
+
+**Inputs:**
+
+- camera raws (DNG and vendor formats, through the decoders PR 15 added);
+- JPEG and HEIC;
+- burst folders;
+- video;
+- a ComfyUI node wrapping `apply`, for people who already run those pipelines (section 16).
+
+**Outputs:**
+
+- linear EXR, 16-bit TIFF or JPEG;
+- a per-pixel variance map;
+- the effective-frames map (burst);
+- a provenance map;
+- a C2PA manifest, which declares the rendered region when the rendered layer is on.
+
+**Controls:**
+
+- the fidelity dial α (section 8.6);
+- the rendered-layer knob w (section 10);
+- descriptor targets, i.e. edits (`apply`'s `target_metrics`).
+
+**Speed targets (est):**
+
+- faithful layer at 30M: under 100 ms per 1080p frame in bf16 on the 5090;
+- burst: 0.15–0.4 s per 1080p frame;
+- rendered: seconds per still.
+
+The speed table comes from `.tmp/bench_shapes.log` once it has run.
+
+**What it will be best at:**
+
+- faithful low-light and high-ISO restoration of raw captures, with a per-pixel uncertainty and a provenance record, which no open restorer ships;
+- burst merging that beats the phone's own merge on real ground truth;
+- optional, declared enhancement whose every rendered pixel is labelled.
+
+The differentiator is the verified provenance, not raw PSNR.
+
+## 13. Order, compute and disk
+
+| Phase | Work | GPU | Needs the user |
+|---|---|---|---|
+| 0, now | Score v13. Decide the gate definitions (2.1). The data fixes in section 4 that need no download (rows 1–3, 6). Swap the loss (8.3). Add the σ² input. Port the degradation to the GPU (8.5). v14 = the ladder (3.4). | ladder: 2 × 245 min | gate decision; ladder go-ahead |
+| 1 | Downloads 1–7 (about 0.94 TB). Real evaluation to ≥ 60 scenes. Dark-frame bank. Tukey read noise. Unprocessing. Real-pair hygiene. | none beyond scoring | downloads; lens-cap dark frames from their camera |
+| 2 | Faithful layer at the ladder's size on the grown corpus, new loss and recipe, 3 seeds. The raw path. | 2–4 days (est) | |
+| 3 | Burst and video layer. | 1–2 weeks (est) | video downloads (8–10) |
+| 4 | Rendered layer, stills then video. | 150–300 h stills (est) on a 6B base, about 3–5× that on the 20B, more for video | the choice of base; no download for the on-disk bases, licences read 2026-10-28 |
+| 5 | Full evaluation: baselines, public sets, human study, claim. | about 1 day for baselines | observers for the study |
+
+**Disk.** On 10-28, D: had 1,332 GB free after the decoded store's 163 GB, and items 1–7 fit with about 0.39 TB to spare. On 10-29 at 05:30 it has 275 GB free of 1.9 TB:
+
+- The decoded store holds 768 GB:
+
+  | Source | Arrays | Size |
+  |---|---|---|
+  | Commons featured pictures | 10,198 | 555 GB |
+  | HDR+ | 4,070 | 140 GB |
+  | RawNIND | 1,116 | 34 GB |
+  | Poly Haven | 1,994 | 30 GB |
+  | PixelShift200 (float16) | 97 | 5.8 GB |
+  | SI-HDR | 362 | 4.9 GB |
+
+  RawNIND's and SI-HDR's counts include the hard-linked names described below.
+- The store now keeps an array in float16 whenever every value is finite and within float16's range (`fits_half`), and in float32 otherwise. Arrays written before that change are float32.
+  - `data decoded --compact` rewrites them in place. A file another process has mapped is left alone and counted busy.
+  - PixelShift200's 97 arrays went from 12 GB to 5.8 GB.
+  - The rest compact after v15's audit, beside its fill, and again once v15 has trained, since its sampler holds files open. Halving the float32 part would return up to about 380 GB (est).
+- `data decoded --prune` removes the arrays no current item keys: the old names a key change leaves behind, and items dropped from a listing.
+- The store's floor (`HARNESS_DECODED_RESERVE_GB`, default 300; v15's fill runs at 250) means it stops writing before the real store's 150 GB floor or the collector's.
+- On 10-30 the Commons quality images' folder in the store (`derived/decoded/wikimedia-quality-images`) became a directory junction to `C:/lens-harness-decoded/wikimedia-quality-images`: D: is below the floor and C: has about 820 GB free.
+  - The store's paths and keys are unchanged, and its floor is read on C: (`shutil.disk_usage` follows the junction).
+  - Moving the 2,045 arrays already there off D: (26 GB in 3.7 minutes) stalled v17's sampler for about 4 minutes. A bulk read of D: waits for a gap between runs, or is throttled.
+- Video and synthetic sets (items 8–11, about 1 TB) need a second drive.
+
+## 14. Risks
+
+- **Gates that cannot pass** (2.1): fixed by definition or the claim fails whatever the model does.
+- **Metric gaming:** every transfer gate is scored by distance to truth; every temporal gate is paired with detail; no learned IQA in any loss.
+- **Leakage:** scene and clip splits, pHash dedup against every evaluation set, and evaluation sets frozen before the claiming run.
+- **Targets that are not clean:** JPEG quality routing; `merged.dng` retired as a target once averaged ground truth is in.
+- **Licences:**
+  - per-row tags;
+  - ShareAlike rows (HDR+, Hypersim, BY-SA Commons) droppable;
+  - non-commercial sets for evaluation and fitting only;
+  - base-model licences read at the primary source before any weight download;
+  - outputs of non-commercial models never in training;
+  - FLUX 3 klein outputs never in training, calibration or distillation (its licence's §4.b).
+- **Compute:** the ladder and the GPU loader come before any large run; no 496M or 1.1B faithful run without ladder evidence.
+- **Overclaiming:** the claim wording in 11.5; the rendered layer is always declared.
+
+## 15. What changes for v14
+
+The planned run was shape J (496M, `--base 64 --mults 1,2,4,8,16 --blocks 2,3,6,8,8 --mid-blocks 12`) at 245 min. The evidence in section 3 points to a ladder instead.
+
+- **v14a, about 30M, and v14b, about 120M.** Shapes are picked from the bench so each lands at its target size.
+- Both use the thirteenth run's data, loss, flags and 245 min, so size is the only change; v13 is the 8M point.
+- Both are loader-bound at the same 35–40 pairs/s. They see the same pairs, which makes the comparison one of capacity at fixed data.
+- **Then v15** takes the winning size with the section 4 data fixes, the section 8.3 loss and the σ² input, changed one at a time where the budget allows.
+
+## 16. What the local ComfyUI install gives
+
+A ComfyUI portable install at `C:\MiraiRender\ComfyUI_windows_portable` holds about 170 GB of weights:
+
+- diffusion models 123.5 GB;
+- text encoders 35.6 GB;
+- LoRAs 10.2 GB;
+- VAEs 1.1 GB.
+
+`C:\MiraiRender\musubi_models` holds another 27 GB (the Wan2.2 T2V low-noise expert in fp16). The Hugging Face cache holds diffusers copies of FLUX 3 klein base, Qwen-Image-Edit-2511, Z-Image-Turbo, Wan2.2 T2V and Qwen3-VL-4B-Instruct.
+
+Licences were read on 2026-10-28: FLUX's from the LICENSE.md in the local cache, the rest from each repository's Hugging Face licence tag.
+
+| Weights here | Size | Licence | Use in this plan |
+|---|---|---|---|
+| Qwen-Image-Edit-2511 (20B, fp8 mixed) | 19.1 GB | Apache-2.0 | the larger rendered-layer base for stills; a generative baseline |
+| Qwen-Image-2512 (20B, fp8) | 19.0 GB | Apache-2.0 | text-to-image; not needed |
+| Qwen-Image and Qwen-Image-Edit Lightning LoRAs (4 and 8 steps) | in 10.2 GB | Apache-2.0 | shows these bases distil to few steps (Stage B); the baseline at 8 steps |
+| Z-Image-Turbo (6B, bf16) | 11.5 GB | Apache-2.0 | the first rendered-layer base; distilled, so training needs the base release or a de-distillation adapter (check) |
+| Wan2.2 T2V and I2V A14B, high- and low-noise experts (fp8) | 4 × 13.3 GB | Apache-2.0 | the video rendered-layer candidate (the low-noise expert as a refiner); the video generative baseline |
+| Wan2.2 lightx2v LoRAs (4 steps) | in 10.2 GB | Apache-2.0 | few-step video distillation |
+| FLUX 3 Image Klein, base and distilled (5.6B) | 10.3 GB each | FLUX Kommunity License v1.0 | evaluation only (see below) |
+| Text encoders: Qwen2.5-VL-7B fp8, Qwen3-VL-4B, Qwen3-4B, UMT5-XXL fp8, Gemma | 35.6 GB | per base | loaded with their bases only |
+| Qwen3-VL-4B-Instruct, transformers format (Hugging Face cache) | | Apache-2.0 | corpus tagging (item 5 below) |
+
+**The FLUX licence.**
+
+- It allows non-commercial use, plus commercial use of outputs by a Qualifying User: under US$5M gross annualised revenue with affiliates, who filters content and discloses AI generation.
+- Derivatives (a fine-tune or a LoRA) may be made for non-commercial purposes only (§2.b).
+- §4.b forbids using the model or its outputs "to improve any other artificial intelligence model" of similar function.
+
+So a shipped rendered layer cannot be built on it, and its outputs never enter training, calibration or distillation. It may run as an evaluation baseline: testing and evaluation in a non-production environment is a listed non-commercial purpose.
+
+It is not the FLUX.2 klein-base-4B that the research found. That model is Apache (tag read today), but it is not on disk.
+
+**What it is not: training data for the faithful layer.**
+
+- **Generated images carry no capture physics.** They have no photon noise, optics or demosaic, so they cannot be clean targets for a model that must undo a camera.
+- **Their fine detail is invented.** It is the generator's invention, decoded through an 8× VAE whose texture fingerprint the restorer would learn as truth.
+- **Training on generated images degrades successive models** (self-consuming loops). Every result in sections 5 and 6 rests on real photons.
+- **Personal material stays untouched.** ComfyUI's output (555 files) and input folders, the `datasets` and `idtest` folders, and the personal LoRAs (`alexandra_*`, `lab_*`) are the user's own. This plan does not open them or use them for anything.
+- **The VLM text encoders are not chat models.** They are encoder weights in ComfyUI's layout.
+
+**What it is.**
+
+1. **The rendered layer's bases, with no download.**
+   - Section 10's 4B base needed a download. Z-Image and Qwen-Image-Edit-2511 are already here, under Apache.
+   - Research deferred Qwen-Image at 20B because bf16 needs 40–78 GB. The fp8 copy here (19 GB) fits the 5090 for inference, and LoRA training fits with block swap (musubi-tuner documents it; measure before committing).
+   - Qwen-Image-Edit takes a reference image natively, which is the restoration framing: R in, G out.
+   - **Recommendation:** prototype Stage A on Z-Image (6B) for iteration speed. Move to Qwen-Image-Edit only if the 6B's rendered bands lose the human study (11.4).
+2. **Training tools already working here.**
+   - ai-toolkit and musubi-tuner are installed in `C:\MiraiRender` and have trained LoRAs on this GPU. Stage A uses them, not new code.
+   - The pair is (R, ground truth): R is the frozen recovered layer's output on the degraded input. It goes in as the edit model's reference image, with a fixed prompt.
+3. **Generative baselines through the headless API.**
+   - ComfyUI serves an HTTP API on 127.0.0.1:8188: POST a workflow JSON to `/prompt`, then read the results from `/history`.
+   - A small driver runs each held-out input through four models and scores the outputs on our gates:
+     - Qwen-Image-Edit with Lightning (8 steps);
+     - Z-Image-Turbo img2img at low denoise;
+     - Wan2.2's low-noise expert, for video;
+     - FLUX 3 klein, evaluation only.
+   - That is the generative row of 11.3 without OSEDiff or PiSA-SR, whose SD-2.1 download is broken.
+   - We expect these models to fail provenance. Measuring that is the point: it shows the gate separates faithful from invented.
+4. **A provenance test set with known masks.**
+   - Take real ground-truth images, mask regions of known size, and inpaint them with Qwen-Image-Edit or Z-Image. Both are Apache, so their outputs may feed our detector.
+   - Check that `undeclared_invention` flags the inpainted regions. This gives the detector's recall and precision, which section 10's gate addition and the claim wording (11.5, "a detector validated at Y % recall") need.
+   - The same G-over-R outputs are the calibration pairs for M's conformal threshold.
+   - FLUX outputs stay out of both, because of §4.b.
+5. **Corpus tagging with a real VLM.** Run Qwen3-VL-4B-Instruct from the cache over the clean corpus (about 17k images; throughput to measure). It serves two purposes:
+   - **Content class** (faces, text, foliage, fabric, architecture, night, sky), for stratified evaluation and per-class reporting.
+   - **Bad clean targets:** watermarks, overlays, borders, screenshots, composites, heavy edits and AI-generated images on Commons.
+
+   Tags are metadata only. A flagged image is reviewed or dropped, never edited.
+6. **Techniques that confirm the design.**
+   - **Colour fix:** ComfyUI's colour-fix nodes (wavelet or AdaIN, used after SeedVR2 and SUPIR) take the low bands from the input and the high bands from the generator. That is the same split as section 10's composition, and it keeps low-band provenance.
+   - **Tiling:** tiled VAE and tiled sampling with blended overlaps. The rendered layer needs this in latent space for full-resolution stills, as `apply.py` does in pixel space.
+   - **Fitting 32 GB:** fp8 e4m3 weights with bf16 compute, plus block swap, are how 14–20B models run in 32 GB.
+   - **Few steps:** the Lightning and lightx2v LoRAs reach 4–8 steps on exactly these bases, which de-risks Stage B.
+7. **A ship channel.**
+   - A ComfyUI custom node wrapping `apply` (raw or image in; image, variance, provenance map and C2PA out) puts the faithful layer in front of people who already run these pipelines.
+   - ComfyUI is GPL-3.0. The node is a thin wrapper whose licence is chosen with that in mind, and the model and harness stay separate.
+   - No custom nodes are installed now, so the SeedVR2 node is not here.
+
+**What it needs from the user:**
+
+- a go-ahead for the API driver and the provenance test set (both are evaluation, with no download);
+- the choice of base, before any rendered-layer training.
+
+## 17. What changes for v15
+
+v15 takes whichever v14 shape wins the scoring: the fewest metrics lost to the real capture across the eval-raw sets (synthetic known and blind, HDR+ and RawNIND real), ties broken on metrics won.
+
+- v14b won: across the six eval-raw sets it loses 11 median metrics against v14a's 12. Both win 15, and v14b loses 286 per-tile comparisons against v14a's 332.
+- v15 therefore takes v14b's shape (about 120M: `--base 64 --mults 1,2,4,8 --blocks 2,3,6,8 --mid-blocks 12`).
+
+- **Data.**
+  - v13's sources and weights, as in v14.
+  - The HDR+ real store grows from the 150 pairs v14 drew to every train and val scene of the corpus. It is 3,487 scenes to build, about 130 GB (est from 5.1 GB per 140).
+  - The target audit (`python -m harness data audit`) reads every clean image for the halo it carries. `--target-audit` then draws only those under their source's `clean.max_halo` (about 0.044 for the two Commons sets, set from the audit's spread).
+  - Two sources added on 10-29:
+    - SI-HDR. Its merged EXR references are clean targets (weight 4, about 1.3 % of clean draws). Its exposure stacks are real pairs: each input is matched against the merge of its stack's longer frames, with the stack's own noise law. v15 draws whatever the store holds at launch.
+    - PixelShift200's pixel-shift merges, which need no demosaic (CC BY 4.0, 5 scenes held out; weight 16, about 3.4 %).
+  - Clean draw shares at launch: HDR+ 45 %, Commons featured pictures 37 %, Poly Haven 8 %, RawNIND 6.5 %, PixelShift200 3.4 %, SI-HDR 1.3 %, KADID and TID the rest.
+  - SI-HDR's references read high on the halo audit (p75 0.072, p90 0.25, against the 0.044 cut). They are not filtered: the source has no `clean.max_halo`, and at 1.3 % of draws the effect is small. v16 sets a cut from its audit or leaves the source out.
+  - The Commons featured-pictures pull is complete.
+- **Pulled for v16, not in v15.** UHD-IQA's 900 test images (CC0), from V-Nova's lossless JPEG 2000 mirror (6.2 GB).
+  - The archive is one uncompressed tar, read in place: label.py indexes its members and never extracts them.
+  - Its JPG mirror is a uniform quality-80 re-encode. It is 41 dB from the originals, and its 8 × 8 blocking is still 4 % over a clean grid at scale 2.
+  - The originals are JPEGs themselves (31 % blocking at full size), but within 1 % of a clean grid at scale 2. So they decode at scale 2 (1920 px), where the JPG mirror needed 4.
+  - They are display-referred, so audited and filtered at the Commons cut.
+  - The full 6,073-image set's host refused every connection on 10-28 and 10-29, so it is listed as manual.
+- **RawNIND rejections, for v16.** The real store keeps 2,337 pairs over 286 scenes and rejects 26 (1.1 %).
+  - 2 are files LibRaw cannot decode. The other 24 fail the alignment rule: the four quadrant shifts must agree within 1 px.
+  - 6 are real changes: kitchen_light's three pairs change their lighting between frames (spread 65 px, correlation 0.46 to 0.63), and skull-C500D's three pairs sit 4 to 7 px off at correlation 1.00, which looks like a scale change.
+  - 18 hold at correlation 0.79 to 0.99 while their quadrant shifts spread 2 to 3 px (10 pairs) or 9 to 57 px (8). 13 of the 18 are at ISO 6400 or above, so the quadrant estimate failing in the noise, or on a flat quadrant, is the likelier reading than a moved scene. v16 can estimate the quadrants on a denoised copy and drop a quadrant with too little texture to read. The 5 at ISO 50 to 3200 may be real misregistration and stay out unless the new estimate passes them.
+  - Not changed for v15: the rule also builds the real-pair evaluation sets, and v15 freezes its code at launch.
+  - RawNIND's listing now keeps only camera raws. Each scene also lists an `.xmp` sidecar and a `.jpg`; the `.xmp` would sort first as the reference. No stored scene changed, so the splits did not move.
+- **Sub-pixel registration of the real targets, built into v15** (planned for v16; `harness/data/subpix.py`). The real store aligns each pair at an integer shift, and `--shift-real` picks each tile's best integer shift within a pixel. A probe measured what is left below a pixel: Fourier cross-correlation of band-passed log luminance, with a peak fit, on 512 px crops at the centre and the four quadrants.
+  - RawNIND, 60 train pairs: a residual of 0.17 px median (p75 0.28, p90 0.45), a third of pairs over 0.25 px. At ISO below 1600 it is 0.18 px, and the quadrants agree within 0.11 px, so it is a shift of the whole frame, not noise in the estimate. Above ISO 6400 the estimate itself is unreliable (quadrant spread 0.7 px).
+  - HDR+, 40 pairs: 0.024 px median, none over 0.25 px. Its targets are registered.
+  - A residual of 0.2 px (as a Gaussian spread) takes the target's MTF to about 0.89 at 0.39 cycles a pixel. That is part, not all, of the resolution gate every run loses on RawNIND (v14a's mtf50 0.293, against the input's 0.387 and the truth's 0.5). The rest is the denoise trade.
+  - The fix:
+    - Each pair's residual is measured on the overlap (a central crop up to 3,072 px) and stored in the pair's record.
+    - It is trusted when the quadrants agree within 0.3 px and the residual is under 1 px on both axes.
+    - The reference tile is shifted by it in the Fourier domain. That shift is an all-pass, so it moves the target without blurring it the way interpolation would.
+    - `--subpix-real` applies it in the loader. A real-pair evaluation set gets a `_sp` twin on the plain set's tiles, with the targets and the camera photos moved.
+    - Every run is rescored on the `_sp` twins, since the evaluation truth moves too.
+  - The backfill over the stored pairs (10-29):
+
+    | Source | Measured | Trusted | Median residual |
+    |---|---|---|---|
+    | RawNIND | 2,337 | 2,135 | 0.159 px |
+    | HDR+ | 1,117 | | 0.012 px |
+    | SI-HDR | 88 | 57 | 0.092 px |
+
+    The loader's train split applies it on 2,005 of RawNIND's 2,196 train pairs (median 0.162 px); the other 191 are untrusted and keep their integer alignment.
+  - **Ringing probe**, on 150 RawNIND edge tiles with a residual of 0.15 px or more on an axis (from 1,365 draws).
+    - Against the unmoved target, the Fourier move adds edge overshoot of 0.016 at the median edge window (0.097 at the 95th percentile). A cubic spline's move of the same residual adds 0.012 (0.087).
+    - Against the capture, the moved target's overshoot is lower than the unmoved one's: 0.008 against 0.013. So most of what the move "adds" against the unmoved target is the misregistration it removes, not ringing.
+    - Edge error against the capture: 0.0025 unmoved, 0.0009 after either move. The Fourier move is below the unmoved target on 98 % of tiles, and level with the cubic (below it on 42 %).
+    - The Fourier move stays: the same error as the cubic, and no low-pass of the target.
+- **Loss.** v13's, plus the transfer term at weight 0.1 (section 8.3).
+  - Four fine-tunes of v13: 600 steps at batch 8, at weights 0, 0.1, 0.3 and 1. Each was scored on 64 known-capture tiles of each real set:
+
+    | Weight | RawNIND MTF50 | RawNIND texture | RawNIND shadow SNR | RawNIND ΔE | RawNIND banding | HDR+ texture | HDR+ shadow SNR | HDR+ ΔE | HDR+ banding |
+    |---|---|---|---|---|---|---|---|---|---|
+    | 0 | 0.298 | 0.383 | 22.8 dB | 0.599 | 0.0117 | 1.085 | 19.9 dB | 0.711 | 0.0224 |
+    | 0.1 | 0.322 | 0.585 | 21.9 dB | 0.651 | 0.0125 | 1.276 | 19.5 dB | 0.631 | 0.0241 |
+    | 0.3 | 0.337 | 0.833 | 20.6 dB | 0.690 | 0.0154 | 1.329 | 18.7 dB | 0.678 | 0.0251 |
+    | 1 | 0.379 | 1.054 | 19.1 dB | 0.734 | 0.0232 | 1.344 | 16.3 dB | 0.747 | 0.0280 |
+
+    HDR+ MTF50 is 0.5 (the ceiling) at every weight. Texture's target is 1, and the capture's shadow SNR is 13.4 dB (RawNIND) and 14.0 dB (HDR+).
+  - The rule written before the fine-tunes takes the largest weight that moves both real sets' texture toward 1 without spending colour, banding, edge overshoot or shadow SNR below the capture's.
+  - No weight passes. Every weight takes HDR+ texture further from 1 (1.09 to 1.28–1.34), and 0.3 and 1 also cost RawNIND colour and banding. The rule's fallback is 0.1.
+  - At 0.1:
+    - RawNIND texture goes from 0.38 to 0.59, and MTF50 from 0.298 to 0.322.
+    - RawNIND pays 0.9 dB of shadow SNR (still 8.5 dB over the capture) and 0.05 ΔE.
+    - On HDR+, ΔE improves (0.71 to 0.63).
+  - 600 steps is a short probe: the full run's own scores decide whether the term stays.
+- **Flags.**
+  - `--shift-real`: each real pair scored at its best integer shift within a pixel.
+  - `--noise-map`: the network reads the capture's noise law per pixel (the σ² input of 8.2).
+  - `--compile`: torch.compile of the training forward.
+  - `--warmup 1000 --lr-floor 0.003`: a longer warmup, and a cosine that ends near zero (8.4).
+- **One run, many changes.** Section 15 asked for these one at a time. The budget is one 245-minute run, so v15 changes them together and its record says so. If v15 regresses on a gate, the ablation runs from the fine-tune evidence first.
+- **Process fixes found on the way.**
+  - The priority helper (decodedstore._lower_priority) passes typed ctypes arguments; untyped, the process handle was truncated and the call failed silently.
+  - Store builds and the audit run on a spawn `multiprocessing.Pool`. On this Windows Python a `ProcessPoolExecutor` worker can die on an invalid handle in its call queue (WinError 6), which broke the pool and failed every scene of the first full HDR+ store build.
+  - The real store now has a free-space floor (`HARNESS_REALSTORE_RESERVE_GB`, default 150, the collector's).
+    - The decoded cache stops at 300 GB, so it gives way first.
+    - A write that would cross the floor stops the build, and the next run resumes there. The unwritten pairs carry no record, so they are not rejected.
+  - Scoring a run skips a real-pair evaluation set that is not built yet. `eval-raw --real` builds a missing set, which takes hours for SI-HDR's stacks, so that set builds in its own low-priority job and the runs are scored on it once it exists.
+  - Before v15's launch, only sources with a `clean.max_halo` need their new items audited; the loader leaves out an item of those that is unaudited. PixelShift200's merges, about 3 GB each to decode, decode before the launch, so the loader never meets one undecoded.
+- **A held-out leak, found and fixed on 10-29 before v15's launch.**
+  - **The cause.** RawNIND names its unknown-sensor files `Bayer_UNK_TEST_<scene>_…`, so `scene_of` keys six of the dataset's test-reserve scenes as `UNK_TEST_LucieB_<name>`: board, bw_drawing1, bw_drawing2, groceries, painted_plants and painted_wallpaper. The manifest's `clean.holdout` named them without the prefix, so they never matched.
+  - **What leaked.** Their 10 GT raws fell in the clean sampler's train split. They were about 0.1 % of clean draws for v13, v14a, v14b and the fine-tunes, and possibly earlier runs.
+  - **Scores are unaffected.** No score saw those scenes: the RawNIND real evaluation set draws its 64 tiles from 9 val scenes. `.tmp`'s leak rescoring confirms every run's RawNIND report has no tile from them. The scenes' own real test pairs (32 of the 148) are in no scored set.
+  - **The fix.**
+    - The manifest names the scenes by their keys.
+    - `rawnind_pairs` now raises, instead of logging, when a test-reserve scene is not in `clean.holdout`.
+    - A scan of the reserve against `split_of` finds 556 files held out and 0 leaking.
+  - **Unchanged.** The scene regex keeps the `UNK_` prefix. Dropping it would rehash the splits of five unknown-sensor scenes outside the reserve, and move them against the real store.
+- **The decoded key leaves out `holdout`**, as it already left out `max_halo`. Neither changes the decoded array, so a holdout edit no longer re-keys a source and orphans its arrays.
+  - The leak fix re-keyed RawNIND, SI-HDR and PixelShift200. Their arrays were hard-linked under the new keys, so nothing decoded again, and `--prune` removes the old names once no process keys them.
+
+## 18. What changes for v16
+
+v16 is queued behind v15: `.tmp/v16_after_v15.sh` starts it once v15 is scored. It keeps v15's sources, weights, shape (about 120M) and flags, so its scores read against v15's. Four things change: how every run is scored, two loss terms, the network's resampling, and the budget.
+
+- **Scoring (every run, from `.tmp/frozen_eval16`).**
+  - **Noise is read as a residual** (`tilemetrics.residual_noise`, `noise="residual"`).
+    - Shadow SNR and DR steps used to take the degraded tile's own high-pass as its noise. Clean texture leaks into that, so a busy tile read noisier than it is, and a blurred output read cleaner.
+    - Evaluation now reads what of the degraded luminance no shift-invariant linear filter of the clean tile explains: one gain per radial band of 1/64 cpp, a 4 px border left out.
+    - Blur, sharpening, a tone curve and a sub-pixel shift read as no noise; added noise reads as it does against the truth.
+    - Labels and the loader's conditioning keep the high-pass reading (`hp`), so training is unchanged. Tests: `tests/test_residual_noise.py`.
+  - **A third gate set, the oracle linear frontier** (`harness/model/frontier.py`, `gates["frontier"]`).
+    - On noisy real pairs the capture gates ask for the impossible. Even the best linear filter, fitted on the truth itself, falls below the noisy capture on mtf50 and texture. On RawNIND, taking shadow SNR from 14.7 to 26.7 dB takes mtf50 from 0.39 to 0.15 and texture from 0.67 to 0.11.
+    - So the output is judged against a parametric Wiener ladder fitted per tile on the truth: 16 rungs from λ 0 (the inverse filter) to 32 (heavy smoothing), 32 radial bands, gains clipped to [0, 8], the lowest band kept at 1.
+    - Each tile's output shadow SNR is located on that tile's own ladder, and every other metric is read off the ladder there.
+    - Every metric must tie or beat that matched point, mtf50 and texture by distance to the truth. Shadow SNR is the match, so it is not judged.
+    - The ladder is cached per set, noise reading and ladder definition under `derived/frontier/`.
+  - **Reports keep the restored tiles** (`outputs.npz` beside `heldout.json`), so a new reading or frontier rescores a run without its checkpoint or the GPU (`heldout.rescore`).
+  - **`python -m harness model compare`** writes one table per set across runs: step, the capture, camera and frontier verdicts, and each metric as output / matched frontier.
+  - **Every earlier run is rescored under both** once v15 is scored (`.tmp/rescore_v16.sh`, v14b first, then v13, v14a, v12, v11, v10), on the GPU beside v16. Each replaced report is kept as `<dir>_pre_v16`. Scores in sections 1 and 17 are under the old reading.
+- **What v14b loses to the frontier on HDR+** (a probe on an earlier ladder; the rescore replaces these numbers):
+
+  | Metric | v14b | Frontier | Note |
+  |---|---|---|---|
+  | edge overshoot | 0.0207 | 0 | the capture reads 0.0063 |
+  | banding | 0.0199 | 0.0164 | |
+  | periodicity | 0.022 | 0.0186 | |
+  | shading | 0.0074 | 0.0062 | |
+
+  These are the artifact and shading gates: v14b passes the noise a linear oracle reaches, and leaves halos and structure at 2 to 16 px.
+- **Where the periodicity comes from** (`.tmp/chk/diag_period.py`, v14b on 24 known-capture tiles of each real set, CPU). The table gives the residual's luminance power (image minus truth) at each grid frequency on the axes, over the median of its ring at the same radius. It is the median over tiles, and the Wiener is matched per tile to the output's shadow SNR.
+
+  | Set | Image | 1/2 cpp | 3/8 cpp | 1/4 cpp | 1/8 cpp | 1/16 cpp |
+  |---|---|---|---|---|---|---|
+  | RawNIND | capture | 3.84 | 2.55 | 2.50 | 2.79 | 2.10 |
+  | RawNIND | v14b | **26.10** | 2.87 | **4.31** | 3.74 | 2.38 |
+  | RawNIND | Wiener | 7.11 | 3.11 | 2.77 | 2.97 | 2.27 |
+  | HDR+ | capture | 8.09 | 1.19 | 2.84 | 1.86 | 1.70 |
+  | HDR+ | v14b | **14.81** | 2.36 | 3.78 | 2.89 | 2.18 |
+  | HDR+ | Wiener | 3.88 | 2.14 | 2.82 | 2.07 | 1.92 |
+
+  - The output's peak sits at the network's own strides: 1/2 cpp, and less at 1/4 and 1/8. There is none at 3/8, the JPEG 8 px block harmonic no power-of-2 stride makes. So it is the resampling grid, not the targets.
+  - The lag-8 autocorrelation excess on RawNIND is in the Wiener too (its mean excess peaks at (±8, ∓2), 0.041 against the output's 0.018). That part is the data's, not the network's.
+- **Smooth resampling** (`--resample smooth`; `net.BlurDown`, `net.SmoothUp`).
+  - Down: a [1 2 1]² binomial low-pass on reflect padding before the strided 3×3 conv (Zhang 2019, anti-aliased CNNs). A bare strided conv aliases, so the level below sees a different signal at each phase of the tile against the stride.
+  - Up: a 1×1 conv, then bilinear ×2, in place of the stride-2 transposed conv (Odena et al. 2016). A transposed conv gives each of the four output phases its own kernel.
+  - The checkpoint's config records it, and `apply` rebuilds the matching net. `learned` stays the default, so every earlier checkpoint loads unchanged.
+- **Two loss terms on the gates' own readings** (`harness/model/losses.py`).
+  - **`overshoot_loss`, weight 1.5**: `edge_overshoot_pair` as a loss.
+    - It works on clipped linear luminance, with the output's local gain against the target's at σ 8 px divided out under no gradient.
+    - For each pixel and axis, a 9 px window gives the target's step and how far the output's maximum or minimum passes the target's range, over the step.
+    - It is the mean over windows that hold an edge (step ≥ 0.1, inside the 0.98 clip guard).
+    - It is zero for the identity and for any output inside the target's local range, so the perfect restoration is still the optimum.
+    - It also charges what a blur carries into a window from beyond it: a 1 px Gaussian on dead leaves reads 0.025.
+  - **`pyramid_loss`, weight 1**: the L1 of the encoded residual's block means at 2, 4, 8 and 16 px, each block weighted by its mean clip weight.
+    - The encoding is near-logarithmic, so a block mean's residual reads as the Weber contrast `banding_score` and `shading_rmse` read.
+    - The per-pixel L1 dilutes a residual that is coherent over a block; this term does not.
+  - Both are zero at weight 0, where `pair_loss` is exactly v15's. Tests: `tests/test_losses.py`, and `tests/test_model.py` for the recorded terms and a rebuilt smooth net.
+- **Budget: 480 minutes** (up to 120,000 steps), twice v15's. v15 trains at about 63 images a second at batch 16, so 480 minutes is about 110,000 steps.
+- **Data: v15's sources and weights,** from the real stores as they stand at launch. The HDR+ and SI-HDR stores are still filling (1,576 of 3,487 and 57 of 163 on the morning of 10-29), so v16 draws more HDR+ pairs than v15 did. UHD-IQA's decode (100 of 845) and audit finish after the launch, so it goes into v17.
+- **One run, several changes**, as for v15. If v16 regresses on a gate, the first ablation is resampling against the two loss terms, from v15's checkpoint.
+- **A process fix, found when v15 failed to start (v15b and v15c).**
+  - CPython 3.12's `_wmi` races when a query times out. The abandoned query thread later writes into, and closes, a handle number the process has reused by then. Upstream fixed it (gh-130727) after 3.12's last bugfix release.
+  - Every spawned DataLoader worker asks WMI through `platform.uname()` when torch imports. Under a busy CPU the loader died at step 0 with `[WinError 6] The handle is invalid` on its queue semaphore.
+  - `harness/__init__.py` turns WMI queries off on Windows, so `platform` answers from `sys.getwindowsversion()` (the same uname on this machine).
+  - Loaders take `harness.loader_context()`, a spawn context whose Process class lives in `harness`. A worker unpickles that class first, so it imports `harness` before torch.
+  - v15d trains on it. Tests: `tests/test_platform_wmi.py`.
+
+## 19. The long run: three seeds on the full real stores (v18)
+
+v18 is three runs of one recipe that differ only in the seed, 24 hours each on the one GPU, back to back. `.tmp/v18_seeds.sh` queues them behind the burst run on v17 and the baseline scoring (11.3). They train from `.tmp/frozen_v18`, the harness at 73758442.
+
+- **Why three seeds.**
+  - A held-out gate that passes on one run can pass by the draw: the initial weights and the order of the stream.
+  - So a claim holds only if every seed passes it, and every score is reported with its spread.
+- **What varies: `--seed 0`, `1`, `2`.**
+  - The initial weights: `torch.manual_seed(seed)` runs before the network is built. Before 73758442 nothing seeded them.
+  - The training stream: the PairStream at seed + step.
+- **What stays fixed: `--val-seed 0`.**
+  - The calibration draw (the normaliser) and the synthetic and real validation draws.
+  - So every run chooses best.pt on one validation set, never on held-out.
+- **Recipe: v15's, picked at 06:17 on 10-30, when v17 was scored.**
+  - v17's if it passes the tone gate wherever v15 does and keeps every gate v15 passes.
+  - Otherwise v15's: v17's flags without `--resample smooth`, `--overshoot-weight` and `--pyramid-weight`.
+  - `.tmp/v18_pick_recipe.sh` makes the pick unattended once v17 is scored (`v18_gate_check.py v15 v17`) and writes it to `.tmp/v18_recipe`; the queue waits for it.
+  - v17 kept 103 of the gates v15 passes and lost 24: the first failure in an ordered gate set, plus the gates after it that it no longer reached.
+    - The failures: lighting_materials on raw.pixls.us (known and blind) and on HDR+'s blind set against the frontier; denoise, and micro_detail against the camera, on HDR+'s known set; tone_color against the frontier on RawNIND's sub-pixel blind set.
+    - On raw.pixls.us blind, v17's shading RMSE is 0.0103, against v15's 0.0062 and the input's 0.0044, past the 0.005 tie.
+  - v15 fails 10 gates v17 passes: denoise on RawNIND's blind set, micro_detail on its sub-pixel known set, resolution on SI-HDR's blind set, and artifacts against the camera on HDR+'s blind set (with the three camera gates after it).
+  - The shape stays at about 120M (base 64, mults 1,2,4,8, blocks 2,3,6,8, 12 mid blocks). This run asks what more steps on real data buy, not what size does.
+- **Data: the real stores as they stand at launch, plus v17's clean sources and weights.**
+
+  | Store | Stored | v17 drew (train split) |
+  |---|---|---|
+  | HDR+ | 3,641 scenes | 3,126 pairs |
+  | RawNIND | 287 scenes | 2,196 pairs |
+  | SI-HDR | 164 scenes | 435 pairs |
+
+  - **UHD-IQA joins** (`hf-uhd-iqa`, CC0) at weight 1: 845 decoded, 593 kept by the target audit (`max_halo` 0.044; 555 train, 38 val). It adds to the synthetic validation draw, so v18's validation losses do not read against v17's. And v18 against v17 measures the budget and UHD-IQA together. The release is judged on the gates and against the baselines, not against v17.
+  - **The Commons quality images join after v18, not in it.** Their audit finished on 10-30: 12,208 images read, 5,359 kept (5,353 under the 0.044 halo cut and 6 it could not read; 5,035 train and 324 val). D: is below the decoded store's 300 GB floor, so their arrays go to C: through a junction (the disk note in section 13). 772 were already decoded. The other 4,587 decoded at low priority beside v17 on 10-30 (04:24 to 05:16, 95 GB, none rejected), and v17's sampler went from 66–67 to 64–65 images a second while they did. All 5,359 are in the store. v18's three seeds keep one source list, so they stay comparable; the Commons images join the run after them.
+  - **Not in v18, still open:** a halo cut for SI-HDR (its references read p75 0.072 and p90 0.25 on the audit, against the 0.044 cut; about 4 % of real draws), and RawNIND's quadrant alignment re-estimated on a denoised copy.
+  - **Never in training:** raw.pixls.us (held-out), RawNIND's test_reserve and holdout scenes, the real-pair val and test scenes, SIDD, and generated images.
+- **Budget: 24 hours a seed (`--minutes 1440 --steps 300000`).**
+  - At v17's rate (about 56 images a second at batch 16, 3.5 steps a second), 24 hours is about 300,000 steps and 4.8M tiles of 256 px.
+  - That is three times v17's 480 minutes (about 100,000 steps).
+  - The cosine runs to the floor over whichever limit is reached first.
+  - Each seed gets up to four tries, each resuming from last.pt; `--minutes` is summed across resumes.
+- **Order and timing (est).**
+
+  | Start | GPU work |
+  |---|---|
+  | 10-30 06:12 | v17 ended; scored at 06:17, and the recipe picked |
+  | 10-30 06:18 | the burst run on v17 failed on its first step (see below) |
+  | 10-30 06:30 | the burst run on v17 again; it spilled out of GPU memory and ran at 1 img/s (see below) |
+  | 10-30 06:45 | the burst run on v17 with gradient checkpointing; it ended at 10:47 and was evaluated at 10:52 (see below) |
+  | 10-30 10:53 | the baselines through the gates and SIDD validation (about 1 h) |
+  | 10-30 11:22 | v18s0; it ended at 11:26 on 10-31 and was scored at 11:37 |
+  | 10-31 11:40 | the stop rule held the queue before v18s1; stopped there at the user's call (11:56), for the probe (20.4) |
+
+- **The burst run's first try (10-30 06:18).**
+  - `BurstNet(single)` keeps the single-frame network as `model.single`. The run scored that network alone at step 0 and then moved it to the CPU, which moved the burst model's own body there, so the first step failed on two devices. The retries would have failed the same way: no last.pt yet.
+  - The chain was stopped before its retries reached the evaluation, so the v18 queue kept waiting. The step-0 reference is now scored where it is (`79423a54`), with tests that a run moves no module and that two steps run on the GPU.
+  - The run went again at 06:30 from `.tmp/frozen_burst17b`: `frozen_burst17` (0e8a76d5) with that one file changed. The crashed try's logs are in `burst_v17/crashed_1030`.
+  - That try did not fit on the card. Batch 16 of four-frame bursts at 256 px held 28.5 GB on the card and 9 GB more in shared system memory, where the Windows driver puts what does not fit instead of failing. It ran at 1 img/s; v17 alone ran at 56. It raised no error, so the script's fallback, gradient checkpointing on a failed try, never started.
+  - It was stopped at step 50 (06:45), which started that fallback by hand: 12.7 GB, and the same loss at step 50 (0.3756), so it is the same run. It ran at 11 img/s over its first 50 steps and 33 once warm, about 30 times the spilled try. At about 1.7 steps a second, validation included, the 240 minutes hold about 25,000 of the 60,000 steps. The stopped try's log is `crashed_1030/train_log_try1_spilled.jsonl`.
+  - The trainers now cap their allocator at the card's free memory at start, less 1 GB (`train.hold_to_card`). The free memory is read from nvidia-smi, because under Windows' WDDM `mem_get_info` sees only its own process. A run that does not fit then raises at once and its retry comes next. Runs frozen before the change (the burst run, v18) do not have it; v18 trains v15's model at batch 16, which v17 ran in 17 GB.
+
+- **The burst run's result (10-30 10:52).**
+  - It trained 25,928 steps in 240 minutes. best.pt is step 22,000: synthetic validation loss 0.5379 with its frames, against 0.5524 from the reference frame alone. On the real validation bursts its frames take the loss from 0.2470 to 0.2258.
+  - It was scored on 64 tiles of the 45 validation bursts (evaluation only), against HDR+'s merge. With its frames it beats the v17 network on the same reference frame on six of nine metrics: shadow SNR by 0.5 dB (24.7 against 24.2; the noisy frame is 21.1), colour error, landmarks, shading and periodicity. It loses on edge overshoot (0.0082 against 0.0037, still under the frame's 0.0087) and on texture, and ties on banding.
+  - Section 2 put a burst's gain at 1.5 to 2.5 dB over one frame on real data; this one is 0.5. Its tiles average 2.75 frames, and HDR+'s own merge is the truth, which caps what any merge can show against it.
+  - Gates: tone passes. Capture, capture_hp and the frontier fail on banding alone (0.0208 against the frame's 0.0189, and 0.0153 for the frontier at its noise level), the one check the v17 network fails alone on these tiles.
+  - It is not released, because it sits on v17, which is not. The burst layer is trained again on v18's release seed.
+
+- **v18s0's result (10-31 11:37).**
+  - It trained 272,000 steps in 24 hours, about 3.15 a second with validation. best.pt is its last save, step 272,000.
+  - Synthetic validation loss: 0.4173 at 45,500 steps, 0.3829 at 150,000, 0.3664 at 272,000. Real validation loss: 0.2119 to 0.2010.
+  - Shadow SNR on the real validation draw stayed flat while the loss fell: 25.25, then 25.42 at 150,000, then 25.27 at 272,000.
+  - Against v15 (the same recipe, 8 hours): pooled IQM of margin / tie −0.042 [−0.070, −0.012], 0.40 of cells improved, so worse.
+    - 8 worse cells: shadow SNR on raw.pixls.us blind, RawNIND known and blind, and SI-HDR blind; edge overshoot on raw.pixls.us known and blind; landmarks on RawNIND known; periodicity.
+    - 11 better cells: MTF50 and texture on raw.pixls.us known and blind, periodicity, the 0.5–0.9 tone band, and colour error known.
+    - 33 of the 140 cells are undetermined.
+  - Against v17: +0.130 [+0.084, +0.173], better.
+  - SIDD validation, blind: 28.30 dB PSNR, against v15's 30.39 and v17's 29.80 (the input 23.66; NAFNet 40.21, Restormer 39.93, SCUNet 35.11).
+  - The stop rule held the queue before v18s1 at 11:40. The queue was stopped there at the user's call at 11:56, and seeds 1 and 2 were not run.
+- **What v18s0 says.**
+  - Three times the steps bought texture and MTF50 and lost shadow SNR and SIDD.
+  - It does not say which change did it. The steps, the data (UHD-IQA), the seed and the validation draw all changed at once.
+  - Validation loss fell 12 % while held-out shadow SNR and SIDD fell. So the training objective does not track what the gates read, and more steps on it is not the way forward.
+  - The objective is the next question. The debiased probe (20.4) asks it in a tenth of a run per change.
+- **Other splits, and why not.**
+  - One 72-hour run gives no spread.
+  - Three 72-hour runs take nine days.
+  - Three at once would not fit: each takes 10.5 GB of GPU memory and 12 loader workers, one run already holds the GPU at 97 %, and RAM is tight.
+- **Stop rules.**
+  - A seed that dies four times is reported as dead, and the queue goes on to the next.
+  - After v18s0 is scored, the queue judges it with the verdict (section 20.3) against v17 and against v15, whose recipe it trains (`.tmp/v18_gate_check.py`; until 30 October it counted cascaded gates, see 20.8). The queue stops before v18s1 and waits for `.tmp/v18_go` when v18s0 lacks one of their reports, or when its pooled reading against either is worse (the interquartile mean of margin / tie over every cell, its 90 % interval below 0). Worse cells alone do not stop it: with one seed a side no cell's interval holds seed variance, and seeds 1 and 2 are what measure it. The rule stops a run like v17, which reads worse against v15 (20.3).
+- **Scoring, per seed.**
+  - `score_run_v17.sh`, from `frozen_eval17`, so the scores read against v15's and v17's:
+    - the demo and raw.pixls.us sets, known and blind;
+    - the three real-pair sets, known and blind;
+    - the sub-pixel sets.
+  - SIDD validation, blind (`model baseline sidd --ckpt`). SIDD is sRGB phone crops and the model trains on linear data, so it is out of the model's domain: it is reported, not a gate.
+  - Then `model compare --runs v15,v17,v18s0,v18s1,v18s2,nafnet,restormer,scunet`.
+- **What is claimed.**
+  - A gate passes for v18 only if it passes on all three seeds.
+  - Each score is given as the median of the three, with the min and max.
+  - The release is the seed with the best validation loss, not the best held-out score. It goes through export, capture-eval and the model card (section 12), and the burst layer is then trained on it.
+- **Disk.** Each seed keeps two checkpoints of 1.9 GB plus its reports and their tiles, about 15 GB for all three. D: has 191 GB free.
+
+## 20. Fewer guesses: checks before and after a run (10-30)
+
+Up to v17 a recipe change was argued from what a term was meant to do, trained for eight hours and read off the count of cascaded gates. That is where the trial and error came from:
+- a term's side effects showed only after the run;
+- a run's length was picked without a forecast;
+- gate counts on 9 or 10 scenes read the draw as wins and losses.
+
+v16 and v17 each cost a full run to learn what a few CPU minutes now show. Three checks replace the guesses. None needs the GPU, so they run while v18 trains.
+
+| Check | When | Command (`python -X utf8 -m ...`) | Answers |
+|---|---|---|---|
+| Neutrality | before a loss change | `harness.model.neutrality <train's loss flags> --against incumbent.json` | whether the loss alone moves tone, shading or colour, against the incumbent's recipe |
+| Curves | before a longer run | `harness.model.curves <run> --to <steps>` | what more steps of the same recipe buy |
+| Verdict | after a run is scored | `harness.model.verdict <candidate> <base>` | which differences the held-out scenes resolve |
+
+All three run with `CUDA_VISIBLE_DEVICES= PYTHONPATH=. HARNESS_DATA_ROOT=D:/lens-harness-data`. Section 20.4 puts them in one order, the probe.
+
+### 20.1 Neutrality: what a loss teaches before a network learns it
+
+- **The idea.**
+  - L1 on the log encoding is minimised by the median, and a monotone map keeps the median (Gneiting 2011, "Making and evaluating point forecasts"). So at the truth plus zero-median noise, L1 pulls tone nowhere.
+  - A one-sided term on a statistic of a noisy image (a local range, a maximum, a standard deviation) is not neutral. Noise moves the statistic, and the term pays the output to undo it at low frequency, where the gates read tone and shading.
+- **The check (`harness/model/neutrality.py`).**
+  - Dead-leaves tiles: sharp edges, eight stops of values, no ISP.
+  - Heteroscedastic noise at s = 0.005, 0.01 and 0.02 (the sd at luminance 0.5). It goes on the output (what a network leaves) or on the target (a real pair's reference).
+  - Adam settles a smooth field under the recipe's `pair_loss`: block offsets at 8 to 32 px, a contrast gain per scale, a tone curve by octave and a gain per channel.
+  - The recipe's excess over L1 and gradients alone, on the same tiles and noise, is what the recipe itself teaches. Two to six minutes on the CPU.
+- **Backtest: the three recipes trained so far, at s = 0.02.**
+
+  | Recipe | Output: shading | Output: tone 0.2–0.5 | Output: tone 0.5–0.9 | Target: shading | Target: tone 0.2–0.5 |
+  |---|---|---|---|---|---|
+  | v15 | +0.0026 | −0.0036 | −0.0004 | +0.0075 | +0.0132 |
+  | v16 | +0.0050 | −0.0105 | −0.0065 | +0.0081 | −0.0053 |
+  | v17 | +0.0042 | −0.0076 | −0.0040 | +0.0081 | −0.0019 |
+
+  - **Absolute limits** (half of each gate's margin: shading 0.0025, tone 0.015 in log). All three fail at s = 0.02, v15 included, and all three pass at 0.01 and below. The absolute read does not separate them.
+  - **Paired against v15** (same tiles and noise, s up to 0.01). v16 moves the 0.2–0.5 and 0.5–0.9 bands 0.002 to 0.008 darker and v17 0.0015 to 0.006. Shading and colour move under 0.001. That is the held-out result's direction and its rank.
+  - **Size: the network amplifies.** Output side at s = 0.01, against the raw.pixls.us blind set's medians, all as changes from v15:
+
+    | Run | Proxy shading | Held-out shading | Proxy tone 0.2–0.5 | Held-out tone 0.2–0.5 | Proxy tone 0.5–0.9 | Held-out tone 0.5–0.9 |
+    |---|---|---|---|---|---|---|
+    | v16 | +0.0005 | +0.0156 | −0.0044 | −0.053 | −0.0049 | −0.182 |
+    | v17 | −0.0001 | +0.0041 | −0.0030 | −0.0135 | −0.0034 | −0.0505 |
+
+    The tone moves grow 4 to 37 times in training. The proxy's shading is too small at these levels to read (v17's has the wrong sign); its tone is not.
+  - **Hence `--against` and its limits (`RELATIVE`).** Tone and colour may move 0.001 in log, and shading 0.0005, at s up to 0.01.
+    - At the smallest factor seen (4), a 0.001 band move is a seventh of the tone margin on held-out. At the largest (37) it is more than the whole margin.
+    - So it is a screen. A change past it is probed (20.4) before it is trained on, and a change within it is not thereby safe.
+    - Two runs that differ by one family of terms set these factors. Each probe adds a point.
+- **Each term alone, against L1 and gradients alone, s = 0.02.**
+
+  | Term (weight) | Output: shading | Output: tone 0.2–0.5 / 0.5–0.9 | Target: shading | Target: tone 0.2–0.5 / 0.5–0.9 |
+  |---|---|---|---|---|
+  | range 3 | +0.0066 | −0.0177 / −0.0184 | +0.0002 | −0.0013 / −0.0016 |
+  | flat 1 | 0.0000 | 0.0000 / 0.0000 | 0.0000 | 0.0000 / 0.0000 |
+  | texture 1 | +0.0024 | +0.0052 / +0.0055 | +0.0163 | +0.0177 / +0.0154 |
+  | transfer 0.1 | 0.0000 | +0.0004 / +0.0004 | +0.0008 | +0.0025 / +0.0027 |
+  | overshoot 1.5 | +0.0047 | −0.0185 / −0.0177 | +0.0043 | −0.0144 / −0.0146 |
+  | overshoot 0.75 | +0.0034 | −0.0143 / −0.0134 | +0.0028 | −0.0110 / −0.0113 |
+  | pyramid 1 | +0.0051 | +0.0033 / +0.0033 | +0.0058 | −0.0042 / −0.0033 |
+
+  - **range 3** darkens the output's mid and high tones when noise is left in it. Noise widens the local range, and the term is one-sided. It does so already at s = 0.005 (−0.005).
+  - **texture 1** matches the output's local std to the target's.
+    - A noisy reference has more std, so on the target side the term pays the output to add contrast and brightness (+0.016 shading, +0.018 tone).
+    - On the output side it brightens a little. So in v15's recipe it partly cancels range's darkening: v15's near-neutral output side is two errors cancelling.
+  - **overshoot** darkens on both sides at every level. At half the weight it does about three quarters as much. This is v16's and v17's held-out tone and shading loss.
+  - **pyramid 1** adds shading on both sides (+0.005 to +0.006) and moves the shadows: 0.05–0.2 is +0.008 on the output side and −0.008 on the target side.
+  - **flat 1 and transfer 0.1** are neutral.
+- **The levels.** The real pairs' references measure s ≈ 0.002 to 0.014. SI-HDR's references carry at most a quarter of their input's variance. So the target side at 0.005 to 0.01 is what training sees, not a stress case.
+- **What it does not say.**
+  - Nothing about detail or noise removal: neutral is necessary, not sufficient.
+  - Dead leaves are not photographs. A term that reads neutral here can still be biased on a texture the leaves lack.
+- **Debiased candidates, against v15 (s up to 0.01).**
+
+  | Candidate (v15's recipe with) | Alone, worst up to s = 0.02 | Against v15, output side, tone 0.2–0.5 / 0.5–0.9 | Against v15, target side, tone 0.2–0.5 / 0.5–0.9 | Against v15, worst: tone, shading, colour | Screen |
+  |---|---|---|---|---|---|
+  | range 0 | not neutral: target shading +0.0154, tone +0.0161 | +0.0037 / +0.0013 | +0.0010 / +0.0003 | 0.0037, +0.0019, 0.0013 | probe first |
+  | texture 0 | not neutral: shading 0.0057, tone 0.0092 | −0.0040 / −0.0020 | −0.0048 / −0.0025 | 0.0048, +0.0015, 0.0013 | probe first |
+  | range 0 and texture 0 | **neutral**: shading 0.0008, tone 0.0027 | +0.0009 / +0.0001 | −0.0044 / −0.0024 | 0.0044, −0.0007, 0.0011 | probe first |
+  | v17's recipe (a repeat) | not neutral: shading 0.0081, tone 0.0076 | −0.0030 / −0.0034 | −0.0064 / −0.0051 | 0.0064, +0.0001, 0.0007 | probe first |
+
+  The changes against v15 are at s = 0.01, where each is largest. A negative shading change is less shading than v15's.
+  - **Taking out one of the pair exposes the other.**
+    - Without range, the recipe brightens (output +0.0037).
+    - Without texture, it darkens (output −0.0040, target −0.0048).
+    - So v15's near-neutral output side is the two terms cancelling at these levels. Nothing designed that cancellation, and it need not hold on photographs.
+  - **Without both, the recipe is neutral outright**, the first that is.
+    - Against v15, its output side moves under 0.001 in the two bands the calibration covers.
+    - Its target side is 0.0044 darker: v15's own brightening on noisy references, taken away.
+    - The screen is blind to direction by design: it measures the distance from what the held-out sets have validated. So it marks this change, too, for a probe.
+  - **v17's recipe repeats the earlier paired read** to the fourth decimal, so the check gives the same answer on the same setup.
+  - **So the first probe after v18 is range 0 and texture 0, against a control branch on v15's recipe.**
+    - Range was added against halos (v9) and texture for local contrast, so edge overshoot and texture may lose without them. The verdict reads both.
+    - If they lose, the next question is a neutral replacement for each, screened here before it gets a branch.
+    - Range 0 alone and texture 0 alone are each predicted to move tone, in opposite directions, so they come after.
+
+### 20.2 Curves: what more steps buy
+
+- **The law** ([Tissue et al. 2024](https://arxiv.org/abs/2408.11029)): L(s) = L0 + A·S1^−α − C·S2.
+  - S1 is the area under the learning rate; S2 is the annealing area.
+  - One fit to one run predicts the same recipe under another schedule: a longer cosine, or a constant trunk with a cooldown ([Hägele et al. 2024](https://arxiv.org/abs/2405.18392)).
+- **Backtest.** Fit on the first part of the run's real validation curve, then predict its end.
+
+  | Run (steps) | Last | Fit on 50 % | Fit on 75 % | Cosine to 150k | Cosine to 300k |
+  |---|---|---|---|---|---|
+  | v15 (45k) | 0.1687 | 0.1620 (−3.9 %) | 0.1667 (−1.2 %) | 0.1636 | 0.1624 |
+  | v17 (93k) | 0.3187 | −6.8 % | −2.2 % | 0.3166 | 0.3153 |
+
+- **Reading.**
+  - The fit is optimistic by 1 to 7 % on its own runs.
+  - It predicts that 300k steps buy 3.4 % (v15) and 0.9 % (v17) of real validation loss over the length each ran. That is no more than the fit's own error.
+  - So length alone is not the lever. v18's threefold steps are expected to move few held-out cells. This prediction is written before v18s0 ends, and the verdict of v18s0 against v15 tests it (20.3).
+- **Mid-run fits do not work.**
+  - At 40k of v18s0's 300k steps the rate has barely fallen (S2 ≈ 0), so the anneal term is not identified. The fit puts the run's end at 0.2134 against a last value of 0.2122.
+  - A forecast needs a run that has annealed. The probe's cooldown branches (20.4) give that in a tenth of a run.
+- **Rule.** Spend length only where the predicted gain exceeds the seed spread on the same draw. v18's three seeds measure that spread for the first time.
+
+### 20.3 Verdict: what the scenes resolve
+
+- **Why.**
+  - A gate passes on the median of 64 tiles from as few as 9 or 10 real scenes.
+  - The cascade stops a gate set at its first failure, so one flip of the draw reads as several lost gates. v17's 24 lost gates in section 19 include the gates after each first failure that it no longer reached.
+- **Method (`harness/model/verdict.py`).**
+  - Each (held-out set, metric) cell and each tone band is judged on its own, on the statistic the gates use.
+  - Scenes are resampled, not tiles: a paired bootstrap, over seeds too when a run is a list of seeds.
+  - A sign-flip randomisation test over scenes, exact up to 14 scenes.
+  - The outcome comes from two one-sided tests against the tie margin (Walker and Nowacki 2011): better, non-inferior, worse or undetermined. `lower` marks a resolved loss inside the margin.
+  - Pooled: the interquartile mean of margin / tie and the share of cells improved, each with a stratified bootstrap ([Agarwal et al. 2021](https://arxiv.org/abs/2108.13264)).
+  - A public baseline is read by its name (nafnet, restormer, scunet), on the blind sets it is scored on.
+- **Results.**
+
+  | Candidate vs base | Worse cells | Better | Lower, inside the margin | Pooled IQM [90 %] | Improves | Verdict |
+  |---|---|---|---|---|---|---|
+  | v17 vs v15 | 13 | 6 | 12 | −0.165 [−0.180, −0.088] | 0.30 [0.28, 0.38] | worse |
+  | v16 vs v15 | 32 | 3 | 12 | −0.257 [−0.345, −0.207] | 0.24 [0.22, 0.31] | worse |
+
+  - v17 loses shadow SNR on the real sets (SI-HDR known −4.8 dB, blind −2.2) and the 0.5–0.9 tone band on raw.pixls.us. It wins MTF50 and texture on raw.pixls.us. Section 19's pick of v15's recipe stands.
+  - v16 loses tone and shading everywhere, and colour and highlights on raw.pixls.us.
+- **Rule.**
+  - A claim names its cells and needs at least 20 scenes behind each (`FEW_SCENES`).
+  - On 9 or 10 scenes, three seeds resolve only differences of about three standard errors. The verdict flags such cells.
+
+### 20.4 The probe: one change, a tenth of a run, a verdict
+
+Every recipe change goes through five steps in order, and stops at the first that fails.
+
+1. **One change at a time**, against the incumbent (today v15's recipe), so the verdict names its cause.
+2. **Neutrality against the incumbent** (`--against`).
+   - Within `RELATIVE`: go on.
+   - Past it: go on only as a probe, never straight to a full run on the term's argument.
+3. **Preflight.**
+   - The run's exact command for about 200 steps, with one validation, one save and one resume, under `train.hold_to_card`.
+   - The burst run's two failed starts on 10-30 would each have shown in the first minute: at 06:18 a module moved off the GPU, and at 06:30 the run spilled to system memory at 1 img/s.
+4. **A warmup-stable-decay probe.**
+   - A constant-rate trunk, then cooldown branches from one checkpoint, each 10 to 20 % of the trunk's steps.
+   - One branch per candidate plus a control branch on the incumbent's recipe, all on the same seed and stream.
+   - A cooldown from a constant-rate trunk matches a cosine of the same length ([Hägele et al. 2024](https://arxiv.org/abs/2405.18392)). So a branch reads as a finished run at a fraction of the cost, and the curve law fits the branches (20.2).
+   - At v18's rate (3.4 steps a second), a 24k-step trunk is about 2 hours, and a 4k-step branch with its scoring is about 45 minutes. Four candidates take about 5 hours, against 8 per candidate as full runs.
+   - The flag: `train --schedule wsd --decay N` (`623fccb9`). `lr_at` holds `--lr` after the warmup, then decays it as 1 − sqrt to the floor over the last N steps. It uses the same budget share as the cosine, so a `--minutes` stop still anneals. At `--decay 0` it never decays: that is the trunk.
+   - A branch resumes from a copy of the trunk's last.pt with a larger `--steps`. The stream is seeded at seed + step, so every branch of a seed reads the same tiles.
+   - The EMA (0.999) has a horizon of about 1,000 steps. After a 4,000-step cooldown, the trunk's share of a branch's EMA weights is about 2 %.
+5. **The verdict decides.**
+   - Adopt when the pooled IQM interval is above 0 and no cell is worse.
+   - Tie when every cell is non-inferior; keep the simpler recipe.
+   - Otherwise drop.
+   - Seeds are paired across branches, and a claim in this plan needs three.
+
+**The first probe (launched 10-31, `.tmp/probe_wsd.sh`, from `.tmp/frozen_probe` at `623fccb9`).**
+
+- **Per seed 0, 1, 2, at `--val-seed 0`:**
+  - A trunk on v15's recipe, held at the peak rate for 24,000 steps.
+  - Five cooldown branches of 4,000 steps from its last.pt.
+
+  | Branch | Range | Flat | Texture | Transfer | What it asks |
+  |---|---:|---:|---:|---:|---|
+  | ctrl | 3 | 1 | 1 | 0.1 | the control: v15's recipe |
+  | r0t0 | 0 | 1 | 0 | 0.1 | the one neutral recipe in 20.1 |
+  | r0 | 0 | 1 | 1 | 0.1 | the range term alone |
+  | t0 | 3 | 1 | 0 | 0.1 | the texture term alone, which may count noise as texture |
+  | l1 | 0 | 0 | 0 | 0 | plain fidelity: L1 (clip-weighted) and the gradient term, as NAFNet and Restormer train |
+
+- **Scoring.**
+  - Each branch's last.pt, not best.pt: a branch's best.pt is chosen on its own loss, so it is removed.
+  - The held-out sets without the demo images (`.tmp/score_probe.sh`, from `frozen_eval17`), and SIDD validation, blind.
+  - Each candidate's verdict against the control, per seed and on three.
+  - `.tmp/probe_table.py` puts SIDD and the median shadow SNR per branch and seed beside v15 and the baselines, in `.tmp/probe_table.md`.
+- **Caveat.** A branch reads what a change does over a cooldown from a shared trunk. A recipe that wins earns a full run before it is released.
+- **Preflight (10-31).** The trunk's and the l1 branch's exact commands at 200 and 300 steps (warmup 50, `.tmp/preflight_wsd`): 10 GB on the card and none spilled, 64–68 img/s, the branch resumed at step 200, and the rate held at 2.0e-4 and then 5.90e-5 at step 250 and 6.0e-7 at 300, as `lr_at` gives. Held-out evaluation (`frozen_eval17`) and SIDD both load the branch's last.pt.
+- **Time.** At 62–64 img/s and about 24 s per validation and save, a trunk is about 2 hours. A branch is about 20 minutes, and its scoring about 11 (SIDD 5.5). So a seed is about 4.7 hours and the three about 14 (est): from 12:36 on 10-31 to about 03:00 on 11-01.
+
+**The first probe's result (finished 03:17 on 11-01, three seeds).** Blind means over the seeds; shadow SNR in dB, the median of the restored tiles.
+
+| Branch | SIDD PSNR | SIDD SSIM | raw.pixls.us | RawNIND | HDR+ | SI-HDR | Verdict on three seeds, pooled IQM [90 %] |
+|---|---:|---:|---:|---:|---:|---:|---|
+| ctrl | 30.18 | 0.682 | 21.46 | 22.77 | 23.32 | 20.13 | the control |
+| r0t0 | 31.08 | 0.730 | 21.86 | 22.53 | 23.66 | 19.90 | +0.004 [−0.020, +0.027], no clear change |
+| r0 | 28.69 | 0.606 | 20.63 | 21.20 | 21.22 | 18.44 | −0.012 [−0.043, +0.007], worse on seeds 0 and 2 |
+| t0 | 31.60 | 0.758 | 22.52 | 23.73 | 24.87 | 20.90 | −0.050 [−0.064, +0.004], worse on each seed |
+| l1 | 31.39 | 0.748 | 23.27 | 25.28 | 25.53 | 22.57 | +0.052 [+0.025, +0.082], better on each seed (+0.033, +0.073, +0.056) |
+| *v15* | 30.39 | 0.687 | 22.92 | 24.67 | 24.32 | 20.55 | |
+| *NAFNet* | 40.21 | 0.924 | 29.79 | 34.24 | 35.47 | 21.77 | |
+
+- **Plain fidelity wins on denoising.** Against the control, l1 adds 1.2 dB on SIDD and 1.8 to 2.5 dB of shadow SNR on every held-out set. It beats v15 on all five columns after 28,000 steps.
+- **The rule still drops it.** Its 17 worse cells are all sharpness or highlights: MTF50, high-frequency texture fidelity, and the highlight-loss fraction. That is the trade a smoother output makes, and the range term was what held the highlights.
+- **The custom terms do not close the gap.** The best branch is still 8.8 dB under NAFNet on SIDD and 6.5 to 9.9 dB under it on shadow SNR (raw.pixls.us, RawNIND, HDR+). No loss weight moves a number by more than 2.5 dB. So the network, not the objective, is the next question.
+- **What it decides.** l1 is not released. It is the loss for the architecture comparison (20.9), because it is the loss NAFNet trains on, so that comparison names the network alone. Tables: `.tmp/probe_table.md`; verdicts: `.tmp/probe/verdict_*`.
+
+### 20.5 Data: what to add, and how to weigh it (research, 10-30)
+
+- **Quantity flattens.** For learned reconstruction, gains taper after a few thousand training images: about 0.04 dB per doubling past about 6,000 ([Klug and Heckel 2022](https://arxiv.org/abs/2209.13435)).
+- **The noise model matters more than the count.**
+  - PMRID loses 39.76 → 36.87 dB when its noise parameters are halved ([Wang et al. 2020](https://arxiv.org/abs/2010.06935)).
+  - ELD ([Wei et al. 2020](https://arxiv.org/abs/2003.12751)) and LED ([Jin et al. 2023](https://arxiv.org/abs/2308.03448)) make the same point in low light.
+- **Real against synthetic.**
+  - Only 1:1 is published. CBDNet ([Guo et al. 2018](https://arxiv.org/abs/1807.04686)): 38.06 dB mixed, against 37.72 on real alone and 37.57 on synthetic alone.
+  - There is no published law for the share in restoration.
+- **How to weigh sources, best first.**
+  1. **In-run gradient alignment** of each source with the real validation set ([DoGE](https://arxiv.org/abs/2310.15393), [In-Run Data Shapley](https://arxiv.org/abs/2406.11011), [LESS](https://arxiv.org/abs/2402.04333)). About 1 % extra compute, read during the run; it can score the target audit's halo bins too.
+  2. **Online reweighting** ([Aioli](https://arxiv.org/abs/2411.05735), [ADO](https://arxiv.org/abs/2410.11820)). [FoundIR-v2](https://arxiv.org/abs/2512.09282) is the one restoration example (+1.0 to 1.5 dB). Weights are capped at 0.5 to 2 times the static mix.
+  3. **Proxy-model mixture search** ([RegMix](https://arxiv.org/abs/2407.01492), [Data Mixing Laws](https://arxiv.org/abs/2403.16952), [DoReMi](https://arxiv.org/abs/2305.10429), [Shukor et al. 2025](https://arxiv.org/abs/2507.09404)). Unproven for restoration, at 1 to 2.5 GPU-days.
+  4. **TRAK-style attribution.** Too costly at this size.
+- **Target quality: measure the dose, then cut.**
+  - JPEG-compressed targets cost 0.12 dB at quality 95 and 2.89 dB at 50 ([Ohtani et al. 2024](https://arxiv.org/abs/2409.00768)). [HQ-50K](https://arxiv.org/abs/2306.05390) filters its targets for the same reason.
+  - For the halo cut (0.044), the same: graded unsharp masking on clean targets in a probe, with the cut set where the curve bends, not by argument.
+- **Here.**
+  - The next data step is per-source gradient alignment logged during a run, and a check of the noise model against the real pairs, not more images.
+  - The Commons images join after v18 as planned, and (1) sets their weight.
+
+### 20.6 Burst: what three or four frames can buy (research, 10-30)
+
+- **Published gains at 3 to 4 real frames are 0.2 to 0.65 dB.** Section 2's 1.5 to 2.5 dB came from 14-frame super-resolution.
+  - DBSR ([Bhat et al. 2021](https://arxiv.org/abs/2101.10997)): +0.65 dB at 4 frames, +1.11 at 8, +1.35 at 14, and below a single frame at 2.
+  - [Karadeniz et al. 2020](https://arxiv.org/abs/2006.09845): +0.20 dB at 4.
+  - RawNeRF ([Mildenhall et al. 2021](https://arxiv.org/abs/2111.13679)): the multi-frame baselines lost.
+  - Our +0.5 dB at 2.75 frames on average sits in that range. The ideal for 2.75 frames is about +2 to 2.5 dB, an inference from [Godard et al. 2017](https://arxiv.org/abs/1712.05790), so the burst layer gets about a quarter of it.
+- **The truth caps the score.**
+  - HDR+'s merged.dng keeps its reference frame at a weight of at least 1/N and aligns to whole pixels ([Monod et al. 2021](https://arxiv.org/abs/2110.09354); [the dataset](https://hdrplusdata.org/dataset.html)).
+  - So the truth holds part of the input's noise, and a network that denoises past it reads as wrong.
+- **Two ways frames go to waste.**
+  - A bicubic half-pixel warp keeps 0.41 of the noise variance.
+  - A kernel-prediction network can learn to ignore the other frames ([Mildenhall et al. 2017](https://arxiv.org/abs/1712.02327)). Godard gained 1.5 dB by fusing at every level.
+- **Checks before the next burst run, cheapest first, none of them training.**
+  1. The gain by frame count on the validation bursts.
+  2. A classical merge fed to the single-frame network, against 24.2 dB (one frame) and 24.7 (the burst network). It is our own merge, since IPOL's is AGPL; [Wronski et al. 2019](https://arxiv.org/abs/1905.03277) is the design.
+  3. Whether the output's noise falls as σ/√N.
+  4. Synthetic bursts with a known truth.
+  5. An audit of merged.dng as a target.
+  6. An independent truth from held-out frames, on bursts of six or more: NTIRE 2026's Twilight Cowboy set ([Khalin et al. 2026](https://arxiv.org/abs/2608.09782)) and SIDD, after licence checks and a download OK.
+  7. The warp-noise audit.
+  8. A copies probe (one frame N times) and an other-burst probe: does the network use the frames at all?
+
+### 20.7 v15 against the public baselines (10-30)
+
+On the blind held-out sets (70 cells each):
+
+| Baseline | Pooled IQM [90 %] | Improves | Worse cells | Verdict for v15 |
+|---|---|---|---|---|
+| NAFNet | +0.562 [+0.421, +0.656] | 0.77 | 4, all shadow SNR | better |
+| Restormer | +0.207 [+0.093, +0.239] | 0.64 | 8 | better |
+| SCUNet | +0.160 [+0.086, +0.218] | 0.61 | 7 | better |
+
+Medians, shadow SNR in dB and MTF50 in cycles per pixel (the truth's MTF50 is 0.500):
+
+| Set | Input SNR | v15 SNR / MTF50 | NAFNet SNR / MTF50 | SCUNet SNR / MTF50 |
+|---|---|---|---|---|
+| raw.pixls.us blind | 26.0 | 22.9 / 0.345 | 29.8 / 0.168 | 27.5 / 0.209 |
+| HDR+ blind | 21.3 | 24.3 / 0.500 | 35.5 / 0.187 | 29.9 / 0.292 |
+| RawNIND blind | 15.0 | 24.7 / 0.366 | 34.2 / 0.145 | 29.8 / 0.177 |
+| RawNIND sub-pixel | 14.2 | 22.8 / 0.336 | 33.8 / 0.145 | 29.1 / 0.167 |
+| SI-HDR | 8.5 | 20.5 / 0.214 | 21.8 / 0.050 | 16.5 / 0.045 |
+
+SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet 40.21 (0.924), Restormer 39.93, SCUNet 35.11. SIDD is the baselines' home set and out of our model's domain.
+
+- **Reading.**
+  - v15 keeps detail, colour and tone; the baselines remove far more noise and smooth the detail away.
+  - v15 reads better pooled against each, on MTF50 (+0.12 to +0.31 cpp everywhere), texture and tone.
+  - It loses shadow SNR to NAFNet by 6.9 to 11.2 dB, and to SCUNet by 4.6 to 6.3 dB except on SI-HDR (+4.0 for v15).
+  - On raw.pixls.us blind, v15's shadow SNR (22.9 dB) is below the input's (26.0).
+- **So a state-of-the-art claim cannot be made today.**
+  - The gap is denoising strength at kept detail: shadow SNR toward NAFNet's while MTF50 stays near the truth's.
+  - The probes in 20.4 aim there first.
+
+### 20.8 Waiting on a decision
+
+- **v18's stop rule: decided on 30 October.** The verdict replaces the count of cascaded gates in `.tmp/v18_gate_check.py`; section 19 states the rule. It stops on the pooled reading, not on single cells. Tested on the reports there: a run against itself goes on, v17 against v15 stops, and a run missing reports stops.
+- **v18s1 and v18s2: not run.** v18s0 read worse than v15 (section 19), and the queue was stopped before seed 1 at the user's call on 10-31.
+- **The probe runs instead (20.4, from 10-31).** Four candidates against a control on v15's recipe, three seeds each: range 0 with texture 0, range 0, texture 0, and plain fidelity. The schedule flag went in after v18 was stopped, so no queued run's code changed.
+- **The probe: done (20.4).** Plain fidelity is better on each seed and the strict rule drops it on sharpness and highlight cells. It is not released, and it is the loss for the next comparison.
+- **Next: NAFNet's architecture on our data, from 11-02 (20.9). Seed 0 says the gap is not the network: NAFNet's network on our data is 9.6 dB under NAFNet on SIDD.** The hypothesis it tested: the best branch is 8.8 dB under NAFNet on SIDD, and no loss weight moved a number by more than 2.5 dB. SCUNet (about 18M parameters) and Restormer (about 26M) beat a 120M network, so the gap is in the network's design, not its size.
+
+### 20.9 NAFNet's architecture on our data (from 11-02)
+
+- **The question: is the gap to NAFNet in the network or in its training data?**
+  - NAFNet trains on SIDD, its home set. On our held-out sets, out of its domain, it still has 6.9 to 11.2 dB more shadow SNR than v15 (20.7).
+  - No probe branch moved SIDD by more than 1.5 dB from the control (20.4). Training NAFNet's network on our data and our loss separates the network from the data.
+- **The design: two arms, each from scratch on the probe's plain fidelity** (clip-weighted L1 + gradient; range, flat, texture and transfer at 0), with the probe's sources, weights and stream.
+
+| | res (the control) | naf |
+|---|---|---|
+| Network | v15's shape: base 64, mults 1,2,4,8, blocks 2,3,6,8, mid 12, residual blocks, concatenated skips | NAFNet-width64: base 64, mults 1,2,4,8,16, blocks 2,2,4,8,0, mid 12, decoder 2, NAF blocks, additive skips, 2 × 2 stride-2 down, 1 × 1 conv and pixel-shuffle up |
+| Parameters | 120.54M (7.37M of them FiLM) | 126.19M: NAFNet's 115.98M, FiLM's 10.13M, the embedding's 0.07M |
+| Multiply-adds per 256-pixel tile | 210.1 G | 63.3 G (the paper: about 64 G) |
+| Optimizer | AdamW 2e-4, betas (0.9, 0.99), weight decay 0.01 | AdamW 5e-4, betas (0.9, 0.9), weight decay 0: NAFNet's, with its 1e-3 at batch 64 scaled by the square root to batch 16 |
+
+- **Both arms:** 28,000 steps, warmup 1,000, warmup-stable-decay with the last 4,000 decayed to 0.3 % of the peak, batch 16, tile 256, seeds 0, 1 and 2 at validation seed 0.
+  - The runs interleave (res s0, naf s0, res s1, ...), so seed 0's verdict comes first.
+  - Each is scored on its EMA weights at the last step, on the held-out sets (known, blind, real, sub-pixel) and SIDD validation.
+  - naf's verdict is taken against res per seed and on all three. The driver is `.tmp/arch_l1.sh`, from the tree frozen at 7573e54a.
+- **The code (7573e54a): `train --block naf`** builds NAFNet's network inside CondUNet ([Chen et al. 2022](https://arxiv.org/abs/2204.04676)).
+  - It has NAFNet's block (layer norm, depthwise convolution, simple gate, simplified channel attention, residual scales β and γ starting at zero), its down and up, its additive skips, and a decoder depth of its own (`--dec-blocks`).
+  - FiLM conditioning, the noise map, the EMA, the checkpoint and the scorers are the res network's. `--beta2` and `--weight-decay` set AdamW's.
+  - A test copies a reference NAFNet's weights into a naf net. With FiLM at zero, the two give the same output, and the parameter count is NAFNet's plus FiLM's and the embedding's.
+  - The defaults are unchanged: res, 0.99 and 0.01. Our block is our own implementation (NAFNet's code is MIT).
+- **Caveats.**
+  - naf changes the network and the optimizer together, as NAFNet trains. Telling the two apart needs a third arm.
+  - The steps are equal, not the compute: naf does 0.30× the multiply-adds per step.
+  - 448,000 tiles is about 1/57 of NAFNet's 25.6M (400,000 iterations at batch 64).
+  - The loss is L1 + gradient, not NAFNet's PSNR loss.
+  - naf's 5e-4 is scaled, not tuned.
+- **How to read it.**
+  - **naf better on the verdict, and nearer NAFNet's shadow SNR and SIDD:** the gap is the network, and the next long run takes naf's network.
+  - **naf no better:** the gap is NAFNet's data and length (SIDD's real pairs, 25.6M tiles), and the next step is real noisy-clean pairs at scale.
+  - **Shadow SNR goes with MTF50:** a naf that removes more noise only by smoothing has made NAFNet's trade, not a gain.
+- **Preflight (11-02).** Each arm ran its exact command from the frozen tree, warmup 50, decay 50, to 200 steps, then resumed to 300. The user's game held about 6 GB of the card throughout.
+
+| | res | naf |
+|---|---|---|
+| Steady rate | 64 to 66 images/s | 82 images/s |
+| Peak memory | 9.99 GB | 21.74 GB, under the 24.5 GB cap, no spill |
+| First 50 steps (compile) | 60 s | 295 s |
+| Real validation loss at 100 / 200 / 300 | 0.3178 / 0.3148 / 0.3097 | 0.3159 / 0.3074 / 0.2995 |
+| Synthetic validation loss at 100 / 200 / 300 | 0.3857 / 0.3853 / 0.3847 | 0.3854 / 0.3858 / 0.3873 |
+
+- **The preflight's results.**
+  - Both resumed from step 200 at the peak rate and decayed to the floor by 300.
+  - **The scorer matches.** The frozen tree scores the res checkpoint as frozen_eval17 did: no difference in 3,568 numbers at a relative 1e-6. So the probe's and v15's numbers compare.
+    - frozen_eval17's CondUNet takes neither `block` nor `dec_blocks`, so an older tree cannot load a checkpoint from 7573e54a on.
+    - For this check it ran through `.tmp/old_tree_eval.py`, which drops the two keys only at their defaults.
+  - A naf checkpoint loads in the held-out scorer and in SIDD (24.08 dB at step 300; the input is 23.66).
+  - **To watch in naf: it moves off the identity faster than res, and its colour and periodicity cells drift first.**
+    - Real validation loss falls at each check. Synthetic validation loss rises a little: 0.3854, 0.3858, 0.3873.
+    - Synthetic periodicity goes 0.072, 0.097, 0.151 at steps 100, 200, 300.
+    - Real ΔE goes 0.51, 0.77, 1.40. Synthetic shadow SNR goes 17.2, 16.8, 15.7.
+    - res holds all three near the input.
+    - In layer norm, the statistics run in float32 under autocast (F.layer_norm), so this is not a precision artefact.
+    - At decay 0.999, the EMA at step 300 is still 74 % the initial weights, and the preflight held the peak rate 5e-4 from step 50. The run warms up over 1,000 steps.
+    - Pixel shuffle and the 2 × 2 stride-2 down both work on a period of 2, which is what the periodicity metric picks up.
+    - If the drift is still there at the end, the verdict carries it: periodicity, ΔE and shadow SNR are all cells.
+- **Time.** About 1.9 h of training for res and 1.6 h for naf, plus validation and about 11 minutes of scoring each: about 4.3 h a seed, about 13 h for three.
+- **Seed 0's result (11-02, 06:18).**
+
+| | res, seed 0 | naf, seed 0 | NAFNet, pretrained on SIDD |
+|---|---|---|---|
+| Final validation loss | 0.1888 | 0.1853 | |
+| Training time | 133.2 min | 117.8 min | |
+| SIDD PSNR / SSIM | 31.52 / 0.7451 | 30.61 / 0.7171 | 40.21 / 0.9243 |
+| Blind shadow SNR, dB: raw.pixls.us, RawNIND, HDR+, SI-HDR | 22.20, 26.48, 26.49, 22.55 | 21.53, 26.56, 27.29, 25.91 | 29.79, 34.24, 35.47, 21.77 |
+| Known shadow SNR, dB: the same sets | 20.72, 28.25, 26.24, 23.22 | 21.66, 29.21, 27.50, 25.73 | |
+
+  - **The verdict of naf against res: worse pooled, by a twentieth of a margin.** IQM -0.047 [-0.053, -0.002]. 5 cells worse, 13 better, 32 undetermined, 120 non-inferior.
+    - Worse: period-2 artefacts on RawNIND (periodicity blind, known and sub-pixel known; banding blind) and blind edge overshoot.
+    - Better: shadow SNR on SI-HDR (+3.4 dB blind, +2.5 known) and on HDR+ (+1.1 to +1.4 in three sets), real ΔE on RawNIND, and blind MTF50 and texture.
+    - The preflight's ΔE drift reversed: naf is better on ΔE. Its periodicity drift stayed, on RawNIND only.
+  - The pooled share of cells improved, 0.38, sits under its own interval [0.40, 0.49]. 24 cells tie at exactly zero (12 of them the integer dr_steps), and a percentile bootstrap of a step statistic is biased. The reading rests on the IQM's interval, which covers its point.
+- **The reading: the gap is not the network.**
+  - On our data and loss, NAFNet's network lands within a twentieth of a margin of ours pooled, at 0.30× the multiply-adds. It is 0.9 dB under ours on SIDD.
+  - Both stay 8.7 to 9.6 dB under pretrained NAFNet on SIDD, and 3 to 8 dB under it on held-out shadow SNR. The exception is SI-HDR, where NAFNet's 21.77 is under both.
+  - So NAFNet's network does not bring NAFNet's numbers. What is left is the data (SIDD's real noisy-clean pairs against our targets), the length (1/57 of its tiles) and the loss.
+  - Seeds 1 and 2 settle res against naf, which matters for compute (naf is 0.30× per step). They will not move the reading above.
+- **Three seeds' result (11-02, 15:39).** Means over seeds 0, 1 and 2 (per seed in `.tmp/arch_table.md`):
+
+| | res | naf | NAFNet | Restormer |
+|---|---|---|---|---|
+| SIDD PSNR / SSIM | 31.38 / 0.7506 (31.52, 31.60, 31.01) | 30.01 / 0.6830 (30.61, 30.10, 29.33) | 40.21 / 0.9243 | 39.93 / 0.9215 |
+| Blind shadow SNR, dB: raw.pixls.us, RawNIND, HDR+, SI-HDR | 22.14, 25.83, 26.20, 22.85 | 21.43, 26.42, 26.82, 26.00 | 29.79, 34.24, 35.47, 21.77 | 29.30, 34.85, 33.78, 24.51 |
+| Known shadow SNR, dB: the same sets | 20.77, 28.35, 26.19, 23.66 | 21.53, 28.86, 27.16, 25.83 | | |
+
+  - **The verdict of naf against res on three seeds: no clear change.** IQM -0.010 [-0.053, +0.054], 0.46 of cells improved. 4 cells worse, 12 better, 31 undetermined, 123 non-inferior.
+    - Per seed: -0.047 (worse), +0.018 and +0.011 (no clear change).
+    - Worse on three seeds: blind edge overshoot (-0.019), and period-2 artefacts on RawNIND (banding blind and sub-pixel known, periodicity known).
+    - The plan's rule reads "drop": adoption needs the interval above zero and no cell worse.
+  - **The reading.** The network is not the lever. Pooled, naf ties res at 0.30× the multiply-adds; it is 1.4 dB under res on SIDD and 3.2 dB over it on SI-HDR's shadows.
+    - Both stay 7 to 9.3 dB under NAFNet and Restormer on held-out shadow SNR outside SI-HDR, and 8.5 to 10.2 dB under them on SIDD.
+    - res stays the default. naf stays as `--block naf`: the pair screen (20.10) runs on it, since it is the cheaper arm to train and its control a_naf_s0 is scored.
+
+### 20.10 The pairs: what our training pairs teach about shadow noise (11-02)
+
+- **The question.** Seed 0 put the gap in the data, not the network.
+  - Our models sit 8 to 9 dB under NAFNet's shadow SNR even on RawNIND and HDR+, which we train on.
+  - On raw.pixls.us, our camera's simulated capture has 26.02 dB of shadow SNR. v15 brings it to 22.92, res to 22.20 and naf to 21.53, under the input. NAFNet brings it to 29.79.
+  - So our models do not only fail to remove fine shadow noise: on a clean capture, they add it.
+- **Two audits of the pairs as the stream draws them** (CPU only, never committed: `.tmp/real_corr_audit.py`, `.tmp/noise_level_audit.py`).
+  - Both read the finest Haar diagonal detail of the luminance, HH = (a − b − c + d) / 2 per 2 × 2 block. White noise of std s gives HH of std s; texture puts little energy there.
+  - The noise estimate is median |HH| / 0.6745, per log-spaced shadow band (the reference's luminance under 0.02), and the tile's median over its bands.
+  - On flat 0.01 plus white noise, it reads 28.36 and 16.49 dB against truths of 28.51 and 16.47.
+- **Finding 1: HDR+'s targets keep their input's noise.** The slope of the target's HH on the input's HH: the median over 96 train tiles per source, 69 to 92 of them with enough shadow. SIDD validation (192 blocks, 124 with shadow) is the reference for independent noise.
+
+| Pairs | Shadow slope [p25, p75] | Shadow correlation | Mid-tone slope | Target HH / input HH, shadows |
+|---|---|---|---|---|
+| HDR+ burst (reference frame → Google's merge) | 0.432 [0.283, 0.630] | 0.751 | 0.750 | 0.60 |
+| RawNIND (high ISO → low ISO, tripod) | 0.061 [0.005, 0.334] | 0.180 | 0.142 | 0.37 |
+| SI-HDR (short frame → merge of the longer frames) | 0.028 [0.002, 0.244] | 0.135 | 0.801 | 0.29 |
+| SIDD validation (one frame → mean of a long burst) | 0.014 [0.011, 0.019] | 0.133 | 0.014 | 0.11 |
+
+  - HDR+'s input is the merge's reference frame, so the merge carries it. Its target keeps 43 % of the input's finest shadow detail, against 1 to 6 % for the other three. SI-HDR's mid-tone slope is texture: its frames are well exposed there, and its input is not in its merge.
+  - RealStore draws a scene uniformly, then a pair in it. HDR+ has 3,183 of the 3,585 train scenes, so it is 89 % of the real draws. At p_real 0.5, about 44 % of every batch teaches keeping about 40 % of the shadow noise.
+- **Finding 2: synthetic noise is coarse, so in the synthetic pairs fine grain in the shadows is never noise.** 24 restore pairs per source, capture profile.
+  - The input is rendered twice from the same seed, with the sensor's noise and without it, so the input's noise is exactly their difference. The real pairs and SIDD have input − target instead, which also carries the target's own noise.
+  - SNR in dB, the median over tiles; 100 is the cap (more than half the blocks read zero):
+
+| Pairs | Noise, std | Noise, HH | Gap | Input, HH | Target, HH |
+|---|---:|---:|---:|---:|---:|
+| KADID-10k, synthetic | 20.65 | 37.04 | +16.4 | 30.30 | 23.20 |
+| TID2013, synthetic | 20.88 | 33.81 | +12.9 | 30.60 | 19.68 |
+| Poly Haven, synthetic | 22.13 | 47.84 | +25.7 | 44.90 | 28.08 |
+| Wikimedia, synthetic | 21.80 | 41.68 | +19.9 | 36.00 | 18.40 |
+| UHD-IQA, synthetic | 19.28 | 40.60 | +21.3 | 33.55 | 20.11 |
+| HDR+ clean frames, synthetic | 27.03 | 46.26 | +19.2 | 39.08 | 22.99 |
+| RawNIND clean frames, synthetic | 18.45 | 100 | capped | 64.23 | 29.18 |
+| SI-HDR clean frames, synthetic | 24.40 | 100 | capped | 92.98 | 40.05 |
+| PixelShift200, synthetic | 22.84 | 53.19 | +30.4 | 64.77 | 32.72 |
+| RawNIND, real | 19.58 | 22.62 | +3.0 | 22.01 | 28.40 |
+| HDR+, real | 20.48 | 21.45 | +1.0 | 18.27 | 23.66 |
+| SI-HDR, real | 8.63 | 11.33 | +2.7 | 10.50 | 29.47 |
+| SIDD validation (linearised, 140 blocks with shadow) | 2.89 | 5.97 | +3.1 | 5.88 | 24.92 |
+
+  - **The gap.** White noise reads the same both ways. The synthetic noise's HH reads 13 to 30 dB above its std, or caps: most of its energy is coarser than a pixel. The real pairs' and SIDD's gap is 1 to 3 dB.
+  - **The cause is the demosaic at the tile's resolution, not the ISP.** camera.simulate_frame supersamples the optics only; the sensor runs at the tile's pixel and is demosaiced bilinearly.
+    - On a flat field, white sensor noise demosaiced bilinearly reads +9.5 dB. Box-downsampled 2× after the demosaic, as the real pairs are made (LibRaw at the sensor's resolution, then the source's clean scale 2), it reads +3.1.
+    - On 16 KADID-10k and 16 RawNIND tiles, the gap is +9.9 and +10.0 dB with the drawn ISP, and +9.6 and +9.6 with JPEG, posterise and unsharp off (`.tmp/noise_isp_split.py`).
+    - The caps on the darker RawNIND and SI-HDR frames add 8-bit flattening of the deep shadows on top.
+  - **The direction.** In every real set the target holds less fine shadow detail than the input (5 to 19 dB cleaner): the pair says "remove this grain". In every synthetic set it holds more (7 to 53 dB), because the camera's optics blurred it out of the input and the target is the sharp scene. That part is right: undoing the blur is the job.
+  - **The consequence.** In the synthetic pairs, fine grain in the input's shadows is never noise, and fine grain missing from it is detail to restore. Real noise is fine grain. A model that learned the synthetic pairs keeps or sharpens it. Our outputs sitting under the input's shadow SNR on raw.pixls.us fit this, but do not prove it: that set's reference carries its own high-ISO grain.
+- **The screen: two runs, one change of pairs each** (`.tmp/pair_screen.sh`, from `.tmp/frozen_arch`). Each is NAFNet's arm at seed 0 with a_naf_s0's flags, and a_naf_s0 is the control.
+  - **d_nohdr:** `--real rawnind,si-hdr --p-real 0.5`. The real pairs without HDR+, which stays a synthetic clean source. RawNIND is 66 % and SI-HDR 34 % of the real draws (402 scenes).
+  - **d_realonly:** `--real rawnind,si-hdr --p-real 1.0`. Those real pairs only, no synthetic pairs.
+  - The real validation set follows `--real`, so validation loss does not compare across the runs. The held-out sets, SIDD and the verdict do.
+  - Each is about 2 h of training and 15 min of scoring. The table is `.tmp/pair_table.py`.
+- **How to read it.**
+  - **d_nohdr nearer NAFNet on shadow SNR, with MTF50 held:** finding 1 is a cause. HDR+ pairs need an input outside their merge: our own merge of the other frames (the burst store's), never the IPOL code.
+  - **d_realonly beyond d_nohdr:** the synthetic pairs hurt as rendered. The fix is to run the sensor and its demosaic at twice the tile's resolution and box-downsample, as the real pairs are made, with read noise scaled so that the fitted noise levels still hold at the tile.
+  - **Neither moves:** the pairs' noise is not the cause, and what is left is length (1/57 of NAFNet's tiles) and the loss.
+  - 402 scenes is few for d_realonly: a gain there that d_nohdr lacks may still be real, and a loss on the synthetic-only metrics (periodicity, colour, the gates' worlds) is expected.
+- **The result (seed 0, blind; `.tmp/pair_table.md`).** Shadow SNR in dB, the median of the restored tiles:
+
+| Run | SIDD PSNR | SIDD SSIM | raw.pixls.us | RawNIND | HDR+ | SI-HDR | Pooled IQM [90 %] against the control |
+|---|---:|---:|---:|---:|---:|---:|---|
+| a_naf_s0, control | 30.61 | 0.717 | 21.53 | 26.56 | 27.29 | 25.91 | |
+| d_nohdr_s0 | 30.49 | 0.695 | 20.97 | 28.94 | 25.67 | 26.49 | −0.119 [−0.139, −0.087]: 12 worse, 5 better |
+| d_realonly_s0 | 27.53 | 0.565 | 28.73 | 32.23 | 30.96 | 28.28 | −0.203 [−0.250, −0.156]: 37 worse, 22 better |
+| NAFNet | 40.21 | 0.924 | 29.79 | 34.24 | 35.47 | 21.77 | |
+| input | 23.66 | 0.334 | 26.02 | 15.00 | 21.32 | 8.50 | |
+
+- **How it reads.**
+  - **d_nohdr does not move.** It gains on RawNIND's shadows (+2.4 dB) and loses on HDR+'s (−1.6 dB), the sets each run trains on. raw.pixls.us is flat. Finding 1 is real but is not what holds the shadows back. Our own merge of HDR+'s other frames is worth little for the cost: a burst's other one to nine handheld frames give a target whose noise std is only 1/√(n − 1) of a frame's, and with HDR+ out of the pairs raw.pixls.us's shadows did not move. It is not built.
+  - **d_realonly moves the shadows the whole way.** +7.2 and +6.6 dB in the gates' worlds and +2 to +6 dB on every real set; raw.pixls.us reaches 28.73 against NAFNet's 29.79, above the input for the first time. The real pairs teach the shadows; the synthetic pairs, as rendered, unteach them (finding 2).
+  - **It pays for it everywhere else.** texture_hf_fidelity −0.30 to −0.35, MTF50 −0.10, periodicity, colour (ΔE max −0.6 to −1.3 on HDR+), and SIDD PSNR −3.1 dB. 402 scenes of two sources do not hold texture, sharpness or colour; the synthetic pairs do.
+  - **So the data needs both, fixed.** Content (texture, sharpness, colour) comes from the synthetic pairs, so their noise must have real noise's grain: the 2× sensor and box downsample above, the larger lever. Real noise with clean targets comes from more cameras: SIDD (section 20.11) adds five phones' noise at about 40 frames' averaging, but only 10 indoor scenes, so it adds noise, not content.
+
+### 20.11 The data: SIDD's bursts as pairs, and the synthetic pairs' grain (11-02)
+
+- **What was pulled, under the four approved pulls.**
+  - **SIDD's raw bursts:** the Hugging Face mirror MhdMohammadi/SIDD-CC-DNG (MIT), the 115 instances of SIDD Medium's training list, one zip of about 150 DNGs each (2 to 4 GB, 235 GB in all). A zip is reduced to a stack and deleted (`siddburst.py`), so the drive holds only what trains: about 0.4 GB per stack. The mirror's hashed validation and test instances stay held out.
+  - **RELLISUR** (Zenodo 5234969, 8.9 GB): 850 scenes of five under-exposed shots and a normal-light reference, from a tripod. **Not a training source.**
+    - **Its terms:** the archive's own LICENSE.txt is CC BY-NC-SA, non-commercial only, though the Zenodo record's metadata says CC BY 4.0. The stricter terms are followed.
+    - **Its pairs:** 8-bit sRGB PNGs, the inputs 2.5 to 4.5 EV under and already downsampled to 625 px. Our model's inputs are raw frames. At most it is an evaluation set for 8-bit sRGB low-light input, which the card says no held-out set measures yet.
+  - **RawNIND** is complete. **SNIC** is dropped: its noisy frames are synthetic (section 6).
+  - **HDR+'s other frames are not pulled further.** The 45 GB pulled for our own merge was more than its use needed: d_nohdr (section 20.10) showed HDR+'s target noise is not what holds the shadows back. The full bursts are about 298 GB and would need their own approval.
+- **SIDD's bursts are not still, so a frame average is not a clean target as it lies.** On 0001, 0012 and 0017 the frames drift a few tenths of a pixel over the burst, a slow zoom as much as a shift, and now and then the tripod is knocked several pixels. The 105 stacks the first reducer made (no registration) had inputs 0.1 to 1.4 px off their mean; they are set aside (`raw/sidd-dng/stacks_old_1102`) and every zip is reduced again.
+  - **Registration.** Each frame is registered on its 2 × 2 quads' luminance: an integer shift of the whole frame, then per patch an integer offset by phase correlation and a sub-quad one by Gauss-Newton, and an affine map fitted to the patches robustly. It fits the motion to 0.01 to 0.02 quads at five places across the frame.
+  - **The inputs** are up to 24 frames, spread over the burst, that lie within 0.25 px of one frame at every corner. The mean is made in their average geometry; training's sub-pixel read (`--subpix-real`) takes out what offset is left.
+  - **The merge is kernel regression, not a warp.** A cubic warp of each frame, averaged, is biased wherever the scene has detail near a Bayer plane's Nyquist, which is every edge. On a synthetic aliased scene its edges were 10 to 20 times further off than the kernel's. On real bursts its mean sat 2 to 6 noise variances off the still inputs' own mean at edges (0017), where the kernel's sat 0.2 to 0.4. Order-1 kernel regression fits a plane per pixel to every frame's nearest raw samples, with nothing interpolated. At MERGE_SIGMA 0.15 the mean's noise is about that of a 40-frame average (n_eff), independent of every input's.
+- **Each input is judged against the mean before it trains (the pair gate).** pair_excess is the input's mismatch with the mean beyond the noise both carry, in the input's noise variances: the worse of edges and flat pixels, the median over the planes. An input is kept at 1.5 or under. A burst pairs when at least 8 inputs are kept and 64 frames are in the mean.
+  - **The calibration (six bursts, 117 inputs).** The still inputs read at most 0.012, 0.83, 0.59, 0.065 and 0.042 on 0001, 0003, 0008, 0051 and 0097. On 0017 one input of 24, 0.249 px off the mean, read 2.16 and was dropped.
+  - **The excess grows as the offset squared:** 11 to 33 noise variances per px² at ISO 100, and a 1 px move reads about 27. 0017's dropped input is its offset alone (2.08 predicted, and no block stands out). The gate stays at 1.5 and errs toward dropping: 1 input in 117 is the price.
+- **The synthetic pairs' grain (finding 2 of section 20.10), fixed as the real pairs are made.** `--sensor-scale 2` runs the sensor, its mosaic and the bilinear demosaic at twice the tile's resolution, then a 2 × 2 box (`camera.simulate_frame`). Default 1, unchanged.
+  - **The noise level is kept.** The ratio of the variance white sensor noise keeps through the demosaic at the tile to what it keeps at 2× and a box was measured on 4 × 512² draws: R, G, B 1.443, 1.443 and 1.439 per pixel, and 1.22, 1.10 and 1.18 per row; without a mosaic the box alone gives 4 and 2. Each pixel's noise variance at the sensor is raised by it (`SENSOR_VAR_RATIO`): the well and the electrons per unit radiance divided by it, read noise and an explicit pedestal by its root, row noise so the row offsets keep their level.
+  - **Only the grain changes.** The luminance's Haar HH reads 9.6 dB over its std at the tile and 3.1 dB at 2× and a box. That is where the real pairs and SIDD read it (1 to 3 dB).
+  - **Sensor scale 1 is bit-identical to the code before it**, checked against the old `simulate_frame` on 8 cases: the defaults, no mosaic, row noise with shading, and read noise with a pedestal, each at supersampling 1 and 2.
+  - **The cost** is about 20 % more CPU per sample: 0.15 against 0.125 s per 256 px dead-leaves sample on 2 threads.
+- **SIDD's pairs in training, and their share of the draw.** The store is built as the others are (`python -m harness data realstore --sources sidd-dng --splits train val`). A real pair is drawn by scene, every scene the same, and HDR+ holds 3,183 of the about 3,585 real training scenes: about 90 SIDD stacks would be 2.4 % of the real draws. `--real-weights source=w` scales a source's scenes' draw mass (1 for a source not named). Without it the draw is the one before, the same random numbers, checked. The real validation draw stays unweighted, and the model card lists a real-pair source that is not a clean one, with its licence and weight.
+- **Once SIDD trains, its validation score is the standard protocol but not held-out content.** NAFNet's 40.21 dB was trained on SIDD Medium, and ours will be too, so the two compare as the papers compare them. SIDD's validation blocks come from the same 10 scenes as its training instances, though, so a gain there is not a gain on unseen content. raw.pixls.us stays the held-out set that decides.
+- **The screen: e_sensor2x** (`.tmp/sensor_screen.sh`, from `.tmp/frozen_sensor`). One change from a_naf_s0, the control: `--real rawnind,hdr-plus-burst,si-hdr --p-real 0.5 --sensor-scale 2`, NAFNet's arm, seed 0, 28,000 steps. Its validation renders at sensor scale 2 too, so its validation loss does not compare with the control's. The held-out sets, SIDD and the verdict do.
+- **How to read it.**
+  - **Shadow SNR on raw.pixls.us rises toward d_realonly's (28.73) with texture, MTF50 and colour held:** the synthetic pairs' grain was the cause. Sensor scale 2 goes into every run after, and SIDD's pairs are added to it.
+  - **It rises with texture lost:** the coarse grain was hiding detail the synthetic pairs taught. Read the per-metric table before deciding.
+  - **It does not move:** the grain is not what the synthetic pairs unteach. What is left is how few real pairs there are against synthetic ones, and SIDD's pairs are the next step either way.
+- **The result (seed 0, blind; `.tmp/pair_table.md`, 11-03).** Shadow SNR in dB, the median of the restored tiles:
+
+| Run | SIDD PSNR | SIDD SSIM | raw.pixls.us | RawNIND | HDR+ | SI-HDR | Pooled IQM [90 %] against the control |
+|---|---:|---:|---:|---:|---:|---:|---|
+| a_naf_s0, control | 30.61 | 0.717 | 21.53 | 26.56 | 27.29 | 25.91 | |
+| e_sensor2x_s0 | 30.17 | 0.685 | 22.84 | 26.59 | 27.36 | 26.20 | −0.036 [−0.077, −0.040]: 10 worse, 6 better |
+| d_realonly_s0 | 27.53 | 0.565 | 28.73 | 32.23 | 30.96 | 28.28 | −0.203 [−0.250, −0.156] |
+| NAFNet | 40.21 | 0.924 | 29.79 | 34.24 | 35.47 | 21.77 | |
+
+- **How it reads: the grain was a small part of it.**
+  - **raw.pixls.us's shadows rise 1.3 dB**, about four times naf's seed spread there (21.23 to 21.53 over three seeds), but under a fifth of the way to d_realonly's 28.73. The real sets do not move (+0.03 to +0.3 dB).
+  - **Texture pays for it:** texture_hf_fidelity −0.095 blind and −0.137 known, MTF50 −0.017 known, ΔE max −0.54 blind and −0.38 known in the gates' worlds. SIDD's −0.44 dB is inside naf's seed spread (29.33 to 30.61).
+  - **So fine grain in the synthetic pairs' noise is not what unteaches the shadows.** The candidate left, not tested, is the optics: the target is the sharp scene and the input is blurred by the camera, so the pairs teach sharpening, and sharpening a shadow amplifies its grain. A real pair's input and target share their optics, and d_realonly's shadows came from such pairs only.
+  - **Sensor scale stays 1.** The rule reads "drop": worse pooled, with texture cells worse. The IQM's interval lies wholly under zero; its point, −0.036, sits just above it, the percentile bootstrap's bias on cells that tie at zero (section 20.9), and the reading rests on the interval.
+- **Next: the real pairs' share.** The lever d_realonly showed is real noise against a clean target in the same optics, and the synthetic pairs are needed for texture and colour. SIDD's stacks add five phones' noise (the reduction runs the highest ISO first: by 01:20 on 11-03, all 10 bursts it had reduced at ISO 1,600 to 10,000 paired with all 24 inputs, where 8 of the first 24 at ISO 50 to 800 did not pair). The next run adds `sidd-dng` with `--real-weights` set so SIDD is about a fifth of the real draws, sensor scale 1, against a_naf_s0.
+
+### 20.12 SIDD in training, and what the rendered pairs teach (11-03)
+
+- **SIDD's store.**
+  - **The reduction.** All 115 of SIDD Medium's training instances were reduced, in two passes, the highest ISO first. 103 pair and 12 do not:
+    - **Six were too few still frames:** fewer than 8 lay within 0.25 px of one frame.
+    - **In the other six the pair gate kept fewer than 8 of 24 inputs:** something in the burst moved.
+  - **What was stored** (`python -m harness data realstore --sources sidd-dng`): 2,042 training pairs in 91 instances and 262 validation pairs in 12, 46.3 GB. One input was rejected (0172_s008, its quadrants 2 px apart).
+  - **These are the noisiest real pairs held:** electrons at clip run from 34 to 3,872, median 665, against 2,906 for the real store as a whole.
+- **Its share.** `--real-weights sidd-dng=9.849` makes SIDD's 91 instances a fifth of the real draws. Training draws hdr-plus-burst 71 %, sidd-dng 20 %, rawnind 6 % and si-hdr 3 % of 7,856 pairs in 3,676 scenes.
+- **The screen: f_sidd** (`.tmp/sidd_screen.sh`, from `.tmp/frozen_sidd` at 97b92b64). One change from a_naf_s0, the control: sidd-dng joins `--real` at that weight. NAFNet's arm, seed 0, 28,000 steps. The real validation draw now holds SIDD's instances, so its loss does not compare with the control's.
+- **How to read it.**
+  - **SIDD PSNR will rise, and that alone decides nothing.** NAFNet trained on SIDD Medium too, but SIDD's validation blocks come from the same 10 scenes as its training instances (section 20.11).
+  - **raw.pixls.us's shadows rise with texture held:** real noise against a clean target is the lever, and more real pairs are the data to get.
+  - **SIDD rises and raw.pixls.us does not move:** five phones' noise does not carry to raw.pixls.us's cameras. What the rendered pairs teach (below) is the place to look.
+- **While it trained: what the control does with its capture descriptor.**
+  - **The probe** (`.tmp/blur_probe.py`, CPU): a_naf_s0 in known mode restored raw.pixls.us's held-out set with its descriptor edited one way per arm.
+  - **What training states:** rendered pairs always state some blur (Airy/2 at least 0.047, residual/4 at least 0.007), and only real pairs state none.
+  - **Each cell** is the median over the 64 tiles; shadow SNR is in dB.
+
+| Descriptor | Shadow SNR | texture_hf_fidelity | MTF50 | Edge overshoot |
+|---|---:|---:|---:|---:|
+| as rendered (best_case_earth) | 21.66 | 0.565 | 0.362 | 0.022 |
+| shot and read noise ×2 | 21.64 | 0.558 | 0.360 | 0.023 |
+| no mosaic | 21.64 | 0.479 | 0.343 | 0.026 |
+| the least blur training states | 22.89 | 0.520 | 0.355 | 0.002 |
+| no blur | 23.32 | 0.502 | 0.351 | 0 |
+| no blur, no mosaic | 23.64 | 0.441 | 0.335 | 0 |
+| input | 26.02 | 0.237 | 0.254 | 0 |
+
+  On RawNIND's held-out real pairs, with their measured descriptor:
+
+| Descriptor | Shadow SNR | texture_hf_fidelity |
+|---|---:|---:|
+| as measured | 29.21 | 0.283 |
+| raw.pixls.us's stated blur | 28.85 | 0.250 |
+| noise ×2 | 30.52 | 0.239 |
+| noise ×½ | 27.73 | 0.323 |
+| blind (section 20.10) | 26.56 | |
+
+- **How it reads.**
+  - **The stated blur sets how hard the model sharpens, and the shadows' grain follows it.**
+    - **From the blur as rendered to none:** the shadows gain 1.7 dB, the overshoot goes to zero, and texture falls from 0.565 to 0.502.
+    - **The response is smooth, not a switch:** the least blur training ever states already gives 1.2 dB of the 1.7.
+  - **The descriptor is not most of it.** With no blur and no mosaic stated, the output's shadows (23.64) are still 2.4 dB grainier than the input's (26.02). The rest of the sharpening is read from the image, and every rendered camera input the model has seen was blurred against a sharp target.
+  - **The noise fields act only where they were learned.**
+    - **On RawNIND's real pairs they set how hard the model denoises:** +1.3 dB at ×2 and −1.5 dB at ×½, with texture moving the other way.
+    - **On rendered raw.pixls.us they do nothing** (−0.02 dB).
+  - **So the rendered camera pairs teach deblurring and denoising in one lesson, and the deblurring amplifies the shadows' grain.** This is the candidate section 20.11 named. Real pairs teach denoising without it, and d_realonly's shadows came from them alone.
+- **The denoise-only pairs (`--p-denoise`, default 0).** For a share of the stream's camera restores, the target is the input's own capture without its noise:
+  - **Capture:** the same chromatic shift, optics, mosaic and demosaic. `CaptureConstraints.noiseless` keeps the well's clip and draws no shot, read or row noise and no ADC.
+  - **Shading:** the input's lens shading is carried as part of the scene (`input_shading`), as `render_pair` does.
+  - **ISP:** the input's rendering intent is kept (`GLOBAL_FIELDS`), and its local stages are dropped: unsharp mask, posterisation and JPEG.
+  - **Conditioning:** as a real pair is, on the target's own tile metrics and a descriptor that states no blur, with the noise law kept.
+  - **Scope:** only the training stream; validation and calibration are unchanged.
+- **Checks.**
+  - **At a share of 0 the stream is bit-identical to 97b92b64.** A SHA-256 over 40 dead-leaves samples at sensor scale 1 and 2, plus two camera degrades, is the same on both trees (`.tmp/stream_digest.py`).
+  - **At a share of 1, 27 of 48 dead-leaves draws took it** (56 %, the camera restores' share). Input minus target is noise about zero: median −0.1 % of the target's mean, sd 0.009 (`.tmp/denoise_cost.py`).
+  - **No measurable cost:** 161, 151 and 166 ms per 256 px sample at shares 0, 0.5 and 1.
+  - **Tests:** 412 passed, 3 skipped.
+- **The result of f_sidd (seed 0, blind; `.tmp/pair_table.md`, 11-03).** Shadow SNR in dB, the median of the restored tiles:
+
+| Run | SIDD PSNR | SIDD SSIM | raw.pixls.us | RawNIND | HDR+ | SI-HDR | Pooled IQM [90 %] against the control |
+|---|---:|---:|---:|---:|---:|---:|---|
+| a_naf_s0, control | 30.61 | 0.717 | 21.53 | 26.56 | 27.29 | 25.91 | |
+| f_sidd_s0 | 32.14 | 0.779 | 22.66 | 27.57 | 28.02 | 27.18 | −0.072 [−0.098, −0.058]: 9 worse, 5 better |
+| NAFNet | 40.21 | 0.924 | 29.79 | 34.24 | 35.47 | 21.77 | |
+
+  In known mode the shadows read 21.66 → 21.68 on raw.pixls.us, 29.21 → 30.74 on RawNIND, 27.50 → 27.63 on HDR+ and 25.74 → 25.84 on SI-HDR.
+- **How it reads: the real pairs gain, and the rendered held-out set moves only where the descriptor is withheld.**
+  - **SIDD rises 1.5 dB,** above naf's three-seed range (29.33 to 30.61), and SSIM 0.717 → 0.779. Its validation is not held-out content (section 20.11), and it is still 8.1 dB under NAFNet.
+  - **Real noise carries to other cameras' real pairs, texture held.** RawNIND's held-out shadows gain 1.0 dB blind (a better cell) and 1.5 known, with texture 0.283 → 0.291 known. HDR+ and SI-HDR gain 0.7 and 1.3 dB blind, inside their intervals.
+  - **On raw.pixls.us it follows the descriptor.**
+    - **Known:** shadows +0.02 dB, texture 0.565 → 0.548, MTF50 unchanged. The stated blur still sets the sharpening, as the probe found.
+    - **Blind:** shadows +1.12 dB (better) and texture 0.513 → 0.461 (worse), the trade the probe's blur edits made. The real draws' share is unchanged, but a fifth of them are now SIDD's, the noisiest real pairs, all stating no blur. A likely reading, not tested: a noisy input now looks more like a real pair to the blind model, so it assumes less blur.
+  - **Worse pooled, beyond one seed's noise.** 0.31 of cells improved. Two arms that tie on three seeds read −0.047 to +0.018 per seed (section 20.9).
+    - **Worse:** texture blind (−0.051); highlight loss blind and known (−0.010, −0.012); banding on raw.pixls.us blind and known, HDR+ blind, and the sub-pixel reads of HDR+ and RawNIND known (−0.002 to −0.005); RawNIND's sub-pixel periodicity blind (−0.031).
+    - **Better:** shadow SNR on raw.pixls.us and RawNIND blind; landmark error blind and known; edge overshoot known.
+  - **So SIDD does not join the default as it stands.** This is the middle case read in advance: the real sets gain, and raw.pixls.us in known mode does not move, so what the rendered pairs teach is the place to look. g_denoise runs on the control's flags.
+- **Next: g_denoise** (`.tmp/denoise_screen.sh`, from `.tmp/frozen_denoise` at a19df486; started 05:30 on 11-03). The control's flags, since f_sidd reads worse, plus `--p-denoise 0.5`, so half of the camera restores teach denoising alone. Its validation is the control's, so its loss compares too.
+  - **raw.pixls.us's shadows rise with MTF50 and texture inside naf's seed spread:** the deblurring lesson was the cause, and the share is set next.
+  - **The shadows rise and texture falls as it did under the probe's edits:** the trade is in the content, not the lesson's mix. The shadows' weight in the loss is the next lever.
+  - **Nothing moves:** the image evidence the model sharpens on is not the rendered pairs' blur.
+- **The result of g_denoise (seed 0, blind; `.tmp/pair_table.md`, 11-03 07:44).** 28,000 steps in 121 minutes, with 50.0 % of the camera restores on a denoise-only target. Validation loss 0.1869, against the control's 0.1853. Shadow SNR in dB, the median of the restored tiles:
+
+| Run | SIDD PSNR | SIDD SSIM | raw.pixls.us | RawNIND | HDR+ | SI-HDR | Pooled IQM [90 %] against the control |
+|---|---:|---:|---:|---:|---:|---:|---|
+| a_naf_s0, control | 30.61 | 0.717 | 21.53 | 26.56 | 27.29 | 25.91 | |
+| g_denoise_s0 | 30.89 | 0.737 | 23.84 | 26.52 | 26.52 | 26.04 | −0.107 [−0.144, −0.087]: 14 worse, 4 better |
+| NAFNet | 40.21 | 0.924 | 29.79 | 34.24 | 35.47 | 21.77 | |
+
+  In known mode the shadows read 21.66 → 23.08 on raw.pixls.us, 29.21 → 28.46 on RawNIND, 27.50 → 25.93 on HDR+ and 25.74 → 24.65 on SI-HDR.
+- **How it reads: the second case. The shadows rise and texture falls, at the probe's rate.**
+  - **raw.pixls.us:** shadows +2.30 dB blind and +1.41 known (better cells). Texture 0.513 → 0.431 blind and 0.565 → 0.515 known, and MTF50 0.346 → 0.327 blind (worse cells). That is about 28 dB per unit of texture in both modes; the probe's no-blur edit traded at about 26.
+  - **The real sets do not gain.** RawNIND ties blind (26.56 → 26.52); known, its shadows fall 0.75 dB as texture rises 0.283 → 0.338. HDR+ and SI-HDR lose 1.6 and 1.1 dB known (worse cells on SI-HDR and on HDR+'s sub-pixel read). Banding is worse on raw.pixls.us and on every HDR+ read (−0.005 to −0.006).
+  - **SIDD +0.3 dB,** inside naf's seed range.
+  - **So the denoise-only share stays 0.** The second case named the shadows' weight in the loss as the next lever. The frontier below says that weight would slide along the same trade, so it is not run.
+- **The frontier: the data screens slide along one trade; the loss and the length move the trade.**
+  - **What it reads.** The frontier gate fits a linear Wiener ladder per tile on the truth and reads its texture and MTF50 at the output's own shadow SNR. The output's texture minus the frontier's is the true detail a model keeps beyond the best linear filter at the same noise. texture_hf_fidelity projects the output's detail onto the truth's (`harness/data/tilemetrics.py:106`), so noise and invented detail add nothing to it.
+  - **raw.pixls.us, blind** (`heldout_blind/heldout.json`, `gates.frontier`):
+
+| Run | Steps | Recipe | Shadow SNR | Texture | MTF50 | Texture − frontier | MTF50 − frontier |
+|---|---:|---|---:|---:|---:|---:|---:|
+| *input* | | | 26.02 | 0.237 | 0.254 | | |
+| a_naf s0, s1, s2 (control) | 28,000 | naf, l1 | 21.23–21.53 | 0.492–0.529 | 0.346–0.355 | +0.151 to +0.183 | +0.045 to +0.051 |
+| f_sidd_s0 | 28,000 | control + SIDD | 22.66 | 0.461 | 0.341 | +0.152 | +0.053 |
+| g_denoise_s0 | 28,000 | control + p_denoise 0.5 | 23.84 | 0.431 | 0.327 | +0.161 | +0.057 |
+| e_sensor2x_s0 | 28,000 | control, sensor ×2 | 22.84 | 0.418 | 0.341 | +0.109 | +0.060 |
+| d_realonly_s0 | 28,000 | real pairs only | 28.73 | 0.210 | 0.242 | +0.063 | +0.047 |
+| p_l1 s0–s2 | 28,000 | v15's trunk, l1 | 22.68–23.96 | 0.373–0.413 | 0.318–0.324 | +0.103 to +0.131 | +0.039 to +0.053 |
+| p_ctrl s0–s2 | 28,000 | v15's trunk, v15's loss | 21.27–21.78 | 0.508–0.570 | 0.356–0.361 | +0.193 to +0.235 | +0.052 to +0.064 |
+| p_r0t0 s0–s2 | 28,000 | v15's trunk, r0t0 | 21.32–22.20 | 0.553–0.618 | 0.370–0.375 | +0.244 to +0.307 | +0.074 to +0.086 |
+| v15 | 45,625 | v15's | 22.92 | 0.468 | 0.345 | +0.175 | +0.066 |
+| v17 | 93,559 | v17's | 21.23 | 0.601 | 0.384 | +0.263 | +0.082 |
+| v18s0 | 272,000 | v15's | 19.55 | 0.991 | 0.500 | +0.547 | +0.145 |
+| *NAFNet* | | | 29.79 | 0.080 | 0.168 | −0.049 | −0.026 |
+| *Restormer* | | | 29.30 | 0.133 | 0.193 | −0.011 | −0.008 |
+| *SCUNet* | | | 27.53 | 0.154 | 0.209 | −0.021 | −0.009 |
+
+  - **The data screens keep the control's efficiency or lose some.** f_sidd and g_denoise stay inside the control's seed range while their shadows rise 1.1 and 2.3 dB; e_sensor2x and d_realonly fall under it. The verdict reads such a move as worse, because texture and MTF50 fail non-inferiority whatever the shadows gain.
+  - **The loss and the length raise it.** At about the control's shadows (21.2 to 22.2 dB), p_r0t0 keeps texture 0.553–0.618 and v17 0.601, against the control's 0.492–0.529. l1, the control's loss, is the probe's least efficient arm. 20.4 chose it for its shadows, a move along the trade, and gave up efficiency to make it. On v15's recipe, 45,625 → 272,000 steps took the margin from +0.175 to +0.547.
+  - **So two decisions read again.** 20.4's "plain fidelity wins" and 20.10's "more steps on it is not the way forward" were both read by the verdict, which cannot tell a move along the trade from a better trade.
+  - **But none of ours is a finished image.** Every run ends with noisier shadows than its input (26.02 dB), and the more efficient, the noisier: v18s0 is 6.5 dB under. NAFNet, Restormer and SCUNet end 1.5 to 3.8 dB over it and under the frontier: they smooth away true detail. Neither side keeps more than the frontier at shadows as clean as the input.
+  - **Caveats.**
+    - One seed for each v run; v15 → v18s0 also changed the data (UHD-IQA), the seed and the validation draw.
+    - Margins are compared near matched shadows, because the frontier's own texture falls as the shadows clean: 0.444 at 19.6 dB, 0.270 at 23.8, 0.147 at 28.7.
+    - On RawNIND known, v15 keeps +0.635 at 45,625 steps and v18s0 +0.678, against the control's +0.145 at 3.3 dB cleaner shadows. On SI-HDR blind every run is under the frontier, v18s0 the most (−0.126).
+- **Next: one operating point for every run, set at inference.**
+  - **How.** Every run conditions on a noise map from the stated noise law (`net.noise_map`), and on the same law through FiLM. Scaling the stated shot and read noise at inference (known mode) should move a model along its own trade without training.
+  - **What.** Sweep the scale for the control, p_r0t0, v17 and v18s0 on raw.pixls.us and RawNIND, then read texture and MTF50 at matched shadow SNR: at the input's (26 dB) and at NAFNet's (29.8). Evaluation only.
+  - **Read in advance:**
+    - **The efficient runs keep their lead at matched shadows:** the efficiency is real. The next long run is r0t0's loss at length, with the scale as the release's strength control.
+    - **Their lead closes as they are pushed clean:** the margin was noise and detail sharpened together, not a better trade, and the data and the loss are the levers again.
+    - **The scale does not move the shadows:** the models read their noise from the image, not the descriptor, so the operating point has to be trained.
+- **The result of the inference sweeps (11-03; `.tmp/noise_sweep.md`, `.tmp/own_ladder.md`, `.tmp/own_ladder_pertile.md`).**
+  - **Setup.** The control (a_naf_s0), p_r0t0_s2, v15, v17 and v18s0, all in known mode.
+  - **Reproduction.** Each sweep's default arm reproduces the stored reports.
+  - **Frontier.** It is the gate's, read at each output's own shadow SNR.
+  - **The stated noise, ×1 to ×8: the third case.** The probe's noise ×2 had already shown it.
+    - **raw.pixls.us:** at ×8 the shadows move +0.3 to +0.9 dB. The probe's −0.02 dB here predicted this, so this half of the sweep was not needed.
+    - **RawNIND:** the shadows peak at ×2 to ×3, +1.3 to +1.8 dB (the control 29.21 → 30.52), then fall back. v15's do not rise.
+  - **The stated blur, raw.pixls.us only (RawNIND states none): +1.7 to +2.4 dB from the blur as rendered to none.**
+    - With no mosaic, or the noise ×8 on top, the gain reaches +3.4 dB.
+    - Every run's margin falls as its shadows rise.
+    - Each cell is shadow SNR / texture / texture − frontier:
+
+| Run | Blur as rendered | Blur ×½ | No blur | No blur, no mosaic | No blur, noise ×8 |
+|---|---|---|---|---|---|
+| a_naf_s0, control | 21.66 / 0.565 / +0.217 | 22.35 / 0.539 / +0.207 | 23.32 / 0.502 / +0.199 | 23.64 / 0.441 / +0.165 | 23.86 / 0.473 / +0.194 |
+| p_r0t0_s2 | 19.89 / 0.677 / +0.294 | 21.32 / 0.578 / +0.249 | 22.33 / 0.465 / +0.150 | 23.29 / 0.449 / +0.161 | 22.19 / 0.523 / +0.213 |
+| v15 | 20.36 / 0.676 / +0.296 | 21.33 / 0.584 / +0.230 | 22.78 / 0.474 / +0.164 | 22.77 / 0.438 / +0.149 | 22.91 / 0.457 / +0.158 |
+| v17 | 18.67 / 0.797 / +0.355 | 19.52 / 0.701 / +0.283 | 20.45 / 0.574 / +0.194 | 21.59 / 0.566 / +0.230 | 21.45 / 0.546 / +0.211 |
+| v18s0 | 19.67 / 0.984 / +0.534 | 20.61 / 0.874 / +0.480 | 21.49 / 0.782 / +0.406 | 21.41 / 0.799 / +0.447 | 22.20 / 0.715 / +0.376 |
+
+  - **The stated target shadow SNR, both sets: the widest control, and it turns over.**
+    - **The control:** the conditioning's own z for the target's shadow SNR, set from 0 to 6 with its mask at 1.
+    - **The default:** the calibration restores' mean, stated on 43 % of tiles.
+    - **Shadow SNR in dB:**
+
+| Run | raw.pixls.us z 0 | Peak (z) | z 6 | RawNIND z 0 | Peak (z) | z 6 |
+|---|---:|---:|---:|---:|---:|---:|
+| a_naf_s0, control | 20.73 | 25.31 (3) | 23.34 | 27.74 | 31.55 (2) | 30.69 |
+| p_r0t0_s2 | 18.52 | 23.41 (6) | 23.41 | 23.06 | 28.82 (4) | 28.18 |
+| v15 | 18.93 | 23.44 (3) | 20.05 | 24.56 | 27.53 (3) | 23.90 |
+| v17 | 17.38 | 22.67 (2) | 16.85 | 23.06 | 27.86 (2) | 25.61 |
+| v18s0 | 19.11 | 21.54 (2) | 15.96 | 22.63 | 27.15 (3) | 24.26 |
+
+    - **The range from z 0 to the peak is 2.4 to 5.8 dB.** p_r0t0 is flat on raw.pixls.us from z 3 (23.11 to 23.41 dB).
+    - **Past the peak the shadows fall and texture rises again.** v18s0 at z 6 reads 15.96 dB and texture 1.213.
+      - A reading, not checked: z 2 to 3 (36 to 51 dB stated) is where the training targets' stated shadow SNR thins out.
+    - **Reach.** No run reaches the input's 26.02 dB on raw.pixls.us. On RawNIND only the control reaches SCUNet's 29.76, and none reaches NAFNet's 34.24.
+    - **Texture over 1 is oversharpening.**
+      - texture_hf_fidelity is a regression gain onto the truth's detail, unbounded above 1. p_r0t0 on RawNIND reads 1.009 at the default and 1.157 at z 0.
+      - Its margin over the frontier then overstates true detail.
+      - v18s0's MTF50 of 0.500 on raw.pixls.us is the metric's ceiling at Nyquist.
+    - **Along the stated target and the blur, raw.pixls.us at matched shadow SNR** (texture / texture − frontier):
+
+| Run | Stated target, 21 dB | Stated target, 22 dB | Stated target, 23 dB | Blur, 22 dB |
+|---|---|---|---|---|
+| a_naf_s0, control | 0.604 / +0.235 | 0.547 / +0.216 | 0.490 / +0.196 | 0.557 / +0.216 |
+| p_r0t0_s2 | 0.622 / +0.282 | 0.575 / +0.266 | 0.530 / +0.245 | 0.511 / +0.190 |
+| v15 | 0.621 / +0.267 | 0.567 / +0.248 | 0.506 / +0.221 | 0.523 / +0.190 |
+| v17 | 0.670 / +0.313 | 0.596 / +0.277 | not reached | not reached |
+| v18s0 | 0.897 / +0.517 | not reached | not reached | not reached |
+
+  - **Each restorer's own ladder: every one at exactly the same noise** (`.tmp/own_ladder.py`).
+    - **What it is.** The frontier's construction, the Wiener ladder fitted per tile and channel on the truth, is run on each restorer's output instead of the input.
+    - **What it measures.** At a given shadow SNR, it is the most true detail a linear strength control could keep from that output.
+    - **Limits.** It is an oracle, not deployable. It is the same for every restorer and for the input, whose ladder is the frontier.
+    - **How it is read.** Each tile is placed at the target on its own ladder, as the gate matches (`.tmp/own_ladder_pertile.py`).
+      - Read this way, the gate's frontier at each output's own SNR reproduces heldout.json: 0.348 for the control on raw.pixls.us, 0.138 on RawNIND.
+      - At most 8 of 64 tiles are clamped to a ladder's end.
+    - **Texture at matched shadow SNR, known / blind:**
+
+| Restorer | raw.pixls.us 22 dB | 26.02 (input) | 29.79 (NAFNet) | RawNIND 26 dB | 29.76 (SCUNet) | 34.24 (NAFNet) |
+|---|---|---|---|---|---|---|
+| *input: the frontier* | 0.329 | 0.196 | 0.121 | 0.223 | 0.127 | 0.054 |
+| a_naf_s0, control | 0.470 / 0.452 | 0.298 / 0.275 | 0.162 / 0.158 | 0.432 / 0.313 | 0.248 / 0.165 | 0.119 / 0.080 |
+| p_r0t0_s2 | 0.460 / 0.447 | 0.245 / 0.247 | 0.144 / 0.136 | 0.549 / 0.430 | 0.323 / 0.244 | 0.157 / 0.124 |
+| v15 | 0.404 / 0.400 | 0.224 / 0.232 | 0.144 / 0.145 | 0.587 / 0.362 | 0.333 / 0.223 | 0.151 / 0.110 |
+| v17 | 0.390 / 0.399 | 0.202 / 0.213 | 0.128 / 0.115 | 0.484 / 0.403 | 0.278 / 0.228 | 0.125 / 0.115 |
+| v18s0 | 0.620 / 0.599 | 0.353 / 0.318 | 0.198 / 0.188 | 0.581 / 0.467 | 0.363 / 0.285 | 0.180 / 0.130 |
+| *NAFNet, blind* | 0.222 | 0.129 | 0.074 | 0.161 | 0.095 | 0.051 |
+| *Restormer, blind* | 0.304 | 0.183 | 0.115 | 0.135 | 0.080 | 0.035 |
+| *SCUNet, blind* | 0.221 | 0.140 | 0.108 | 0.129 | 0.074 | 0.040 |
+
+    - **The median curve reads one rung for every tile.**
+      - **raw.pixls.us:** values move −0.04 to +0.11 from the per-tile read.
+        - v18s0 still leads everywhere, and p_r0t0, v15 and v17 in known mode are still at or under the control.
+        - p_r0t0 blind reads above the control at 22 and 26.02 dB (0.557 and 0.302 against 0.515 and 0.293).
+      - **RawNIND:** it lifts the input's ladder (0.385 against 0.127 at 29.76 dB) and narrows our runs' spread (0.476 to 0.534 known, against 0.248 to 0.363). The baselines are nearly unchanged (0.096 to 0.111).
+      - **Why:** RawNIND's tiles differ widely in noise, so a single rung leaves the clean tiles their detail. The per-tile read is the gate's, so it leads.
+- **How it reads.**
+  - **The inference knobs move each run along its own trade, and none takes it to a finished image's shadows.**
+    - **How far each moves the shadows:** the stated noise up to 0.9 dB on raw.pixls.us and 1.8 on RawNIND, the blur 1.7 to 2.4, the stated target 2.4 to 5.8 before it turns over.
+    - **Reach:** no run reaches the input's shadows on raw.pixls.us.
+    - **Which case:** the third for the noise, and in part for the others. The operating point has to be trained.
+  - **v18s0 keeps its lead at matched noise: on both sets, in both modes and in every read.**
+    - **raw.pixls.us, at the input's 26.02 dB per tile:** 0.353 known, against the control's 0.298 and the frontier's 0.196.
+    - **raw.pixls.us, along the stated target at 21 dB:** margin +0.517 against +0.235.
+    - **RawNIND, at SCUNet's 29.76 dB:** 0.363 against 0.248.
+    - **So length and data are the lever that held.**
+  - **On raw.pixls.us, p_r0t0's, v15's and v17's lead depends on the read: the second case there.**
+    - **Along the stated target** they keep +0.03 to +0.08 of margin over the control at 21 to 23 dB.
+    - **Along the blur** they fall under it: +0.190 against +0.216 at 22 dB.
+    - **On their own ladders** they are at or under it: 0.390 to 0.460 against 0.470 at 22 dB, and 0.202 to 0.245 against 0.298 at 26.02.
+    - **A likely reading.** texture_hf_fidelity is a regression gain, so sharpening raises it; the oracle filter refits each band's gain and takes that out. Their default margins were sharpening and noise together.
+  - **On RawNIND's real pairs every efficient run keeps a lead at matched noise.**
+    - Along the stated target at 28 dB, p_r0t0's margin is +0.485 against the control's +0.144.
+    - On the ladders at 29.76 dB per tile, the runs keep 0.278 to 0.363 against 0.248.
+  - **Against the public baselines at their own noise on real pairs, ours keep 2.6 to 4.9 times their true detail known, and 1.7 to 3.9 times blind.**
+    - **RawNIND, per tile at SCUNet's 29.76 dB:** ours keep 0.248 to 0.363 known and 0.165 to 0.285 blind. SCUNet keeps 0.074, Restormer 0.080 and NAFNet 0.095, all under the input's own frontier (0.127).
+    - **Deployed, not oracle:**
+      - The control at 29.76 dB along the stated target keeps texture 0.275, MTF50 0.277, margin +0.146.
+      - SCUNet's output keeps 0.076, MTF50 0.177, margin −0.043.
+    - **raw.pixls.us, at the input's 26.02 dB:** ours keep 0.202 to 0.353 against the baselines' 0.129 to 0.183.
+  - **Blind trails known on real pairs:** per tile at 29.76 dB, by 0.05 to 0.11. On raw.pixls.us the two modes are within 0.035.
+  - **Caveats.**
+    - The ladders are an oracle fitted on the truth. They bound what a linear strength control could keep, not what a deployed one does.
+    - There is one seed per v run, and v18s0 also changed the data (UHD-IQA), the seed and the validation draw.
+    - raw.pixls.us is rendered by our own renderer.
+    - Texture over 1 overstates true detail.
+- **Next: a deployable strength control, then the long run on v18s0's path.**
+  - **The control, evaluation only.**
+    - One per-band gain curve per strength is fitted on the calibration restores' outputs against their targets, not on the held-out truth.
+    - It is applied to every run's held-out output and read against that run's own oracle ladder, the same way.
+  - **Read in advance:**
+    - **It comes within reach of the oracle.** The release has its strength control without training, and the next long run is chosen on matched-noise detail alone: v18s0's recipe at length on the widest licensed data.
+    - **It falls well short.** The operating point is trained: the stated target becomes the control, with the training targets' stated shadow SNR widened to the range inference needs.
+- **The result of the deployable strength control (11-03; `.tmp/strength_control.md`, `.tmp/strength_verdict.md`).**
+  - **Setup.**
+    - **The curve.** One per strength and channel, in the frontier's 32 bands and 16 rungs, from its gain formula on spectra pooled over a calibration draw: 128 training-split tiles at seed 101, a draw of its own.
+      - For raw.pixls.us the draw is the training sources' rendered pairs; for RawNIND, its stored train pairs.
+      - Each restorer's curve is fitted on its own restores of that draw against their targets.
+    - **How it is read.** Every curve is applied to every held-out output, and each tile is matched on the restorer's own oracle ladder and on the input's frontier, as the gate matches.
+    - **A comparison, not deployable:** the same fit on the held-out outputs themselves, one curve for the set.
+    - **The control:** the same fit on the calibration inputs, applied to the held-out inputs.
+    - **Reproduction.** The unfiltered rows equal own_ladder.json's exactly.
+  - **The control: the curve family adds almost nothing.** On the input, the calibration curve lands on the input's own frontier: margin −0.018 to +0.021 on raw.pixls.us, −0.001 to +0.009 on RawNIND.
+  - **Reach.**
+    - **Our runs.** The calibration curves take every run past the input's shadows on raw.pixls.us (v18s0 known 12.2 to 55.9 dB over the rungs, the input at 26.02) and past NAFNet's 34.24 on RawNIND.
+    - **The baselines.** Their raw.pixls.us curves, fitted on our rendered training pairs, take all detail at the lowest rungs, and only Restormer's and SCUNet's reach the input's shadows.
+  - **Texture at matched shadow SNR, deployed** (texture / texture − the input's frontier there):
+
+| Restorer | raw.pixls.us 22 dB | 26.02 (input) | 29.79 (NAFNet) | RawNIND 26 dB | 29.76 (SCUNet) | 34.24 (NAFNet) |
+|---|---|---|---|---|---|---|
+| *input, the control* | 0.324 / −0.018 | 0.218 / +0.016 | 0.153 / +0.021 | 0.226 / −0.001 | 0.142 / +0.009 | 0.082 / +0.008 |
+| a_naf_s0 known | 0.537 / +0.211 | 0.375 / +0.171 | 0.258 / +0.138 | not reached | 0.253 / +0.130 | 0.157 / +0.086 |
+| p_r0t0_s2 known | 0.459 / +0.125 | 0.314 / +0.110 | 0.218 / +0.089 | 0.764 / +0.536 | 0.508 / +0.379 | 0.254 / +0.185 |
+| v15 known | 0.503 / +0.185 | 0.349 / +0.143 | 0.244 / +0.118 | not reached | 0.530 / +0.387 | 0.267 / +0.189 |
+| v17 known | 0.485 / +0.165 | 0.329 / +0.129 | 0.231 / +0.104 | 0.562 / +0.313 | 0.365 / +0.212 | 0.160 / +0.083 |
+| v18s0 known | 0.675 / +0.339 | 0.468 / +0.248 | 0.331 / +0.192 | not reached | 0.516 / +0.385 | 0.249 / +0.173 |
+| v18s0 blind | 0.723 / +0.386 | 0.510 / +0.289 | 0.346 / +0.209 | 0.686 / +0.422 | 0.399 / +0.235 | 0.154 / +0.080 |
+| *NAFNet, blind* | not reached | not reached | 0.007 / −0.125 | 0.081 / −0.193 | 0.049 / −0.151 | 0.010 / −0.101 |
+| *Restormer, blind* | not reached | 0.232 / −0.020 | 0.250 / +0.047 | 0.099 / −0.120 | 0.079 / −0.056 | 0.051 / −0.027 |
+| *SCUNet, blind* | not reached | 0.170 / −0.084 | 0.184 / −0.012 | 0.115 / −0.087 | 0.077 / −0.040 | 0.037 / −0.025 |
+
+  - **What the table's gaps mean.**
+    - "Not reached" at RawNIND's 26 dB means the curve's lightest rung is already past it (v18s0 known: 26.15 dB).
+    - **Share of the restorer's own oracle.** v18s0's deployed curve keeps 104, 124 and 150 % of it on raw.pixls.us and 118 and 115 % on RawNIND.
+      - The share passes 100 % because the oracle is the least-squares filter per tile, not a detail frontier; the control reads 95 to 116 % of its own.
+      - Every other run keeps 86 % or more; a_naf_s0 on RawNIND keeps 72 to 92 %.
+    - **The comparison fit.**
+      - For our runs it keeps no more than the calibration curve at the input's shadows (v18s0 known 0.424 against 0.468 at 26.02 dB), so for them nothing is lost by fitting off the held-out set.
+      - On the input it keeps more (0.283 against 0.218): a curve fitted on the set itself takes +0.08 over the frontier there.
+  - **The full verdict at fixed rungs** (lam 0.7, 1, 1.4, 2 and 3, fixed in advance, and unfiltered; heldout.score's every gate).
+    - **How to read it.** The capture gate stops at its first failing family, so the families before it passed; the medians give the rest.
+    - **raw.pixls.us: no restorer passes the capture gate at any strength.**
+      - **v18s0 at lam 1.4.**
+        - Shadows read 28.4 dB known and 27.0 blind, past the input's 26.0. Texture reads 0.376 and 0.463, MTF50 0.251 and 0.356 against the input's 0.254.
+        - The edge overshoot is gone: 0.034 unfiltered, 0 from lam 1.
+        - Every check passes but banding_score: 0.0127 known and 0.0132 blind, against the input's 0.0095.
+        - The frontier gate passes known from lam 0.7 to 2, blind at lam 2.
+      - **At lam 2, shading_rmse fails as well.** The curve's low bands are what fail it: the input under its own curve fails it at lam 3.
+      - **Banding is every restorer's.**
+        - Unfiltered, ours read 0.0146 to 0.0188 and the public baselines 0.0126 to 0.0140.
+        - Under the curve none goes under 0.0121 (v18s0 known, lam 1).
+        - The curve leaves the input's own banding where it was, 0.0096 to 0.0112 through lam 2, so it neither causes it nor cures it.
+        - Restormer's and SCUNet's unfiltered outputs stop at it too.
+      - **What it reads.** banding_pair takes the largest step, along the reference's level, in the mean residual of the reference's smooth regions.
+        - A reading, not checked: low-frequency residual left in a smooth gradient reads as such a step, and a per-band linear curve cannot take it out without the shading that fails at lam 2.
+    - **RawNIND: the unfiltered outputs already pass, and the curve costs resolution.**
+      - **Unfiltered.** v18s0, v15 and v17 known, and p_r0t0_s2 blind, pass both the capture and the frontier gate.
+        - v18s0 known reads 24.6 dB, texture 0.963 and MTF50 0.423, against the input's 15.0 dB, 0.667 and 0.387.
+      - **Under the curve, every one fails resolution through lam 2, its MTF50 under the input's 0.387.** v18s0 known reads 0.319 at lam 0.7. The frontier gate still passes for v18s0, v15 and v17 known.
+        - The input is sharp and very noisy, so trading toward the baselines' shadows gives up its detail.
+        - v18s0 blind fails delta_e_max at every strength, and a_naf_s0 fails periodicity everywhere.
+      - **The baselines fail at every strength:** NAFNet at lighting_materials, Restormer at artifacts or resolution, SCUNet at periodicity.
+- **How it reads.**
+  - **The first case, on detail: the release has its shadow control without training.**
+    - The deployed curve keeps at least the oracle's detail for v18s0 on both sets.
+    - It adds at most 0.02 of margin on the input, so the margins are the restorers'.
+  - **v18s0 leads on raw.pixls.us, deployed.**
+    - At the input's 26.02 dB it keeps 0.468 known and 0.510 blind, 2.1 to 2.3 times the input's 0.218 under the same control.
+    - Its margins there are +0.248 and +0.289, against the next run's +0.171 (a_naf_s0).
+  - **On RawNIND at 29.76 dB, v18s0, v15 and p_r0t0_s2 tie in known mode:** +0.385, +0.387 and +0.379.
+  - **Against the public baselines at their own unfiltered noise, deployed.**
+    - On RawNIND at SCUNet's 29.76 dB, its texture is 0.076; ours keep 0.253 to 0.530 known, 3.3 to 7.0 times.
+    - On raw.pixls.us at NAFNet's 29.79 dB, its texture is 0.080; ours keep 0.210 to 0.346 in either mode, 2.6 to 4.3 times.
+  - **What the curve cannot do: banding on raw.pixls.us.**
+    - At the input's shadows it is the one check left between v18s0 and the capture gate, and every restorer, the public baselines with them, fails it.
+    - On RawNIND the curve is not needed for the capture gate.
+  - **Caveats.**
+    - There is one seed per v run, and the rungs are fixed, not chosen on the held-out set.
+    - raw.pixls.us is rendered by the same renderer as its calibration draw, so the curve there is fitted on the held-out set's own kind of noise. A camera without such a draw has only RawNIND's kind of evidence.
+- **Next: what v18s0's banding is, then the long run on v18s0's path.**
+  - **The banding read, evaluation only, on the CPU.**
+    - On raw.pixls.us' held-out tiles, inside banding_pair's own smooth mask, v18s0's residual against the truth is split two ways: by band, and by the reference's level.
+    - The same read is run on a noise-free input through the network.
+  - **Read in advance:**
+    - **Low-frequency mottle** (the residual's power in the lowest bands, at the noise's level, gone on the noise-free input): the network leaves the noise's low bands. The long run's loss or data has to reach them, and that change is screened on a probe before the run.
+    - **A staircase in level** (steps at fixed levels, present on the noise-free input too): a defect in the network's tone or the output path, fixed in code. The long run goes on v18s0's recipe unchanged.
+- **The result of the banding read (11-03; `.tmp/banding_read.md`, `.tmp/banding_split.md`, `.tmp/banding_signal_own.md`, `.tmp/banding_oracle.md`).**
+  - **Setup.** Evaluation only, on the CPU, on raw.pixls.us' 64 held-out tiles (best_case_earth, the gate's set), inside banding_pair's own smooth mask. 50 of the tiles hold a region that scores.
+    - The script's jump rule reproduces banding_pair exactly (largest difference 0), and the held-out input rebuilds exactly from the crops.
+    - **Four reads.**
+      - The residual against the truth, split by band (a low-pass normalised inside each region, and the rest), against a phase-randomised field with its own spectrum, and by the level of each tile's worst jump.
+      - Each network on the truth itself as input.
+      - The residual split into what the network does to the noise-free capture x0 (the optics' blur and the mosaic, no noise) and what it does to the noise, and x0's part by band against the detail x0 is missing.
+      - A linear least-squares oracle fitted on the set itself, the bound on what the capture holds.
+    - **Restorers:** the input, v18s0 known (unfiltered and under its calibration curve at lam 1.4) and blind, a_naf_s0 known, p_r0t0_s2 (range 0, texture 0) in the band read, and SCUNet blind.
+  - **Neither case read in advance holds.**
+    - **Not mottle.** v18s0 known's low-pass part scores 0.0029 of its 0.0165 and holds 5 % of the residual's variance on the mask. On x0, with the capture's own descriptor, it scores 0.0165, all of it; the noise's part scores 0.0053.
+    - **Not a staircase.** For every output, the input included, the phase-randomised field scores higher than the real one (real / randomised 0.70 to 0.89; a staircase locked to level reads above 1). The worst jumps fall at sRGB codes from 19 to 225, spread as the input's are.
+    - **What it reads is the residual's size.** On the mask the score tracks the residual's sd: score / sd is 3.2 to 3.8 for every output. On this near-noiseless preset, banding_pair reads how far the output is from the truth in dark smooth regions.
+  - **The input's 0.0095 is the truth's fine grain the capture lost, not noise.**
+    - The input on x0 alone scores 0.0095 (sd 0.00274); its noise alone, 0.0029 (sd 0.00073).
+    - The detail x0 is missing on the mask sits 79 % above 0.25 c/px. Its power share by band, from 0 to 0.71 c/px: 0.00, 0.00, 0.02, 0.03, 0.06, 0.09, 0.17, 0.41, 0.21.
+  - **Every network adds structure there that is not the missing grain.**
+    - On x0, the addition's coherence with the missing grain is at most 0.10 in any band for ours and 0.12 for SCUNet. So the residual grows: its power over the missing grain's is 1.90 for v18s0 known, 2.17 blind, 1.58 for a_naf_s0, 1.74 for p_r0t0_s2 known and 1.51 for SCUNet.
+    - Given the truth itself as input, where the identity reads 0, they score 0.0068 (v18s0 known, stating a clean render), 0.0109 (v18s0 blind), 0.0073 (a_naf_s0) and 0.0128 (SCUNet).
+    - **The excess over the untouched capture**, as a share of the missing grain's power, on x0 with each capture's own descriptor:
+
+  | Output | 0–0.35 c/px | 0.35–0.5 | 0.5–0.71 | all |
+  |---|---:|---:|---:|---:|
+  | v18s0 known | +0.58 | +0.30 | +0.01 | +0.90 |
+  | v18s0 known, cal lam 1.4 | +0.26 | +0.01 | −0.02 | +0.25 |
+  | v18s0 blind | +0.70 | +0.43 | +0.04 | +1.17 |
+  | a_naf_s0 known | +0.49 | +0.09 | 0.00 | +0.58 |
+  | p_r0t0_s2 known | +0.66 | +0.07 | 0.00 | +0.74 |
+  | p_r0t0_s2 blind | +0.49 | +0.11 | 0.00 | +0.60 |
+  | SCUNet blind | +0.42 | +0.08 | +0.01 | +0.51 |
+
+    - **A shared part at 0 to 0.35 c/px, +0.42 to +0.70**, in every network: ours and SCUNet, with the range and texture terms and without.
+    - **v18s0's own part at 0.35 to 0.5 c/px, +0.30 known and +0.43 blind**, where the others add +0.07 to +0.11.
+      - A reading of its cause, not an ablation: the texture term charges the output's local std deficit whatever its phase (2.3). On the banding mask the flat term's tau of 0.01 counts 9 % of the pixel-channels as flat (the median 7×7 encoded std is 0.058), so 91 % of the mask is texture to the loss. There the grain the capture lost is paid for with grain the network invents. The run without the range and texture terms adds +0.07.
+      - The calibration curve takes this part out (+0.01 at lam 1.4) and leaves +0.26 under 0.35 c/px: that is its 0.0127.
+  - **The capture holds almost none of that grain, linearly.** A least-squares kernel over the unmasked source, predicting the missing luminance on the mask, cross-fitted over even and odd tiles and scored by banding_pair's rule. The control fits the same kernels on the textured pixels outside the mask.
+
+  | Source, kernel | the oracle's banding | residual / missing, smooth mask | residual / missing, texture (the control) |
+  |---|---:|---:|---:|
+  | x0, luminance 15×15 | 0.0096 | 0.947 | 0.526 |
+  | x0, luminance 31×31 | 0.0094 | 0.952 | 0.537 |
+  | x0, RGB 15×15 | 0.0107 | 0.931 | 0.442 |
+  | x, luminance 15×15 | 0.0102 | 0.955 | 0.529 |
+  | x, luminance 31×31 | 0.0105 | 0.961 | 0.539 |
+  | x, RGB 15×15 | 0.0108 | 0.949 | 0.445 |
+
+    - On texture the fit takes back 46 to 56 % of the lost detail's variance, so it finds detail where the capture keeps it. On the smooth mask it takes back 4 to 7 %, and its banding stays at the input's 0.0095.
+    - BEATS (under 0.0075) needs the residual's sd down by about a fifth: about 38 % of the grain's variance put back in phase.
+- **How it reads.**
+  - **On raw.pixls.us a tie is the floor for banding.** A linear filter fitted on the truth itself does not go under the input's 0.0095. The gate asks the restoration to denoise, and on this set the input's banding is not noise.
+  - **v18s0's banding is invented flat-area structure, not a code defect.** Nothing in tone or the output path needs fixing. The long run's loss has to stop paying for invented grain.
+  - **Texture's lead stands.** texture_hf_fidelity counts coherent detail only, so the invented grain costs banding and adds nothing there.
+  - **A gate question, the user's to decide.**
+    - The capture gate's banding check is BEATS. By the file's own argument for colour and dynamic range (the captures sit within the tie margin of what any candidate can reach), it would be TOB on this set, with shadow_snr_db still carrying "must denoise".
+    - It does not pass v18s0 either way: 0.0127 at lam 1.4 and 0.0121 at lam 1.0 (where the shadows fail), against TOB's 0.0115.
+    - On noisy captures, where banding is the noise's, BEATS is the right ask; shadow SNR's BEATS keeps that ask there.
+  - **Caveats.**
+    - The oracle is linear, luminance or RGB at 15 to 31 px; a learned prior may recover more, so the floor is the linear one.
+    - One preset (best_case_earth, near-noiseless), and one seed per run.
+    - The texture term's part is read from the band split and the term's reach, not from an ablation.
+- **Next: a screened probe at the flat-area addition, then the long run.**
+  - **Candidates, each a short probe on v18s0's recipe:**
+    - The texture deficit charged only where it is coherent: the transfer term (8.3) in its place, or a tau or window under which the banding mask reads flat.
+    - The shared part under 0.35 c/px, which no current term reaches, screened on its own.
+  - **The screen, fixed in advance**, on raw.pixls.us' calibration draw (the one the curves are fitted on), so the held-out set stays for the verdict:
+    - the excess over the capture on x0 at 0 to 0.35 and at 0.35 to 0.5 c/px on the banding mask;
+    - banding at the input's shadows under the calibration curve;
+    - texture at matched noise, which may not fall by more than its tie margin.

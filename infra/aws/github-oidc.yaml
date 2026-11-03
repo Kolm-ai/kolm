@@ -1,0 +1,110 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  GitHub Actions OIDC trust for deploying the kolm API: the identity provider
+  (one per account) and a role that .github/workflows/deploy-aws.yml assumes
+  from the main branch. The role can only push to the kolm/api ECR repository
+  and roll the kolm-api ECS service; infrastructure changes stay with human
+  operators running scripts/aws/provision.sh.
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Default: sneaky-hippo
+  GitHubRepo:
+    Type: String
+    Default: kolm
+  Branch:
+    Type: String
+    Default: main
+    Description: Only workflow runs on this branch may assume the role.
+  EcrStackName:
+    Type: String
+    Default: kolm-ecr
+  ApiStackName:
+    Type: String
+    Default: kolm-api
+    Description: The kolm-api stack name doubles as the ECS cluster name.
+  ServiceName:
+    Type: String
+    Default: kolm-api
+  ExistingOidcProviderArn:
+    Type: String
+    Default: ''
+    Description: >
+      Leave empty to create the token.actions.githubusercontent.com provider.
+      If the account already has one (IAM > Identity providers), pass its ARN.
+
+Conditions:
+  CreateProvider: !Equals [!Ref ExistingOidcProviderArn, '']
+
+Resources:
+  OidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      # AWS validates GitHub's certificate chain itself; the list is still a
+      # required property. These are GitHub's published root thumbprints.
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${GitHubRepo}-github-deploy'
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateProvider
+                - !Ref OidcProvider
+                - !Ref ExistingOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${Branch}'
+      Policies:
+        - PolicyName: push-image
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:ListImages
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource:
+                  Fn::ImportValue: !Sub '${EcrStackName}-RepositoryArn'
+        - PolicyName: roll-service
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:UpdateService
+                  - ecs:DescribeServices
+                Resource: !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/${ApiStackName}/${ServiceName}'
+
+Outputs:
+  DeployRoleArn:
+    Description: Set this as the AWS_DEPLOY_ROLE_ARN repository variable on GitHub.
+    Value: !GetAtt DeployRole.Arn
+  OidcProviderArn:
+    Value: !If [CreateProvider, !Ref OidcProvider, !Ref ExistingOidcProviderArn]

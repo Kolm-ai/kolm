@@ -209,7 +209,7 @@ test('hosted runtime rejects the development admin fallback key', async (t) => {
     DEFAULT_TENANT: 'hosted',
     ANTHROPIC_API_KEY: '',
     KOLM_DATA_DIR: dataDir,
-    RAILWAY_ENVIRONMENT: 'production',
+    AWS_EXECUTION_ENV: 'AWS_ECS_FARGATE',
   };
   delete env.ADMIN_KEY;
   delete env.NODE_ENV;

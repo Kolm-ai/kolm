@@ -6,10 +6,10 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { rmSyncBestEffort } from './_spawn-helpers.js';
 
-test('server trusts the two-hop Vercel + Railway edge chain in production', async (t) => {
+test('server trusts the two-hop Vercel + AWS ALB edge chain in production', async (t) => {
   const savedEnv = {
     NODE_ENV: process.env.NODE_ENV,
-    RAILWAY_ENVIRONMENT: process.env.RAILWAY_ENVIRONMENT,
+    AWS_EXECUTION_ENV: process.env.AWS_EXECUTION_ENV,
     VERCEL: process.env.VERCEL,
     AWS_LAMBDA_FUNCTION_NAME: process.env.AWS_LAMBDA_FUNCTION_NAME,
     KOLM_DATA_DIR: process.env.KOLM_DATA_DIR,
@@ -18,7 +18,7 @@ test('server trusts the two-hop Vercel + Railway edge chain in production', asyn
 
   process.env.KOLM_DATA_DIR = testDataDir;
   delete process.env.NODE_ENV;
-  process.env.RAILWAY_ENVIRONMENT = 'production';
+  process.env.AWS_EXECUTION_ENV = 'AWS_ECS_FARGATE';
   delete process.env.VERCEL;
   delete process.env.AWS_LAMBDA_FUNCTION_NAME;
 
@@ -31,9 +31,9 @@ test('server trusts the two-hop Vercel + Railway edge chain in production', asyn
   });
 
   const { app } = await import(`../server.js?trust-proxy=${Date.now()}`);
-  // Two-hop chain: Client -> Vercel CDN -> Railway edge -> Express. Express
+  // Two-hop chain: Client -> Vercel CDN -> AWS ALB -> Express. Express
   // must trust both hops so rate-limit keyGenerator and req.ip resolve to the
-  // real client IP, not Railway's edge IP.
+  // real client IP, not the ALB's IP.
   assert.equal(app.get('trust proxy'), 2);
 });
 

@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
+import { isProductionRuntime } from './env.js';
 
 const require = createRequire(import.meta.url);
 
@@ -20,7 +21,7 @@ const PREFERRED_DATA_DIR = process.env.KOLM_DATA_DIR
   : (ON_VERCEL ? '/tmp/data' : BUNDLED_DATA_DIR);
 
 function probeWritable(dir) {
-  // Verify we can actually create/write files in this directory. On Railway
+  // Verify we can actually create/write files in this directory. On network
   // persistent volumes the directory can exist but be owned by a previous
   // container's user → EACCES on every write. When that happens we must
   // degrade to a writable fallback OR the boot path can succeed but every
@@ -44,8 +45,7 @@ if (!probeWritable(DATA_DIR)) {
   // state would vanish on the next restart with no error). In a production-like
   // environment, fail boot LOUDLY instead of degrading invisibly, unless the
   // operator explicitly opts in with KOLM_ALLOW_EPHEMERAL=1.
-  const productionLike = process.env.NODE_ENV === 'production'
-    || !!process.env.RAILWAY_ENVIRONMENT || !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+  const productionLike = isProductionRuntime();
   if (productionLike && process.env.KOLM_ALLOW_EPHEMERAL !== '1') {
     throw new Error(`[store] FATAL: KOLM_DATA_DIR ${DATA_DIR} is not writable in a production environment. Refusing to fall back to ephemeral /tmp because paid + audit state would be silently lost on restart. Fix the volume mount/permissions, or set KOLM_ALLOW_EPHEMERAL=1 to explicitly accept ephemeral storage.`);
   }
@@ -62,10 +62,7 @@ function detectDefaultDriver() {
   // Production-like environments default to SQLite when the runtime supports
   // it; this gives us transactional writes without callers opting in. Local
   // development keeps the dependency-free JSON files unless explicitly asked.
-  const productionLike = process.env.NODE_ENV === 'production'
-    || !!process.env.RAILWAY_ENVIRONMENT
-    || !!process.env.VERCEL
-    || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+  const productionLike = isProductionRuntime();
   if (!productionLike) return 'json';
   try {
     require('node:sqlite');
@@ -120,9 +117,7 @@ const SQLITE_PATH = process.env.KOLM_DB_PATH
 // billing + audit state. Mirrors the env.js readiness stance. Opt out only with
 // an explicit KOLM_ALLOW_JSON_STORE=true.
 {
-  const _prodLike = process.env.NODE_ENV === 'production'
-    || !!process.env.RAILWAY_ENVIRONMENT || !!process.env.VERCEL
-    || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+  const _prodLike = isProductionRuntime();
   if (_prodLike && STORE_DRIVER === 'json' && process.env.KOLM_ALLOW_JSON_STORE !== 'true') {
     throw new Error('[store] FATAL: KOLM_STORE_DRIVER=json (or defaulted) in a production environment. JSON files are per-process and not durable for restart/multi-node state. Set KOLM_STORE_DRIVER=sqlite (recommended), or KOLM_ALLOW_JSON_STORE=true to explicitly accept it.');
   }
@@ -393,8 +388,15 @@ function getSqliteDb() {
     quarantineAndRecoverSqlite(`integrity_check threw (${icErr.message})`);
     sqliteDb = new DatabaseSync(SQLITE_PATH);
   }
+  // WAL needs an mmap'd shared-memory index, which SQLite only supports on a
+  // local disk. On a network volume (EFS/NFS) use a rollback journal instead:
+  // the ECS task definition sets KOLM_SQLITE_JOURNAL_MODE=TRUNCATE
+  // (infra/aws/kolm-api.yaml). store-backup.js opens a second connection for
+  // VACUUM INTO, so exclusive locking is not an option here.
+  const journalModeEnv = String(process.env.KOLM_SQLITE_JOURNAL_MODE || '').toUpperCase();
+  const journalMode = /^(WAL|DELETE|TRUNCATE|PERSIST)$/.test(journalModeEnv) ? journalModeEnv : 'WAL';
   sqliteDb.exec(`
-    PRAGMA journal_mode = WAL;
+    PRAGMA journal_mode = ${journalMode};
     PRAGMA synchronous = FULL;
     PRAGMA foreign_keys = ON;
     PRAGMA busy_timeout = 30000;
@@ -747,9 +749,7 @@ export function isTransactional() {
 export function assertTeamsTransactionality({ teamsEnabled = true } = {}) {
   const info = { ok: true, driver: STORE_DRIVER, transactional: isTransactional() };
   if (!teamsEnabled) return info;
-  const prodLike = process.env.NODE_ENV === 'production'
-    || !!process.env.RAILWAY_ENVIRONMENT || !!process.env.VERCEL
-    || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+  const prodLike = isProductionRuntime();
   if (prodLike && !isTransactional() && process.env.KOLM_ALLOW_NONTXN_TEAMS !== 'true') {
     throw new Error(
       `[store] FATAL: Teams seat billing requires a transactional core store, but KOLM_STORE_DRIVER resolved to "${STORE_DRIVER}". `

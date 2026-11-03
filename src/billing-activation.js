@@ -2,7 +2,7 @@
 //
 // P0 - Stripe billing ACTIVATION readiness + on-the-fly Checkout for the
 // PRICE-ID path. This is the module an operator "turns on" by setting price-id
-// env vars in Railway/Vercel; the code here is ready the moment they do.
+// env vars in AWS/Vercel; the code here is ready the moment they do.
 //
 // Why this exists alongside billing-upgrade.js / stripe.js:
 //   * stripe.js - webhook signature verify + amount->plan mapping.
@@ -91,7 +91,7 @@ export function priceIdFor(plan) {
 //
 // Returns { ready, missing[], secret_key, webhook_secret, livemode, prices }.
 // `missing` lists the EXACT env var names the operator must set in
-// Railway/Vercel. The webhook secret is required for the activation to be
+// AWS/Vercel. The webhook secret is required for the activation to be
 // end-to-end useful (it's what flips the tenant's plan after payment), so its
 // absence is reported in missing[] too - matching the existing
 // /v1/billing/tiers `stripe.ready` semantics.
@@ -146,7 +146,7 @@ export class BillingNotConfiguredError extends Error {
   constructor(missing, message) {
     super(
       message ||
-        ('Stripe billing is not configured. Set these environment variables in Railway/Vercel: ' +
+        ('Stripe billing is not configured. Set these environment variables in AWS/Vercel: ' +
           (missing || []).join(', '))
     );
     this.name = 'BillingNotConfiguredError';
@@ -260,7 +260,7 @@ export async function createCheckoutSession(opts = {}) {
     throw new BillingNotConfiguredError(
       missing,
       `Cannot start Stripe Checkout for "${plan}": price id / secret key not configured. ` +
-      'Operator must set these in Railway/Vercel: ' + missing.join(', ')
+      'Operator must set these in AWS/Vercel: ' + missing.join(', ')
     );
   }
 

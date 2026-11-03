@@ -45,7 +45,7 @@ export function verificationSecrets({ includeLegacyArtifactSecret = false } = {}
   return out;
 }
 
-// In production-like hosts (Vercel/Railway/Lambda), KOLM_ARTIFACT_DIR and
+// In production-like hosts (Vercel/AWS), KOLM_ARTIFACT_DIR and
 // KOLM_DATA_DIR may be unset. /ready used to fail-closed 503 in that case.
 // Instead, resolve sane writable defaults under os.tmpdir() and create them
 // on demand so /ready is green out of the box. Operators can still override
@@ -75,10 +75,14 @@ export function resolveDataDir() {
   return dir;
 }
 
+// Production-like hosts: explicit NODE_ENV, Vercel, or any AWS runtime
+// (ECS/Fargate sets AWS_EXECUTION_ENV and ECS_CONTAINER_METADATA_URI_V4,
+// Lambda sets AWS_LAMBDA_FUNCTION_NAME). Railway is no longer a target.
 export function isProductionRuntime() {
   return process.env.NODE_ENV === 'production' ||
-    !!process.env.RAILWAY_ENVIRONMENT ||
     !!process.env.VERCEL ||
+    !!process.env.AWS_EXECUTION_ENV ||
+    !!process.env.ECS_CONTAINER_METADATA_URI_V4 ||
     !!process.env.AWS_LAMBDA_FUNCTION_NAME;
 }
 

@@ -1,18 +1,24 @@
 #!/usr/bin/env bash
-# One-shot setter for kolm production env vars on Railway.
+# One-shot setter for kolm production env vars on AWS.
+#
+# Writes each variable as a SecureString parameter in SSM Parameter Store under
+# $KOLM_SSM_PREFIX (default /kolm/prod). The ECS task definition references
+# these parameters by ARN in its `secrets` block, so a redeploy picks them up.
 #
 # Fill in the values you have, comment out the ones you don't yet, and run:
 #   bash scripts/setup-prod.sh
 #
-# This requires the railway CLI to be linked to the kolm project:
-#   railway link --project kolm-stack
+# Requires the AWS CLI with credentials that can ssm:PutParameter in the
+# target account/region (AWS_PROFILE / AWS_REGION as usual).
 #
 # Anything left as <YOURS> is skipped — re-run after you create the OAuth
-# apps / Resend API key / etc. Idempotent.
+# apps / Resend API key / etc. Idempotent (--overwrite).
 
 set -euo pipefail
 
-SERVICE="${RAILWAY_SERVICE:-kolm-stack}"
+PREFIX="${KOLM_SSM_PREFIX:-/kolm/prod}"
+REGION_FLAG=()
+if [ -n "${AWS_REGION:-}" ]; then REGION_FLAG=(--region "$AWS_REGION"); fi
 
 # Source the operator's production env file if present. This file is .gitignored
 # (covered by .env.* in .gitignore) — paste the live Stripe payment-link URLs +
@@ -31,10 +37,12 @@ set_var() {
     echo "skip  $name (not set)"
     return
   fi
-  # MSYS_NO_PATHCONV=1 prevents Git Bash for Windows from rewriting Unix paths
-  # like /app/data into C:/Program Files/Git/app/data when forwarding to railway.
-  MSYS_NO_PATHCONV=1 railway variable set "$name=$value" --service "$SERVICE" --skip-deploys >/dev/null
-  echo "ok    $name"
+  # MSYS_NO_PATHCONV=1 prevents Git Bash for Windows from rewriting the
+  # /kolm/prod/... parameter name into C:/Program Files/Git/kolm/prod/...
+  MSYS_NO_PATHCONV=1 aws ssm put-parameter "${REGION_FLAG[@]}" \
+    --name "$PREFIX/$name" --type SecureString --overwrite \
+    --value "$value" >/dev/null
+  echo "ok    $PREFIX/$name"
 }
 
 # --- Stripe ----------------------------------------------------------------
@@ -71,14 +79,24 @@ set_var OAUTH_REDIRECT_BASE "${OAUTH_REDIRECT_BASE:-https://kolm.ai}"
 
 # --- Persistence -----------------------------------------------------------
 # Required for /ready to return ready in production. KOLM_DATA_DIR must point
-# at a writable path. Without a Railway volume mounted at /data this is
-# ephemeral (wiped on every restart); add the volume after first launch:
-#   railway volume add --mount-path /data --service "$SERVICE"
-# then change these to /data and /data/artifacts.
-set_var KOLM_DATA_DIR        "/app/data"
-set_var KOLM_ARTIFACT_DIR    "/app/data/artifacts"
-set_var KOLM_STORE_DRIVER    "json"
-set_var KOLM_ALLOW_JSON_STORE "true"
+# at the EFS mount declared in the task definition (the Dockerfile default is
+# /var/lib/kolm; docker-entrypoint.sh chowns it and drops to the node user).
+# Without a persistent mount this is ephemeral (wiped on every task restart).
+set_var KOLM_DATA_DIR        "${KOLM_DATA_DIR:-/var/lib/kolm}"
+set_var KOLM_ARTIFACT_DIR    "${KOLM_ARTIFACT_DIR:-/var/lib/kolm/artifacts}"
+set_var KOLM_STORE_DRIVER    "${KOLM_STORE_DRIVER:-sqlite}"
+
+# --- API keys --------------------------------------------------------------
+# ANTHROPIC_API_KEY powers the model calls; ADMIN_KEY gates /v1/admin/*. Both
+# are in the task definition secrets block, so the task will not start without
+# them (scripts/aws/check-ssm-params.sh lists what is still missing).
+set_var ANTHROPIC_API_KEY "${ANTHROPIC_API_KEY:-}"
+set_var ADMIN_KEY         "${ADMIN_KEY:-}"
+
+# --- Receipts --------------------------------------------------------------
+# HMAC secret for /v1/compile receipts; the Ed25519 key pair lives under
+# $KOLM_DATA_DIR/keys on the volume and is NOT an env var.
+set_var RECIPE_RECEIPT_SECRET "${RECIPE_RECEIPT_SECRET:-}"
 
 # --- Email (Resend) --------------------------------------------------------
 # 1. Sign up at https://resend.com (Google login works)
@@ -90,5 +108,5 @@ set_var EMAIL_FROM     "${EMAIL_FROM:-kolm <hello@kolm.ai>}"
 set_var EMAIL_REPLY_TO "${EMAIL_REPLY_TO:-dev@kolm.ai}"
 
 echo ""
-echo "done. Trigger a redeploy for changes to take effect:"
-echo "  railway up --service $SERVICE --detach"
+echo "done. Force a new deployment so the task picks up the parameters:"
+echo "  aws ecs update-service --cluster kolm-api --service kolm-api --force-new-deployment"

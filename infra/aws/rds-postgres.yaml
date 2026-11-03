@@ -1,0 +1,151 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  RDS PostgreSQL instance replacing a Neon project. One stack per instance;
+  an instance can hold several application databases (one role + database
+  per app, created by scripts/aws/migrate-neon-to-rds.sh). The endpoint is
+  public because the Vercel-hosted apps that use it have no fixed egress
+  IPs; TLS is enforced server-side (rds.force_ssl) and clients must use
+  sslmode=verify-full with the RDS CA bundle.
+
+Parameters:
+  NetworkStackName:
+    Type: String
+    Default: kolm-prod-network
+    Description: Name of the deployed infra/aws/network.yaml stack in this region.
+  InstanceClass:
+    Type: String
+    Default: db.t4g.small
+    Description: Burstable Graviton. Move to db.t4g.medium or db.m7g.large when CPU credits run out.
+  EngineVersion:
+    Type: String
+    Default: '16'
+    Description: PostgreSQL major version; RDS picks the latest minor and auto-upgrades minors.
+  AllocatedStorageGiB:
+    Type: Number
+    Default: 20
+    MinValue: 20
+  MaxAllocatedStorageGiB:
+    Type: Number
+    Default: 100
+    MinValue: 20
+  MultiAZ:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Standby in a second AZ. Doubles the instance cost; turn on for botspace once it carries real traffic.
+  BackupRetentionDays:
+    Type: Number
+    Default: 7
+    MinValue: 1
+    MaxValue: 35
+  InitialDatabaseName:
+    Type: String
+    Default: postgres
+    AllowedPattern: '^[a-z_][a-z0-9_]*$'
+    Description: Database created with the instance. Application databases are added by the migration script.
+  ClientCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+    Description: >
+      Who may reach port 5432. Vercel functions have no fixed source IPs, so the
+      default is open; the controls are forced TLS, strong per-app passwords and
+      least-privilege roles. Narrow it if every client moves inside the VPC.
+  DeletionProtection:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+
+Conditions:
+  IsMultiAZ: !Equals [!Ref MultiAZ, 'true']
+  HasDeletionProtection: !Equals [!Ref DeletionProtection, 'true']
+
+Resources:
+  SubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub '${AWS::StackName} subnets'
+      SubnetIds: !Split
+        - ','
+        - Fn::ImportValue: !Sub '${NetworkStackName}-PublicSubnetIds'
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub '${AWS::StackName} PostgreSQL clients'
+      VpcId:
+        Fn::ImportValue: !Sub '${NetworkStackName}-VpcId'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: !Ref ClientCidr
+          Description: PostgreSQL over TLS
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-postgres'
+
+  ParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: !Sub '${AWS::StackName} postgres16 with forced TLS'
+      Family: postgres16
+      Parameters:
+        rds.force_ssl: '1'
+        log_min_duration_statement: '1000'
+        log_connections: '1'
+        log_disconnections: '1'
+
+  Instance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Ref AWS::StackName
+      Engine: postgres
+      EngineVersion: !Ref EngineVersion
+      DBInstanceClass: !Ref InstanceClass
+      DBName: !Ref InitialDatabaseName
+      MasterUsername: postgres
+      ManageMasterUserPassword: true
+      AllocatedStorage: !Ref AllocatedStorageGiB
+      MaxAllocatedStorage: !Ref MaxAllocatedStorageGiB
+      StorageType: gp3
+      StorageEncrypted: true
+      MultiAZ: !If [IsMultiAZ, true, false]
+      PubliclyAccessible: true
+      DBSubnetGroupName: !Ref SubnetGroup
+      VPCSecurityGroups:
+        - !Ref SecurityGroup
+      DBParameterGroupName: !Ref ParameterGroup
+      CACertificateIdentifier: rds-ca-rsa2048-g1
+      BackupRetentionPeriod: !Ref BackupRetentionDays
+      PreferredBackupWindow: 08:00-09:00
+      PreferredMaintenanceWindow: sun:09:30-sun:10:30
+      CopyTagsToSnapshot: true
+      AutoMinorVersionUpgrade: true
+      DeletionProtection: !If [HasDeletionProtection, true, false]
+      EnableCloudwatchLogsExports:
+        - postgresql
+      Tags:
+        - Key: Name
+          Value: !Ref AWS::StackName
+
+Outputs:
+  Endpoint:
+    Value: !GetAtt Instance.Endpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-Endpoint'
+  Port:
+    Value: !GetAtt Instance.Endpoint.Port
+  MasterSecretArn:
+    Description: Secrets Manager secret holding the postgres master password (managed by RDS).
+    Value: !GetAtt Instance.MasterUserSecret.SecretArn
+    Export:
+      Name: !Sub '${AWS::StackName}-MasterSecretArn'
+  SecurityGroupId:
+    Value: !Ref SecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-SecurityGroupId'
+  InstanceIdentifier:
+    Value: !Ref Instance
