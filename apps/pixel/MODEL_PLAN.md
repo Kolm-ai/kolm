@@ -1835,3 +1835,71 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
   - **Read in advance:**
     - **Low-frequency mottle** (the residual's power in the lowest bands, at the noise's level, gone on the noise-free input): the network leaves the noise's low bands. The long run's loss or data has to reach them, and that change is screened on a probe before the run.
     - **A staircase in level** (steps at fixed levels, present on the noise-free input too): a defect in the network's tone or the output path, fixed in code. The long run goes on v18s0's recipe unchanged.
+- **The result of the banding read (11-03; `.tmp/banding_read.md`, `.tmp/banding_split.md`, `.tmp/banding_signal_own.md`, `.tmp/banding_oracle.md`).**
+  - **Setup.** Evaluation only, on the CPU, on raw.pixls.us' 64 held-out tiles (best_case_earth, the gate's set), inside banding_pair's own smooth mask. 50 of the tiles hold a region that scores.
+    - The script's jump rule reproduces banding_pair exactly (largest difference 0), and the held-out input rebuilds exactly from the crops.
+    - **Four reads.**
+      - The residual against the truth, split by band (a low-pass normalised inside each region, and the rest), against a phase-randomised field with its own spectrum, and by the level of each tile's worst jump.
+      - Each network on the truth itself as input.
+      - The residual split into what the network does to the noise-free capture x0 (the optics' blur and the mosaic, no noise) and what it does to the noise, and x0's part by band against the detail x0 is missing.
+      - A linear least-squares oracle fitted on the set itself, the bound on what the capture holds.
+    - **Restorers:** the input, v18s0 known (unfiltered and under its calibration curve at lam 1.4) and blind, a_naf_s0 known, p_r0t0_s2 (range 0, texture 0) in the band read, and SCUNet blind.
+  - **Neither case read in advance holds.**
+    - **Not mottle.** v18s0 known's low-pass part scores 0.0029 of its 0.0165 and holds 5 % of the residual's variance on the mask. On x0, with the capture's own descriptor, it scores 0.0165, all of it; the noise's part scores 0.0053.
+    - **Not a staircase.** For every output, the input included, the phase-randomised field scores higher than the real one (real / randomised 0.70 to 0.89; a staircase locked to level reads above 1). The worst jumps fall at sRGB codes from 19 to 225, spread as the input's are.
+    - **What it reads is the residual's size.** On the mask the score tracks the residual's sd: score / sd is 3.2 to 3.8 for every output. On this near-noiseless preset, banding_pair reads how far the output is from the truth in dark smooth regions.
+  - **The input's 0.0095 is the truth's fine grain the capture lost, not noise.**
+    - The input on x0 alone scores 0.0095 (sd 0.00274); its noise alone, 0.0029 (sd 0.00073).
+    - The detail x0 is missing on the mask sits 79 % above 0.25 c/px. Its power share by band, from 0 to 0.71 c/px: 0.00, 0.00, 0.02, 0.03, 0.06, 0.09, 0.17, 0.41, 0.21.
+  - **Every network adds structure there that is not the missing grain.**
+    - On x0, the addition's coherence with the missing grain is at most 0.10 in any band for ours and 0.12 for SCUNet. So the residual grows: its power over the missing grain's is 1.90 for v18s0 known, 2.17 blind, 1.58 for a_naf_s0, 1.74 for p_r0t0_s2 known and 1.51 for SCUNet.
+    - Given the truth itself as input, where the identity reads 0, they score 0.0068 (v18s0 known, stating a clean render), 0.0109 (v18s0 blind), 0.0073 (a_naf_s0) and 0.0128 (SCUNet).
+    - **The excess over the untouched capture**, as a share of the missing grain's power, on x0 with each capture's own descriptor:
+
+  | Output | 0–0.35 c/px | 0.35–0.5 | 0.5–0.71 | all |
+  |---|---:|---:|---:|---:|
+  | v18s0 known | +0.58 | +0.30 | +0.01 | +0.90 |
+  | v18s0 known, cal lam 1.4 | +0.26 | +0.01 | −0.02 | +0.25 |
+  | v18s0 blind | +0.70 | +0.43 | +0.04 | +1.17 |
+  | a_naf_s0 known | +0.49 | +0.09 | 0.00 | +0.58 |
+  | p_r0t0_s2 known | +0.66 | +0.07 | 0.00 | +0.74 |
+  | p_r0t0_s2 blind | +0.49 | +0.11 | 0.00 | +0.60 |
+  | SCUNet blind | +0.42 | +0.08 | +0.01 | +0.51 |
+
+    - **A shared part at 0 to 0.35 c/px, +0.42 to +0.70**, in every network: ours and SCUNet, with the range and texture terms and without.
+    - **v18s0's own part at 0.35 to 0.5 c/px, +0.30 known and +0.43 blind**, where the others add +0.07 to +0.11.
+      - A reading of its cause, not an ablation: the texture term charges the output's local std deficit whatever its phase (2.3). On the banding mask the flat term's tau of 0.01 counts 9 % of the pixel-channels as flat (the median 7×7 encoded std is 0.058), so 91 % of the mask is texture to the loss. There the grain the capture lost is paid for with grain the network invents. The run without the range and texture terms adds +0.07.
+      - The calibration curve takes this part out (+0.01 at lam 1.4) and leaves +0.26 under 0.35 c/px: that is its 0.0127.
+  - **The capture holds almost none of that grain, linearly.** A least-squares kernel over the unmasked source, predicting the missing luminance on the mask, cross-fitted over even and odd tiles and scored by banding_pair's rule. The control fits the same kernels on the textured pixels outside the mask.
+
+  | Source, kernel | the oracle's banding | residual / missing, smooth mask | residual / missing, texture (the control) |
+  |---|---:|---:|---:|
+  | x0, luminance 15×15 | 0.0096 | 0.947 | 0.526 |
+  | x0, luminance 31×31 | 0.0094 | 0.952 | 0.537 |
+  | x0, RGB 15×15 | 0.0107 | 0.931 | 0.442 |
+  | x, luminance 15×15 | 0.0102 | 0.955 | 0.529 |
+  | x, luminance 31×31 | 0.0105 | 0.961 | 0.539 |
+  | x, RGB 15×15 | 0.0108 | 0.949 | 0.445 |
+
+    - On texture the fit takes back 46 to 56 % of the lost detail's variance, so it finds detail where the capture keeps it. On the smooth mask it takes back 4 to 7 %, and its banding stays at the input's 0.0095.
+    - BEATS (under 0.0075) needs the residual's sd down by about a fifth: about 38 % of the grain's variance put back in phase.
+- **How it reads.**
+  - **On raw.pixls.us a tie is the floor for banding.** A linear filter fitted on the truth itself does not go under the input's 0.0095. The gate asks the restoration to denoise, and on this set the input's banding is not noise.
+  - **v18s0's banding is invented flat-area structure, not a code defect.** Nothing in tone or the output path needs fixing. The long run's loss has to stop paying for invented grain.
+  - **Texture's lead stands.** texture_hf_fidelity counts coherent detail only, so the invented grain costs banding and adds nothing there.
+  - **A gate question, the user's to decide.**
+    - The capture gate's banding check is BEATS. By the file's own argument for colour and dynamic range (the captures sit within the tie margin of what any candidate can reach), it would be TOB on this set, with shadow_snr_db still carrying "must denoise".
+    - It does not pass v18s0 either way: 0.0127 at lam 1.4 and 0.0121 at lam 1.0 (where the shadows fail), against TOB's 0.0115.
+    - On noisy captures, where banding is the noise's, BEATS is the right ask; shadow SNR's BEATS keeps that ask there.
+  - **Caveats.**
+    - The oracle is linear, luminance or RGB at 15 to 31 px; a learned prior may recover more, so the floor is the linear one.
+    - One preset (best_case_earth, near-noiseless), and one seed per run.
+    - The texture term's part is read from the band split and the term's reach, not from an ablation.
+- **Next: a screened probe at the flat-area addition, then the long run.**
+  - **Candidates, each a short probe on v18s0's recipe:**
+    - The texture deficit charged only where it is coherent: the transfer term (8.3) in its place, or a tau or window under which the banding mask reads flat.
+    - The shared part under 0.35 c/px, which no current term reaches, screened on its own.
+  - **The screen, fixed in advance**, on raw.pixls.us' calibration draw (the one the curves are fitted on), so the held-out set stays for the verdict:
+    - the excess over the capture on x0 at 0 to 0.35 and at 0.35 to 0.5 c/px on the banding mask;
+    - banding at the input's shadows under the calibration curve;
+    - texture at matched noise, which may not fall by more than its tie margin.
