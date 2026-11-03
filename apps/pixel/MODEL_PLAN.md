@@ -1752,3 +1752,86 @@ SIDD validation PSNR (input 23.66 dB): v15 30.39 (SSIM 0.687), v17 29.80, NAFNet
   - **Read in advance:**
     - **It comes within reach of the oracle.** The release has its strength control without training, and the next long run is chosen on matched-noise detail alone: v18s0's recipe at length on the widest licensed data.
     - **It falls well short.** The operating point is trained: the stated target becomes the control, with the training targets' stated shadow SNR widened to the range inference needs.
+- **The result of the deployable strength control (11-03; `.tmp/strength_control.md`, `.tmp/strength_verdict.md`).**
+  - **Setup.**
+    - **The curve.** One per strength and channel, in the frontier's 32 bands and 16 rungs, from its gain formula on spectra pooled over a calibration draw: 128 training-split tiles at seed 101, a draw of its own.
+      - For raw.pixls.us the draw is the training sources' rendered pairs; for RawNIND, its stored train pairs.
+      - Each restorer's curve is fitted on its own restores of that draw against their targets.
+    - **How it is read.** Every curve is applied to every held-out output, and each tile is matched on the restorer's own oracle ladder and on the input's frontier, as the gate matches.
+    - **A comparison, not deployable:** the same fit on the held-out outputs themselves, one curve for the set.
+    - **The control:** the same fit on the calibration inputs, applied to the held-out inputs.
+    - **Reproduction.** The unfiltered rows equal own_ladder.json's exactly.
+  - **The control: the curve family adds almost nothing.** On the input, the calibration curve lands on the input's own frontier: margin −0.018 to +0.021 on raw.pixls.us, −0.001 to +0.009 on RawNIND.
+  - **Reach.**
+    - **Our runs.** The calibration curves take every run past the input's shadows on raw.pixls.us (v18s0 known 12.2 to 55.9 dB over the rungs, the input at 26.02) and past NAFNet's 34.24 on RawNIND.
+    - **The baselines.** Their raw.pixls.us curves, fitted on our rendered training pairs, take all detail at the lowest rungs, and only Restormer's and SCUNet's reach the input's shadows.
+  - **Texture at matched shadow SNR, deployed** (texture / texture − the input's frontier there):
+
+| Restorer | raw.pixls.us 22 dB | 26.02 (input) | 29.79 (NAFNet) | RawNIND 26 dB | 29.76 (SCUNet) | 34.24 (NAFNet) |
+|---|---|---|---|---|---|---|
+| *input, the control* | 0.324 / −0.018 | 0.218 / +0.016 | 0.153 / +0.021 | 0.226 / −0.001 | 0.142 / +0.009 | 0.082 / +0.008 |
+| a_naf_s0 known | 0.537 / +0.211 | 0.375 / +0.171 | 0.258 / +0.138 | not reached | 0.253 / +0.130 | 0.157 / +0.086 |
+| p_r0t0_s2 known | 0.459 / +0.125 | 0.314 / +0.110 | 0.218 / +0.089 | 0.764 / +0.536 | 0.508 / +0.379 | 0.254 / +0.185 |
+| v15 known | 0.503 / +0.185 | 0.349 / +0.143 | 0.244 / +0.118 | not reached | 0.530 / +0.387 | 0.267 / +0.189 |
+| v17 known | 0.485 / +0.165 | 0.329 / +0.129 | 0.231 / +0.104 | 0.562 / +0.313 | 0.365 / +0.212 | 0.160 / +0.083 |
+| v18s0 known | 0.675 / +0.339 | 0.468 / +0.248 | 0.331 / +0.192 | not reached | 0.516 / +0.385 | 0.249 / +0.173 |
+| v18s0 blind | 0.723 / +0.386 | 0.510 / +0.289 | 0.346 / +0.209 | 0.686 / +0.422 | 0.399 / +0.235 | 0.154 / +0.080 |
+| *NAFNet, blind* | not reached | not reached | 0.007 / −0.125 | 0.081 / −0.193 | 0.049 / −0.151 | 0.010 / −0.101 |
+| *Restormer, blind* | not reached | 0.232 / −0.020 | 0.250 / +0.047 | 0.099 / −0.120 | 0.079 / −0.056 | 0.051 / −0.027 |
+| *SCUNet, blind* | not reached | 0.170 / −0.084 | 0.184 / −0.012 | 0.115 / −0.087 | 0.077 / −0.040 | 0.037 / −0.025 |
+
+  - **What the table's gaps mean.**
+    - "Not reached" at RawNIND's 26 dB means the curve's lightest rung is already past it (v18s0 known: 26.15 dB).
+    - **Share of the restorer's own oracle.** v18s0's deployed curve keeps 104, 124 and 150 % of it on raw.pixls.us and 118 and 115 % on RawNIND.
+      - The share passes 100 % because the oracle is the least-squares filter per tile, not a detail frontier; the control reads 95 to 116 % of its own.
+      - Every other run keeps 86 % or more; a_naf_s0 on RawNIND keeps 72 to 92 %.
+    - **The comparison fit.**
+      - For our runs it keeps no more than the calibration curve at the input's shadows (v18s0 known 0.424 against 0.468 at 26.02 dB), so for them nothing is lost by fitting off the held-out set.
+      - On the input it keeps more (0.283 against 0.218): a curve fitted on the set itself takes +0.08 over the frontier there.
+  - **The full verdict at fixed rungs** (lam 0.7, 1, 1.4, 2 and 3, fixed in advance, and unfiltered; heldout.score's every gate).
+    - **How to read it.** The capture gate stops at its first failing family, so the families before it passed; the medians give the rest.
+    - **raw.pixls.us: no restorer passes the capture gate at any strength.**
+      - **v18s0 at lam 1.4.**
+        - Shadows read 28.4 dB known and 27.0 blind, past the input's 26.0. Texture reads 0.376 and 0.463, MTF50 0.251 and 0.356 against the input's 0.254.
+        - The edge overshoot is gone: 0.034 unfiltered, 0 from lam 1.
+        - Every check passes but banding_score: 0.0127 known and 0.0132 blind, against the input's 0.0095.
+        - The frontier gate passes known from lam 0.7 to 2, blind at lam 2.
+      - **At lam 2, shading_rmse fails as well.** The curve's low bands are what fail it: the input under its own curve fails it at lam 3.
+      - **Banding is every restorer's.**
+        - Unfiltered, ours read 0.0146 to 0.0188 and the public baselines 0.0126 to 0.0140.
+        - Under the curve none goes under 0.0121 (v18s0 known, lam 1).
+        - The curve leaves the input's own banding where it was, 0.0096 to 0.0112 through lam 2, so it neither causes it nor cures it.
+        - Restormer's and SCUNet's unfiltered outputs stop at it too.
+      - **What it reads.** banding_pair takes the largest step, along the reference's level, in the mean residual of the reference's smooth regions.
+        - A reading, not checked: low-frequency residual left in a smooth gradient reads as such a step, and a per-band linear curve cannot take it out without the shading that fails at lam 2.
+    - **RawNIND: the unfiltered outputs already pass, and the curve costs resolution.**
+      - **Unfiltered.** v18s0, v15 and v17 known, and p_r0t0_s2 blind, pass both the capture and the frontier gate.
+        - v18s0 known reads 24.6 dB, texture 0.963 and MTF50 0.423, against the input's 15.0 dB, 0.667 and 0.387.
+      - **Under the curve, every one fails resolution through lam 2, its MTF50 under the input's 0.387.** v18s0 known reads 0.319 at lam 0.7. The frontier gate still passes for v18s0, v15 and v17 known.
+        - The input is sharp and very noisy, so trading toward the baselines' shadows gives up its detail.
+        - v18s0 blind fails delta_e_max at every strength, and a_naf_s0 fails periodicity everywhere.
+      - **The baselines fail at every strength:** NAFNet at lighting_materials, Restormer at artifacts or resolution, SCUNet at periodicity.
+- **How it reads.**
+  - **The first case, on detail: the release has its shadow control without training.**
+    - The deployed curve keeps at least the oracle's detail for v18s0 on both sets.
+    - It adds at most 0.02 of margin on the input, so the margins are the restorers'.
+  - **v18s0 leads on raw.pixls.us, deployed.**
+    - At the input's 26.02 dB it keeps 0.468 known and 0.510 blind, 2.1 to 2.3 times the input's 0.218 under the same control.
+    - Its margins there are +0.248 and +0.289, against the next run's +0.171 (a_naf_s0).
+  - **On RawNIND at 29.76 dB, v18s0, v15 and p_r0t0_s2 tie in known mode:** +0.385, +0.387 and +0.379.
+  - **Against the public baselines at their own unfiltered noise, deployed.**
+    - On RawNIND at SCUNet's 29.76 dB, its texture is 0.076; ours keep 0.253 to 0.530 known, 3.3 to 7.0 times.
+    - On raw.pixls.us at NAFNet's 29.79 dB, its texture is 0.080; ours keep 0.210 to 0.346 in either mode, 2.6 to 4.3 times.
+  - **What the curve cannot do: banding on raw.pixls.us.**
+    - At the input's shadows it is the one check left between v18s0 and the capture gate, and every restorer, the public baselines with them, fails it.
+    - On RawNIND the curve is not needed for the capture gate.
+  - **Caveats.**
+    - There is one seed per v run, and the rungs are fixed, not chosen on the held-out set.
+    - raw.pixls.us is rendered by the same renderer as its calibration draw, so the curve there is fitted on the held-out set's own kind of noise. A camera without such a draw has only RawNIND's kind of evidence.
+- **Next: what v18s0's banding is, then the long run on v18s0's path.**
+  - **The banding read, evaluation only, on the CPU.**
+    - On raw.pixls.us' held-out tiles, inside banding_pair's own smooth mask, v18s0's residual against the truth is split two ways: by band, and by the reference's level.
+    - The same read is run on a noise-free input through the network.
+  - **Read in advance:**
+    - **Low-frequency mottle** (the residual's power in the lowest bands, at the noise's level, gone on the noise-free input): the network leaves the noise's low bands. The long run's loss or data has to reach them, and that change is screened on a probe before the run.
+    - **A staircase in level** (steps at fixed levels, present on the noise-free input too): a defect in the network's tone or the output path, fixed in code. The long run goes on v18s0's recipe unchanged.
